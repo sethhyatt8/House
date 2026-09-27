@@ -501,26 +501,30 @@ function greatWhiteProfile(u) {
   let radius;
   let oy = 0;
   if (u < 0.14) {
-    radius = 0.046 + 0.05 * Math.pow(u / 0.14, 0.75);
-  } else if (u < 0.56) {
-    const k = (u - 0.14) / 0.42;
-    radius = 0.096 + 0.18 * Math.sin(k * Math.PI * 0.5);
-  } else if (u < 0.74) {
-    const k = (u - 0.56) / 0.18;
-    radius = 0.276 - 0.02 * k;
+    radius = 0.046 + 0.048 * Math.pow(u / 0.14, 0.8);
+  } else if (u < 0.58) {
+    const k = (u - 0.14) / 0.44;
+    radius = 0.094 + 0.16 * Math.sin(k * Math.PI * 0.5);
+  } else if (u < 0.8) {
+    const k = (u - 0.58) / 0.22;
+    radius = 0.254 - 0.03 * k;
   } else {
-    const k = (u - 0.74) / 0.26;
-    radius = Math.max(0.256 * Math.pow(Math.max(1 - k, 0), 0.78), 0.008);
-    oy = 0.08 * k;
+    const k = (u - 0.8) / 0.2;
+    radius = Math.max(0.224 * Math.pow(Math.max(1 - k, 0), 0.75), 0.014);
+    oy = 0.03 * k;
   }
-  const x = -1.15 + u * 2.26;
-  const head = THREE.MathUtils.clamp((u - 0.64) / 0.12, 0, 1);
   return {
-    x,
-    y: radius * (0.98 - head * 0.3),
-    z: radius * (0.86 + head * 0.36),
+    x: -1.12 + u * 2.18,
+    y: radius * 0.96,
+    z: radius * 0.92,
     oy,
   };
+}
+
+function sharkSlice(u) {
+  const p = greatWhiteProfile(u);
+  const oy = p.oy || 0;
+  return { x: p.x, mid: oy, top: oy + p.y, belly: oy - p.y, half: p.z };
 }
 
 function sharkSkinTexture(base = '#3c5566') {
@@ -651,7 +655,7 @@ function createSharks(scene, splash) {
   const whiteFin = whiteMat.clone();
   whiteFin.side = THREE.DoubleSide;
   const swordBody = tubeGeometry(swordfishProfile, 2);
-  const whiteBody = tubeGeometry(greatWhiteProfile, 2.2);
+  const whiteBody = tubeGeometry(greatWhiteProfile, 2);
   const swordDorsal = finGeometry([
     [0.08, 0.17],
     [0.0, 0.26],
@@ -673,12 +677,12 @@ function createSharks(scene, splash) {
     [0.02, -0.01],
   ], 0.012);
   const whiteDorsal = finGeometry([
-    [0.22, 0.27],
-    [0.1, 0.4],
-    [0.0, 0.5],
-    [-0.12, 0.36],
-    [-0.24, 0.26],
-  ], 0.026);
+    [0.18, 0.24],
+    [0.08, 0.36],
+    [-0.02, 0.46],
+    [-0.14, 0.32],
+    [-0.24, 0.22],
+  ], 0.022);
   const whiteTail = finGeometry([
     [0.04, 0.05],
     [-0.16, 0.2],
@@ -739,6 +743,7 @@ function createSharks(scene, splash) {
     const gum = new THREE.MeshStandardMaterial({
       color: 0x3a1818,
       roughness: 0.92,
+      side: THREE.DoubleSide,
       clippingPlanes: [aboveWater],
     });
     const ivory = new THREE.MeshStandardMaterial({
@@ -746,34 +751,49 @@ function createSharks(scene, splash) {
       roughness: 0.38,
       clippingPlanes: [aboveWater],
     });
-    const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), gum);
-    mouth.name = 'mouth';
-    mouth.scale.set(0.55, 0.42, 1.35);
-    mouth.position.set(0.86, -0.24, 0);
-    fish.add(mouth);
-    const toothGeo = new THREE.ConeGeometry(0.02, 0.08, 4);
-    const teeth = 13;
-    for (let i = 0; i < teeth; i += 1) {
-      const across = i / (teeth - 1) - 0.5;
+    const toothGeo = new THREE.ConeGeometry(0.01, 0.026, 3);
+    const count = 11;
+    const lip = [];
+    for (let i = 0; i < count; i += 1) {
+      const across = i / (count - 1) - 0.5;
       const edge = Math.abs(across) * 2;
+      const slice = sharkSlice(0.9 - edge * 0.08);
+      const point = new THREE.Vector3(slice.x - 0.012, slice.belly - 0.006, across * slice.half * 1.35);
+      lip.push(point);
+      if (edge > 0.92) continue;
       const upper = new THREE.Mesh(toothGeo, ivory);
       upper.name = 'tooth';
-      upper.position.set(1.02 - edge * 0.24, -0.2 - edge * 0.08, across * 0.54);
+      upper.position.set(point.x, point.y - 0.006, point.z);
       upper.rotation.z = Math.PI;
       fish.add(upper);
       const lower = new THREE.Mesh(toothGeo, ivory);
       lower.name = 'tooth';
-      lower.position.set(0.94 - edge * 0.22, -0.34 - edge * 0.04, across * 0.48);
+      lower.position.set(point.x, point.y - 0.014, point.z);
       fish.add(lower);
     }
-    const slit = new THREE.BoxGeometry(0.012, 0.15, 0.012);
+    const positions = [];
+    const indices = [];
+    lip.forEach((point, index) => {
+      positions.push(point.x, point.y, point.z, point.x - 0.008, point.y - 0.01, point.z);
+      if (index === lip.length - 1) return;
+      const k = index * 2;
+      indices.push(k, k + 1, k + 2, k + 2, k + 1, k + 3);
+    });
+    const mouth = new THREE.Mesh(new THREE.BufferGeometry(), gum);
+    mouth.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    mouth.geometry.setIndex(indices);
+    mouth.geometry.computeVertexNormals();
+    mouth.name = 'mouth';
+    fish.add(mouth);
+    const slit = new THREE.BoxGeometry(0.008, 0.06, 0.006);
     for (let i = 0; i < 5; i += 1) {
+      const slice = sharkSlice(0.7 - i * 0.018);
       const gill = new THREE.Mesh(slit, darkMat);
-      gill.position.set(0.18 - i * 0.05, -0.02, 0.3);
+      gill.position.set(slice.x, slice.mid - 0.015, slice.half * 0.97);
       gill.rotation.z = -0.35;
       fish.add(gill);
       const gillL = gill.clone();
-      gillL.position.z = -0.3;
+      gillL.position.z = -slice.half * 0.97;
       fish.add(gillL);
     }
   };
@@ -791,25 +811,27 @@ function createSharks(scene, splash) {
     tail.position.set(-1.18, 0.02, 0);
     tail.add(new THREE.Mesh(whiteTail, whiteFin));
     fish.add(tail);
+    const pecSlice = sharkSlice(0.64);
     const pec = new THREE.Mesh(pecGeo, whiteFin);
-    pec.position.set(0.22, -0.1, 0.22);
+    pec.position.set(pecSlice.x, pecSlice.belly + 0.04, pecSlice.half * 0.55);
     pec.rotation.y = 0.85;
-    pec.scale.set(1.45, 1.45, 1.45);
+    pec.scale.set(1.15, 1.15, 1.15);
     fish.add(pec);
     const pecL = pec.clone();
-    pecL.position.z = -0.22;
+    pecL.position.z = -pecSlice.half * 0.55;
     pecL.rotation.y = -0.85;
     fish.add(pecL);
-    const eyeGeo = new THREE.SphereGeometry(0.038, 10, 8);
+    const eyeSlice = sharkSlice(0.78);
+    const eyeGeo = new THREE.SphereGeometry(0.026, 10, 8);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(0.58, 0.05, 0.29);
+    eye.position.set(eyeSlice.x, eyeSlice.mid + 0.015, eyeSlice.half * 0.78);
     fish.add(eye);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(0.58, 0.05, -0.29);
+    eyeL.position.set(eyeSlice.x, eyeSlice.mid + 0.015, -eyeSlice.half * 0.78);
     fish.add(eyeL);
     return fish;
   };
-  const waterline = { sword: 0.16, white: 0.3 };
+  const waterline = { sword: 0.16, white: 0.2 };
   const routes = [
     { kind: 'sword', cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.42, phase: 0.3, scale: 2.15, dive: 0.7 },
     { kind: 'sword', cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.52, phase: 1.6, scale: 1.7, dive: 0.55 },
@@ -824,15 +846,14 @@ function createSharks(scene, splash) {
     scene.add(pair.shark);
     scene.add(pair.shadow);
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
-    route.finTip = route.kind === 'white' ? 0.5 : 0.36;
+    route.finTip = route.kind === 'white' ? 0.46 : 0.36;
     route.wasAbove = true;
     route.wake = 0;
     return pair;
   });
   const places = routes.map(() => ({ x: 0, z: 0 }));
   let time = 0;
-  return {
-    update(dt) {
+  const update = (dt) => {
       time += dt;
       sharks.forEach((pair, index) => {
         const route = routes[index];
@@ -920,8 +941,79 @@ function createSharks(scene, splash) {
           }
         }
       });
-    },
   };
+  function stillAnimal(kind) {
+    const fish = kind === 'white' ? makeWhite() : makeSwordfish();
+    fish.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      const material = child.material.clone();
+      material.clippingPlanes = [];
+      child.material = material;
+      child.castShadow = true;
+    });
+    return fish;
+  }
+  return { update, sword: stillAnimal('sword'), white: stillAnimal('white') };
+}
+
+function createAnimalCase(scene, targets, sword, white) {
+  const caseX = -0.7;
+  const caseZ = -0.55;
+  const shelfTop = 0.1;
+  const wood = new THREE.MeshStandardMaterial({ color: 0x5c4638, roughness: 0.86 });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.1, 0.62), wood);
+  base.position.set(caseX, 0.05, caseZ);
+  base.castShadow = true;
+  base.receiveShadow = true;
+  base.userData = { type: 'shelf', top: shelfTop, hx: 0.78, hz: 0.28 };
+  scene.add(base);
+  targets.push(base);
+  [[-0.76, -0.26], [0.76, -0.26], [-0.76, 0.26], [0.76, 0.26]].forEach(([x, z]) => {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.5, 0.035), wood);
+    post.position.set(caseX + x, shelfTop + 0.25, caseZ + z);
+    post.castShadow = true;
+    scene.add(post);
+  });
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(1.48, 0.46, 0.5),
+    new THREE.MeshPhysicalMaterial({
+      color: 0xd5e7ee,
+      roughness: 0.05,
+      metalness: 0,
+      transmission: 0.72,
+      thickness: 0.04,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  glass.position.set(caseX, shelfTop + 0.25, caseZ);
+  scene.add(glass);
+
+  function seat(model, label, x) {
+    model.scale.setScalar(label === 'great white' ? 0.34 : 0.4);
+    model.rotation.y = -Math.PI / 2;
+    model.position.set(x, 0, caseZ);
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const floorY = -box.min.y;
+    const stackH = box.max.y - box.min.y;
+    model.position.y = shelfTop + floorY;
+    model.userData = {
+      type: 'prop',
+      label,
+      role: 'loose',
+      floorY,
+      stackH,
+      stackSpan: 0.7,
+      hold: 'level',
+    };
+    scene.add(model);
+    targets.push(model);
+  }
+  seat(sword, 'swordfish', caseX - 0.34);
+  seat(white, 'great white', caseX + 0.34);
 }
 
 function plankTexture() {
@@ -1508,6 +1600,7 @@ export function createWorld() {
   }
   createFinds(scene, targets, rockMap);
   const sharks = createSharks(scene, cliff.splash);
+  createAnimalCase(scene, targets, sharks.sword, sharks.white);
 
   return {
     scene,

@@ -1736,8 +1736,39 @@ const faceUp = new THREE.Vector3(0, 1, 0);
 const towardEye = new THREE.Vector3();
 const presentQuat = new THREE.Quaternion();
 
+function supportY(prop) {
+  let best = prop.userData.floorY ?? 0.03;
+  const span = prop.userData.stackSpan ?? 0.35;
+  for (const other of targets) {
+    if (other === prop || other.userData.role === 'held') continue;
+    if (other.userData.type === 'shelf') {
+      const dx = Math.abs(prop.position.x - other.position.x);
+      const dz = Math.abs(prop.position.z - other.position.z);
+      if (dx < other.userData.hx && dz < other.userData.hz) {
+        const top = other.userData.top + (prop.userData.floorY ?? 0);
+        if (top > best) best = top;
+      }
+      continue;
+    }
+    if (other.userData.type !== 'prop' || other.userData.stackH == null) continue;
+    const dx = other.position.x - prop.position.x;
+    const dz = other.position.z - prop.position.z;
+    if (dx * dx + dz * dz > span * span) continue;
+    const floor = other.userData.floorY ?? 0;
+    const top = other.position.y - floor + other.userData.stackH + (prop.userData.floorY ?? 0);
+    if (top > best) best = top;
+  }
+  return best;
+}
+
 function presentHeld(prop) {
   if (!prop) return;
+  if (prop.userData.hold === 'level') {
+    towardEye.subVectors(camera.position, prop.position);
+    if (towardEye.lengthSq() < 1e-6) return;
+    prop.rotation.set(0, Math.atan2(-towardEye.z, towardEye.x), 0);
+    return;
+  }
   if (heldFrom) {
     presentQuat.setFromUnitVectors(faceUp, towardEye.set(0, 0.35, 1).normalize());
   } else {
@@ -1805,6 +1836,16 @@ function releaseProp() {
   if (holder) velocity.y = Math.max(velocity.y, 0.8);
   const speed = velocity.length();
   if (speed > 7) velocity.multiplyScalar(7 / speed);
+  if (speed < 1.6 && prop.userData.stackH != null) {
+    prop.position.y = supportY(prop);
+    prop.rotation.x = 0;
+    prop.rotation.z = 0;
+    prop.userData.role = 'loose';
+    setBrickRaycast(prop, true);
+    if (!targets.includes(prop)) targets.push(prop);
+    setStatus(`Set the ${prop.userData.label} down.`);
+    return;
+  }
   throwProp(prop, velocity);
   setStatus(`Threw the ${prop.userData.label}.`);
 }
@@ -1849,8 +1890,9 @@ function throwProp(prop, velocity) {
         job.t = job.d;
         return;
       }
-      if (!overCliff && prop.position.y <= floorY && vy <= 0) {
-        prop.position.y = floorY;
+      const rest = prop.userData.stackH != null ? supportY(prop) : floorY;
+      if (!overCliff && prop.position.y <= rest && vy <= 0) {
+        prop.position.y = rest;
         if (vy < -1.3) {
           vy = -vy * 0.32;
           vx *= 0.55;
