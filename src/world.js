@@ -5,6 +5,7 @@ import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAP
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
 export const CLIFF_X = -1.78;
+export const WATER_Y = -8;
 
 export function pedestalSlot(index) {
   const col = index % 2;
@@ -61,19 +62,16 @@ function createCliff(scene) {
   scene.add(sky);
 
   const rock = new THREE.MeshStandardMaterial({ color: 0x6e675f, roughness: 1 });
-  const rockDark = new THREE.MeshStandardMaterial({ color: 0x5c564f, roughness: 1 });
-  const scrub = new THREE.MeshStandardMaterial({ color: 0x7d8a62, roughness: 1 });
-  const farRock = new THREE.MeshStandardMaterial({ color: 0x8d877e, roughness: 1 });
+  const farRock = new THREE.MeshStandardMaterial({ color: 0x7a746c, roughness: 1 });
 
-  const face = new THREE.Mesh(new THREE.BoxGeometry(2.4, 28, 14), rock);
-  face.position.set(CLIFF_X - 1.2, -14, 0);
-  scene.add(face);
-  const buttressA = new THREE.Mesh(new THREE.BoxGeometry(3.2, 20, 2.4), rockDark);
-  buttressA.position.set(CLIFF_X - 2.4, -10, -1.6);
-  scene.add(buttressA);
-  const buttressB = new THREE.Mesh(new THREE.BoxGeometry(2.6, 16, 1.8), rockDark);
-  buttressB.position.set(CLIFF_X - 2.8, -8, 2.1);
-  scene.add(buttressB);
+  // The house sits on this mass. Its chasm face is the floor edge, so the drop
+  // beside the room is open air down to the water.
+  const drop = -WATER_Y + 1.6;
+  const underW = 2.2;
+  const under = new THREE.Mesh(new THREE.BoxGeometry(underW, drop, 24), rock);
+  under.position.set(CLIFF_X + underW / 2, -drop / 2, 0);
+  under.receiveShadow = true;
+  scene.add(under);
 
   const lip = new THREE.Mesh(
     new THREE.BoxGeometry(0.22, 0.08, 5.6),
@@ -84,24 +82,131 @@ function createCliff(scene) {
   lip.receiveShadow = true;
   scene.add(lip);
 
-  const valley = new THREE.Mesh(
-    new THREE.PlaneGeometry(70, 80),
-    scrub,
-  );
-  valley.rotation.x = -Math.PI / 2;
-  valley.position.set(-24, -22, 0);
-  scene.add(valley);
+  const waterNear = CLIFF_X + 0.05;
+  const waterFar = -56;
+  const waterWidth = waterNear - waterFar;
+  const waterDepth = 64;
+  const waterGeo = new THREE.PlaneGeometry(waterWidth, waterDepth, 56, 40);
+  waterGeo.rotateX(-Math.PI / 2);
+  const waterMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: true,
+    fog: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uTime: { value: 0 },
+        uDeep: { value: new THREE.Color(0x07141a) },
+        uShallow: { value: new THREE.Color(0x1c5966) },
+        uGlint: { value: new THREE.Color(0xd7e6ea) },
+      },
+    ]),
+    vertexShader: `
+      #include <common>
+      #include <fog_pars_vertex>
+      uniform float uTime;
+      varying vec2 vUv;
+      varying float vWave;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        float w = sin(p.x * 0.22 + uTime * 0.42) * 0.05
+                + sin(p.z * 0.16 - uTime * 0.28) * 0.04
+                + sin(p.x * 0.09 + p.z * 0.13 + uTime * 0.62) * 0.025;
+        p.y += w;
+        vWave = w;
+        vec4 worldPos = modelMatrix * vec4(p, 1.0);
+        vWorldPos = worldPos.xyz;
+        vec4 mvPosition = viewMatrix * worldPos;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }
+    `,
+    fragmentShader: `
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform float uTime;
+      uniform vec3 uDeep;
+      uniform vec3 uShallow;
+      uniform vec3 uGlint;
+      varying vec2 vUv;
+      varying float vWave;
+      varying vec3 vWorldPos;
+      void main() {
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        float fresnel = pow(1.0 - clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 3.4);
+        float crest = smoothstep(-0.015, 0.055, vWave);
+        vec3 color = mix(uDeep, uShallow, fresnel * 0.32 + crest * 0.22);
+        float along = sin(vUv.y * 54.0 + uTime * 0.9) * 0.5 + 0.5;
+        float shore = smoothstep(0.975, 0.998, vUv.x) * (0.45 + 0.55 * along);
+        color = mix(color, uGlint, shore * 0.16 + fresnel * 0.05);
+        gl_FragColor = vec4(color, 0.97);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }
+    `,
+  });
+  const water = new THREE.Mesh(waterGeo, waterMat);
+  water.position.set((waterNear + waterFar) / 2, WATER_Y, 0);
+  scene.add(water);
 
-  const farWall = new THREE.Mesh(new THREE.BoxGeometry(10, 14, 90), farRock);
-  farWall.position.set(-78, -15, 0);
+  const farWall = new THREE.Mesh(new THREE.BoxGeometry(7, 13, 72), farRock);
+  farWall.position.set(waterFar - 3.5, WATER_Y + 2.4, 0);
   scene.add(farWall);
 
-  const ridge = new THREE.MeshStandardMaterial({ color: 0x7a736b, roughness: 1 });
-  [[-38, -12, 6], [-55, 2, 8], [-34, 20, 5], [-62, -22, 7]].forEach(([x, z, height]) => {
-    const peak = new THREE.Mesh(new THREE.ConeGeometry(height * 0.42, height, 5), ridge);
-    peak.position.set(x, -22 + height / 2, z);
+  const ridge = new THREE.MeshStandardMaterial({ color: 0x6a645c, roughness: 1 });
+  [[-24, -9, 5.2], [-36, 4, 6.4], [-18, 14, 4.2], [-44, -16, 5.6]].forEach(([x, z, height]) => {
+    const peak = new THREE.Mesh(new THREE.ConeGeometry(height * 0.42, height, 6), ridge);
+    peak.position.set(x, WATER_Y + height * 0.18, z);
     scene.add(peak);
   });
+
+  const ringGeo = new THREE.RingGeometry(0.18, 0.32, 28);
+  const ripples = [];
+
+  function splash(x, z) {
+    const px = Math.min(x, waterNear - 0.4);
+    const pz = THREE.MathUtils.clamp(z, -waterDepth / 2 + 1, waterDepth / 2 - 1);
+    for (let i = 0; i < 2; i += 1) {
+      const ring = new THREE.Mesh(
+        ringGeo,
+        new THREE.MeshBasicMaterial({
+          color: 0xc5d4d2,
+          transparent: true,
+          opacity: 0.6,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(px, WATER_Y + 0.06, pz);
+      ring.scale.setScalar(0.3);
+      scene.add(ring);
+      ripples.push({ mesh: ring, age: -i * 0.14, life: 1.15 });
+    }
+  }
+
+  function update(dt) {
+    waterMat.uniforms.uTime.value += dt;
+    for (let i = ripples.length - 1; i >= 0; i -= 1) {
+      const ripple = ripples[i];
+      ripple.age += dt;
+      const k = ripple.age / ripple.life;
+      if (k < 0) continue;
+      if (k >= 1) {
+        ripple.mesh.material.dispose();
+        scene.remove(ripple.mesh);
+        ripples.splice(i, 1);
+        continue;
+      }
+      ripple.mesh.scale.setScalar(0.35 + k * 2.8);
+      ripple.mesh.material.opacity = 0.55 * (1 - k);
+    }
+  }
+
+  return { update, splash };
 }
 
 function plateTexture() {
@@ -214,7 +319,7 @@ export function createWorld() {
   floor.position.set(roomMidX, 0.001, 0);
   floor.receiveShadow = true;
   scene.add(floor);
-  createCliff(scene);
+  const cliff = createCliff(scene);
 
   const hemi = new THREE.HemisphereLight(0xfff7ee, 0x6d5c4c, 0.9);
   scene.add(hemi);
@@ -323,6 +428,8 @@ export function createWorld() {
     tableTop: TABLE_TOP,
     layoutTable,
     setRoomCode: roomCard.setRoomCode,
+    update: cliff.update,
+    splash: cliff.splash,
   };
 }
 

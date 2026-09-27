@@ -7,7 +7,7 @@ import { cellsFromGrid, generateModel, lookVerdict, sameLook } from './challenge
 import { colorById, GRID_X, GRID_Z, HEIGHT, heightById, LAYER, MAX_PEDESTALS, partLabel, PEG_MAX, PEG_MIN, shapeById, STUD, STUD_H } from './config.js';
 import { brickLocalPosition, canPlaceAssembly, columnTop, connectedBricks, createGrid, findAssemblySnap, findSnap, footprintOf, occupy, release, rotatePieceRecords } from './grid.js';
 import { hostRoomCode, openRoom, watchCodeFromUrl } from './watch.js';
-import { CLIFF_X, createPedestal, createWorld, pedestalSlot } from './world.js';
+import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -1088,19 +1088,32 @@ function fallBrick(brick) {
   const index = targets.indexOf(brick);
   if (index >= 0) targets.splice(index, 1);
   const start = brick.position.clone();
-  const vx = -0.45 - Math.random() * 0.35;
-  const vz = (Math.random() - 0.5) * 0.3;
-  jobs.push({
+  const vx = -0.7 - Math.random() * 0.45;
+  const vz = (Math.random() - 0.5) * 0.35;
+  const job = {
     t: 0,
-    d: 2.6,
+    d: 3.4,
+    hit: false,
     update(k) {
-      const time = k * 2.6;
-      brick.position.set(start.x + vx * time, start.y - time * time * 3.6, start.z + vz * time);
+      if (job.hit) return;
+      const time = k * job.d;
+      const x = start.x + vx * time;
+      const y = start.y - time * time * 3.1;
+      const z = start.z + vz * time;
+      brick.position.set(x, y, z);
       brick.rotation.x += 0.09;
       brick.rotation.z += 0.06;
+      if (y <= WATER_Y) {
+        job.hit = true;
+        job.t = job.d;
+        world.splash(x, z);
+        brick.parent?.remove(brick);
+        return;
+      }
       if (k >= 1) brick.parent?.remove(brick);
     },
-  });
+  };
+  jobs.push(job);
 }
 
 function tossHeld(fling = flingBrick) {
@@ -1677,6 +1690,7 @@ function frame() {
   }
   machine.update(dt);
   world.challenge.update(dt);
+  world.update(dt);
   for (const controller of controllers) updateLaser(controller);
   if (!renderer.xr.isPresenting) controls.update();
   else {
