@@ -59,30 +59,96 @@ function rockTexture() {
   }).texture;
 }
 
-function createPuddles(scene) {
-  const material = new THREE.ShaderMaterial({
+function basinGeometry(seed) {
+  const rings = 12;
+  const segs = 36;
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const wobble = (ring, seg) => {
+    const edge = ring / rings;
+    const n = Math.sin(seg * 0.85 + seed * 2.3) + 0.35 * Math.sin(seg * 1.9 + seed);
+    return 1 + n * 0.035 * (1 - edge);
+  };
+  const push = (x, y, z, wet) => {
+    positions.push(x, y, z);
+    const damp = 1 - wet * 0.28;
+    colors.push(damp, damp, damp * 0.98);
+  };
+  push(0, 0, 0, 1);
+  for (let i = 1; i <= rings; i += 1) {
+    const t = i / rings;
+    const y = t < 0.72
+      ? 0.006 + 0.1 * (t / 0.72) ** 1.1
+      : 0.106 - 0.1 * ((t - 0.72) / 0.28) ** 2;
+    for (let j = 0; j < segs; j += 1) {
+      const a = (j / segs) * Math.PI * 2;
+      const radius = t * wobble(i, j);
+      push(Math.cos(a) * radius, y, Math.sin(a) * radius, 1 - t);
+    }
+  }
+  for (let j = 0; j < segs; j += 1) {
+    indices.push(0, 1 + ((j + 1) % segs), 1 + j);
+  }
+  for (let i = 0; i < rings - 1; i += 1) {
+    for (let j = 0; j < segs; j += 1) {
+      const a = 1 + i * segs + j;
+      const b = 1 + i * segs + ((j + 1) % segs);
+      const c = 1 + (i + 1) * segs + j;
+      const d = 1 + (i + 1) * segs + ((j + 1) % segs);
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array((positions.length / 3) * 2), 2));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function stampFloorUv(geometry, x, z, rx, rz) {
+  const pos = geometry.attributes.position;
+  const uv = geometry.attributes.uv;
+  const roomRight = 2.7;
+  const roomZ = 2.7;
+  const roomMidX = (roomRight + CLIFF_X) / 2;
+  const spanX = roomRight - CLIFF_X;
+  const spanZ = roomZ * 2;
+  for (let i = 0; i < pos.count; i += 1) {
+    const wx = x + pos.getX(i) * rx;
+    const wz = z + pos.getZ(i) * rz;
+    uv.setXY(i, (wx - roomMidX) / spanX + 0.5, -wz / spanZ + 0.5);
+  }
+  uv.needsUpdate = true;
+}
+
+const PUDDLES = [[1.15, 0.12, 0.4, 0.3, 1.2], [1.7, -1.15, 0.36, 0.42, 2.4], [0.05, -1.35, 0.3, 0.36, 3.1], [-0.9, 0.85, 0.24, 0.18, 4.2]];
+
+function createPuddles(scene, floorMap) {
+  const rock = new THREE.MeshStandardMaterial({
+    map: floorMap,
+    color: 0xc8bfb4,
+    roughness: 0.94,
+    vertexColors: true,
+  });
+  const waterMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     fog: true,
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
-      {
-        uTime: { value: 0 },
-        uDeep: { value: new THREE.Color(0x07141a) },
-        uShallow: { value: new THREE.Color(0x1a4e58) },
-      },
+      { uTime: { value: 0 } },
     ]),
     vertexShader: `
       #include <common>
       #include <fog_pars_vertex>
-      uniform float uTime;
       varying vec2 vUv;
       varying vec3 vWorld;
       void main() {
         vUv = uv;
-        vec3 p = position;
-        p.z += sin(p.x * 16.0 + uTime * 2.1) * 0.018 + sin(p.y * 13.0 - uTime * 1.6) * 0.012;
-        vec4 world = modelMatrix * vec4(p, 1.0);
+        vec4 world = modelMatrix * vec4(position, 1.0);
         vWorld = world.xyz;
         vec4 mvPosition = viewMatrix * world;
         gl_Position = projectionMatrix * mvPosition;
@@ -93,47 +159,46 @@ function createPuddles(scene) {
       #include <common>
       #include <fog_pars_fragment>
       uniform float uTime;
-      uniform vec3 uDeep;
-      uniform vec3 uShallow;
       varying vec2 vUv;
       varying vec3 vWorld;
       void main() {
-        vec2 c = vUv - vec2(0.5);
-        float rim = length(c);
-        float wobble = sin(atan(c.y, c.x) * 6.0 + uTime * 0.6) * 0.02;
-        float alpha = smoothstep(0.52, 0.26, rim + wobble);
-        vec2 xz = vWorld.xz;
-        float e = 0.04;
-        float h = sin(xz.x * 22.0 - uTime * 2.4) + sin(xz.y * 18.0 + uTime * 1.9);
-        float hx = sin((xz.x + e) * 22.0 - uTime * 2.4) + sin(xz.y * 18.0 + uTime * 1.9);
-        float hz = sin(xz.x * 22.0 - uTime * 2.4) + sin((xz.y + e) * 18.0 + uTime * 1.9);
-        vec3 normal = normalize(vec3((h - hx) * 2.2, e, (h - hz) * 2.2));
-        vec3 viewDir = normalize(cameraPosition - vWorld);
-        vec3 lightDir = normalize(vec3(-0.45, 0.72, 0.12));
-        vec3 halfVec = normalize(lightDir + viewDir);
-        float spec = pow(clamp(dot(normal, halfVec), 0.0, 1.0), 48.0);
-        float fresnel = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 2.4);
-        float deep = smoothstep(0.46, 0.04, rim);
-        vec3 color = mix(uShallow, uDeep, deep * 0.85);
-        color += vec3(0.78, 0.86, 0.88) * spec * 0.65;
-        color = mix(color, vec3(0.72, 0.82, 0.84), fresnel * 0.22);
-        gl_FragColor = vec4(color, alpha * 0.78);
+        vec2 p = (vUv - vec2(0.5)) * 2.0;
+        float rim = length(p);
+        float edge = smoothstep(1.0, 0.55, rim);
+        float depth = smoothstep(1.0, 0.0, rim);
+        float seed = fract(sin(dot(floor(vWorld.xz), vec2(19.1, 73.7))) * 241.5);
+        float sweep = fract(uTime * 0.05 + seed);
+        float band = smoothstep(0.07, 0.0, abs(p.y - mix(-0.45, 0.45, sweep)));
+        float rare = step(0.78, fract(seed * 17.0 + floor(uTime * 0.12)));
+        float shimmer = band * rare * smoothstep(0.35, 0.9, sin(uTime * 0.9 + seed * 6.2) * 0.5 + 0.5);
+        vec3 color = mix(vec3(0.12, 0.14, 0.13), vec3(0.9, 0.94, 0.92), shimmer);
+        float alpha = edge * mix(0.02, 0.1, depth) + shimmer * 0.45;
+        gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
       }
     `,
   });
-  [[0.45, 0.2, 0.58, 0.36], [1.55, -1.05, 0.34, 0.46], [-0.25, 1.2, 0.26, 0.2], [1.85, 0.8, 0.2, 0.15]].forEach(([x, z, rx, rz]) => {
-    const puddle = new THREE.Mesh(new THREE.CircleGeometry(1, 24), material);
-    puddle.rotation.x = -Math.PI / 2;
-    puddle.scale.set(rx, rz, 1);
-    puddle.position.set(x, 0.018, z);
-    scene.add(puddle);
+  const waterGeo = new THREE.CircleGeometry(0.4, 24);
+  PUDDLES.forEach(([x, z, rx, rz, seed]) => {
+    const geometry = basinGeometry(seed);
+    stampFloorUv(geometry, x, z, rx, rz);
+    const bowl = new THREE.Mesh(geometry, rock);
+    bowl.scale.set(rx, 1, rz);
+    bowl.position.set(x, 0.012, z);
+    bowl.receiveShadow = true;
+    scene.add(bowl);
+    const water = new THREE.Mesh(waterGeo, waterMat);
+    water.rotation.x = -Math.PI / 2;
+    water.scale.set(rx, rz, 1);
+    water.position.set(x, 0.068, z);
+    water.renderOrder = 2;
+    scene.add(water);
   });
   return {
     update(dt) {
-      material.uniforms.uTime.value += dt;
+      waterMat.uniforms.uTime.value += dt;
     },
   };
 }
@@ -957,63 +1022,68 @@ function createSharks(scene, splash) {
 }
 
 function createAnimalCase(scene, targets, sword, white) {
-  const caseX = -0.7;
-  const caseZ = -0.55;
-  const shelfTop = 0.1;
   const wood = new THREE.MeshStandardMaterial({ color: 0x5c4638, roughness: 0.86 });
-  const base = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.1, 0.62), wood);
-  base.position.set(caseX, 0.05, caseZ);
-  base.castShadow = true;
-  base.receiveShadow = true;
-  base.userData = { type: 'shelf', top: shelfTop, hx: 0.78, hz: 0.28 };
-  scene.add(base);
-  targets.push(base);
-  [[-0.76, -0.26], [0.76, -0.26], [-0.76, 0.26], [0.76, 0.26]].forEach(([x, z]) => {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.5, 0.035), wood);
-    post.position.set(caseX + x, shelfTop + 0.25, caseZ + z);
-    post.castShadow = true;
-    scene.add(post);
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0xf7f8f8,
+    roughness: 0.03,
+    metalness: 0,
+    transmission: 0.92,
+    thickness: 0.015,
+    transparent: true,
+    opacity: 0.1,
+    depthWrite: false,
+    side: THREE.DoubleSide,
   });
-  const glass = new THREE.Mesh(
-    new THREE.BoxGeometry(1.48, 0.46, 0.5),
-    new THREE.MeshPhysicalMaterial({
-      color: 0xd5e7ee,
-      roughness: 0.05,
-      metalness: 0,
-      transmission: 0.72,
-      thickness: 0.04,
-      transparent: true,
-      opacity: 0.28,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
-  );
-  glass.position.set(caseX, shelfTop + 0.25, caseZ);
-  scene.add(glass);
+  const shelfTop = 0.08;
 
-  function seat(model, label, x) {
-    model.scale.setScalar(label === 'great white' ? 0.34 : 0.4);
-    model.rotation.y = -Math.PI / 2;
-    model.position.set(x, 0, caseZ);
+  function addCase(model, label, x, z, scale) {
+    model.scale.setScalar(scale);
+    model.rotation.y = 0.35;
+    model.position.set(0, 0, 0);
     model.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(model);
-    const floorY = -box.min.y;
-    const stackH = box.max.y - box.min.y;
-    model.position.y = shelfTop + floorY;
+    const bounds = new THREE.Box3().setFromObject(model);
+    const length = bounds.max.x - bounds.min.x;
+    const width = bounds.max.z - bounds.min.z;
+    const height = bounds.max.y - bounds.min.y;
+    const floorY = -bounds.min.y;
+    const halfL = length / 2 + 0.1;
+    const halfW = Math.max(width / 2 + 0.1, 0.18);
+    const wallH = height + 0.12;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(halfL * 2 + 0.08, shelfTop, halfW * 2 + 0.08), wood);
+    base.position.set(x, shelfTop / 2, z);
+    base.castShadow = true;
+    base.receiveShadow = true;
+    base.userData = { type: 'shelf', top: shelfTop, hx: halfL + 0.04, hz: halfW + 0.04 };
+    scene.add(base);
+    targets.push(base);
+    const pane = (w, h, d, px, py, pz) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glassMat);
+      mesh.position.set(px, py, pz);
+      scene.add(mesh);
+    };
+    const glassY = shelfTop + wallH / 2;
+    const thick = 0.012;
+    pane(thick, wallH, halfW * 2, x - halfL, glassY, z);
+    pane(thick, wallH, halfW * 2, x + halfL, glassY, z);
+    pane(halfL * 2, wallH, thick, x, glassY, z - halfW);
+    pane(halfL * 2, wallH, thick, x, glassY, z + halfW);
+    pane(halfL * 2, thick, halfW * 2, x, shelfTop + wallH, z);
+    model.position.set(x, shelfTop + floorY, z);
     model.userData = {
       type: 'prop',
       label,
       role: 'loose',
       floorY,
-      stackH,
-      stackSpan: 0.7,
+      stackH: height,
+      stackSpan: Math.max(length, width) * 0.55,
       hold: 'level',
     };
     scene.add(model);
     targets.push(model);
   }
-  seat(sword, 'swordfish', caseX - 0.34);
-  seat(white, 'great white', caseX + 0.34);
+
+  addCase(sword, 'swordfish', -1.15, -1.15, 0.46);
+  addCase(white, 'great white', -0.35, -0.22, 0.4);
 }
 
 function plankTexture() {
@@ -1505,7 +1575,7 @@ export function createWorld() {
     scene.add(boulder);
     targets.push(boulder);
   });
-  const puddles = createPuddles(scene);
+  const puddles = createPuddles(scene, floorMap);
   const cliff = createCliff(scene);
 
   const hemi = new THREE.HemisphereLight(0x8ea4cc, 0x2a2622, 0.62);
