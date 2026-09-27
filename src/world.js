@@ -476,12 +476,27 @@ function swordfishProfile(u) {
 }
 
 function greatWhiteProfile(u) {
-  const hump = Math.sin(Math.PI * Math.pow(Math.min(u, 1), 0.9));
-  const body = 0.07 + 0.3 * Math.pow(Math.max(hump, 0), 0.85);
-  const snout = u > 0.68 ? Math.pow((1 - u) / 0.32, 0.62) : 1;
-  const stock = u < 0.16 ? 0.32 + 0.68 * Math.pow(u / 0.16, 0.7) : 1;
-  const depth = Math.max(0.012, body * snout * stock);
-  return { x: -1.22 + u * 2.52, y: depth, z: depth * 0.94 };
+  let radius;
+  if (u < 0.15) {
+    const k = u / 0.15;
+    radius = 0.05 + 0.045 * Math.pow(k, 0.75);
+  } else if (u < 0.62) {
+    const k = (u - 0.15) / 0.47;
+    radius = 0.095 + 0.22 * Math.sin(k * Math.PI * 0.5);
+  } else if (u < 0.88) {
+    const k = (u - 0.62) / 0.26;
+    radius = 0.315 - 0.02 * k;
+  } else {
+    const k = (u - 0.88) / 0.12;
+    radius = 0.295 * Math.sqrt(Math.max(0.02, 1 - k * k));
+  }
+  const x = -1.18 + u * 2.33;
+  const snout = u > 0.8;
+  return {
+    x,
+    y: radius * (snout ? 0.78 : 1),
+    z: radius * (snout ? 1.08 : 0.92),
+  };
 }
 
 function sharkSkinTexture(base = '#3c5566') {
@@ -634,11 +649,11 @@ function createSharks(scene, splash) {
     [0.02, -0.01],
   ], 0.012);
   const whiteDorsal = finGeometry([
-    [0.38, 0.26],
-    [0.24, 0.44],
-    [0.1, 0.54],
-    [-0.02, 0.38],
-    [-0.16, 0.24],
+    [0.34, 0.32],
+    [0.2, 0.46],
+    [0.08, 0.58],
+    [-0.06, 0.4],
+    [-0.2, 0.28],
   ], 0.026);
   const whiteTail = finGeometry([
     [0.04, 0.05],
@@ -707,25 +722,35 @@ function createSharks(scene, splash) {
       roughness: 0.38,
       clippingPlanes: [aboveWater],
     });
-    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.16, 0.5), gum);
+    const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), gum);
     mouth.name = 'mouth';
-    mouth.position.set(0.72, -0.2, 0);
-    mouth.rotation.z = -0.35;
+    mouth.scale.set(0.55, 0.42, 1.35);
+    mouth.position.set(0.86, -0.24, 0);
     fish.add(mouth);
-    const toothGeo = new THREE.ConeGeometry(0.016, 0.07, 4);
-    const teeth = 14;
+    const toothGeo = new THREE.ConeGeometry(0.02, 0.08, 4);
+    const teeth = 13;
     for (let i = 0; i < teeth; i += 1) {
       const across = i / (teeth - 1) - 0.5;
+      const edge = Math.abs(across) * 2;
       const upper = new THREE.Mesh(toothGeo, ivory);
       upper.name = 'tooth';
-      upper.position.set(0.86 - Math.abs(across) * 0.22, -0.12, across * 0.46);
+      upper.position.set(1.02 - edge * 0.24, -0.2 - edge * 0.08, across * 0.54);
       upper.rotation.z = Math.PI;
       fish.add(upper);
-      if (i % 2 === 0) continue;
       const lower = new THREE.Mesh(toothGeo, ivory);
       lower.name = 'tooth';
-      lower.position.set(0.78 - Math.abs(across) * 0.16, -0.3, across * 0.42);
+      lower.position.set(0.94 - edge * 0.22, -0.34 - edge * 0.04, across * 0.48);
       fish.add(lower);
+    }
+    const slit = new THREE.BoxGeometry(0.012, 0.15, 0.012);
+    for (let i = 0; i < 5; i += 1) {
+      const gill = new THREE.Mesh(slit, darkMat);
+      gill.position.set(0.18 - i * 0.05, -0.02, 0.3);
+      gill.rotation.z = -0.35;
+      fish.add(gill);
+      const gillL = gill.clone();
+      gillL.position.z = -0.3;
+      fish.add(gillL);
     }
   };
   const makeWhite = () => {
@@ -739,24 +764,24 @@ function createSharks(scene, splash) {
     addSharkMouth(fish);
     const tail = new THREE.Group();
     tail.name = 'tail';
-    tail.position.set(-1.22, 0.02, 0);
+    tail.position.set(-1.18, 0.02, 0);
     tail.add(new THREE.Mesh(whiteTail, whiteFin));
     fish.add(tail);
     const pec = new THREE.Mesh(pecGeo, whiteFin);
-    pec.position.set(0.35, -0.02, 0.16);
-    pec.rotation.y = 1.05;
-    pec.scale.set(1.35, 1.35, 1.35);
+    pec.position.set(0.22, -0.1, 0.22);
+    pec.rotation.y = 0.85;
+    pec.scale.set(1.45, 1.45, 1.45);
     fish.add(pec);
     const pecL = pec.clone();
-    pecL.position.z = -0.16;
-    pecL.rotation.y = -1.05;
+    pecL.position.z = -0.22;
+    pecL.rotation.y = -0.85;
     fish.add(pecL);
-    const eyeGeo = new THREE.SphereGeometry(0.04, 8, 6);
+    const eyeGeo = new THREE.SphereGeometry(0.038, 10, 8);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(0.7, 0.07, 0.16);
+    eye.position.set(0.58, 0.05, 0.29);
     fish.add(eye);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(0.7, 0.07, -0.16);
+    eyeL.position.set(0.58, 0.05, -0.29);
     fish.add(eyeL);
     return fish;
   };
@@ -775,7 +800,7 @@ function createSharks(scene, splash) {
     scene.add(pair.shark);
     scene.add(pair.shadow);
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
-    route.finTip = route.kind === 'white' ? 0.54 : 0.36;
+    route.finTip = route.kind === 'white' ? 0.58 : 0.36;
     route.wasAbove = true;
     route.wake = 0;
     return pair;
@@ -925,6 +950,51 @@ function moonTexture() {
   }).texture;
 }
 
+const waterWaveGlsl = `
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  }
+  float ringWave(vec4 s, vec2 xz) {
+    float age = s.z;
+    float amp = s.w;
+    float live = step(0.02, amp) * step(age, 1.8);
+    float dist = length(xz - s.xy);
+    float front = age * 2.4;
+    float band = exp(-abs(dist - front) * 2.8);
+    return sin(dist * 7.5 - age * 16.0) * band * amp * exp(-age * 1.15) * live;
+  }
+  float heightAt(vec2 xz) {
+    float region = noise(xz * 0.048);
+    float gust = noise(xz * 0.1 + vec2(2.4, 6.1));
+    float turn = (gust - 0.5) * 0.38;
+    vec2 wind = vec2(-0.22, 0.98);
+    float cs = cos(turn);
+    float sn = sin(turn);
+    vec2 dir = normalize(vec2(wind.x * cs - wind.y * sn, wind.x * sn + wind.y * cs));
+    float along = dot(xz, dir);
+    float crossw = dot(xz, vec2(-dir.y, dir.x));
+    float amp = mix(0.35, 1.15, smoothstep(0.12, 0.88, region));
+    float freq = mix(1.25, 2.7, gust);
+    float phase = region * 12.0;
+    float speed = 1.45 + noise(xz * 0.07 + 9.0) * 0.7;
+    float primary = sin(along * freq + uTime * speed + phase);
+    float ripple = sin(along * freq * 1.9 + crossw * 0.28 - uTime * speed * 1.35 + phase * 2.0);
+    float sea = (primary * 0.72 + ripple * 0.5) * amp;
+    float wake = ringWave(uRings[0], xz) + ringWave(uRings[1], xz) + ringWave(uRings[2], xz) + ringWave(uRings[3], xz);
+    return sea * 0.12 + wake * 0.07;
+  }
+`;
+
 function createCliff(scene) {
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(120, 20, 16),
@@ -976,42 +1046,25 @@ function createCliff(scene) {
         uDeep: { value: new THREE.Color(0x07141a) },
         uShallow: { value: new THREE.Color(0x1c5966) },
         uGlint: { value: new THREE.Color(0xd7e6ea) },
+        uRings: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
       },
     ]),
     vertexShader: `
       #include <common>
       #include <fog_pars_vertex>
       uniform float uTime;
+      uniform vec4 uRings[4];
       varying vec2 vUv;
       varying vec3 vWorldPos;
-      float hash(vec2 p) {
-        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-      }
-      float noise(vec2 p) {
-        vec2 i = floor(p);
-        vec2 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        float a = hash(i);
-        float b = hash(i + vec2(1.0, 0.0));
-        float c = hash(i + vec2(0.0, 1.0));
-        float d = hash(i + vec2(1.0, 1.0));
-        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-      }
-      float swell(vec2 xz) {
-        float region = noise(xz * 0.045);
-        float gust = noise(xz * 0.11 + 3.7);
-        vec2 wind = normalize(vec2(gust - 0.35, region - 0.2));
-        float along = dot(xz, wind);
-        float chop = 0.25 + region * region * 1.15;
-        float slow = sin(along * (0.22 + gust * 0.55) + uTime * (0.28 + region * 0.35));
-        float mid = sin(along * (0.7 + region) - uTime * (0.45 + gust * 0.4) + gust * 6.0);
-        float fine = noise(xz * (0.35 + region * 0.4) + vec2(uTime * 0.12, -uTime * 0.09));
-        return (slow * 0.65 + mid * 0.28 + (fine - 0.5) * 0.45) * chop;
-      }
+      varying float vHeight;
+      ${waterWaveGlsl}
       void main() {
         vUv = uv;
         vec3 p = position;
-        p.y += swell(p.xz) * 0.045;
+        vec2 xz = (modelMatrix * vec4(p, 1.0)).xz;
+        float h = heightAt(xz);
+        vHeight = h;
+        p.y += h;
         vec4 worldPos = modelMatrix * vec4(p, 1.0);
         vWorldPos = worldPos.xyz;
         vec4 mvPosition = viewMatrix * worldPos;
@@ -1023,56 +1076,38 @@ function createCliff(scene) {
       #include <common>
       #include <fog_pars_fragment>
       uniform float uTime;
+      uniform vec4 uRings[4];
       uniform vec3 uDeep;
       uniform vec3 uShallow;
       uniform vec3 uGlint;
       varying vec2 vUv;
       varying vec3 vWorldPos;
-      float hash(vec2 p) {
-        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-      }
-      float noise(vec2 p) {
-        vec2 i = floor(p);
-        vec2 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        float a = hash(i);
-        float b = hash(i + vec2(1.0, 0.0));
-        float c = hash(i + vec2(0.0, 1.0));
-        float d = hash(i + vec2(1.0, 1.0));
-        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-      }
-      float swell(vec2 xz) {
-        float region = noise(xz * 0.045);
-        float gust = noise(xz * 0.11 + 3.7);
-        vec2 wind = normalize(vec2(gust - 0.35, region - 0.2));
-        float along = dot(xz, wind);
-        float chop = 0.25 + region * region * 1.15;
-        float slow = sin(along * (0.22 + gust * 0.55) + uTime * (0.28 + region * 0.35));
-        float mid = sin(along * (0.7 + region) - uTime * (0.45 + gust * 0.4) + gust * 6.0);
-        float fine = noise(xz * (0.35 + region * 0.4) + vec2(uTime * 0.12, -uTime * 0.09));
-        return (slow * 0.65 + mid * 0.28 + (fine - 0.5) * 0.45) * chop;
-      }
+      varying float vHeight;
+      ${waterWaveGlsl}
       void main() {
         vec2 xz = vWorldPos.xz;
-        float e = 0.35;
-        float h = swell(xz);
-        float hx = swell(xz + vec2(e, 0.0));
-        float hz = swell(xz + vec2(0.0, e));
-        vec3 normal = normalize(vec3(h - hx, e, h - hz));
+        float e = 0.2;
+        float h = heightAt(xz);
+        float hx = heightAt(xz + vec2(e, 0.0));
+        float hz = heightAt(xz + vec2(0.0, e));
+        vec3 slope = vec3((h - hx) * 2.6, e, (h - hz) * 2.6);
+        vec3 normal = normalize(slope);
         vec3 viewDir = normalize(cameraPosition - vWorldPos);
         vec3 moon = normalize(vec3(-0.45, 0.72, 0.12));
         vec3 halfVec = normalize(moon + viewDir);
-        float spec = pow(clamp(dot(normal, halfVec), 0.0, 1.0), 48.0);
+        float lit = clamp(dot(normal, moon) * 0.5 + 0.5, 0.0, 1.0);
+        float spec = pow(clamp(dot(normal, halfVec), 0.0, 1.0), 70.0);
         float into = pow(clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 0.55);
-        float fresnel = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 2.6);
-        float chop = noise(xz * 0.045);
+        float fresnel = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 3.0);
+        float crest = smoothstep(-0.02, 0.08, vHeight);
         float far = smoothstep(0.92, 0.08, vUv.x);
         vec3 depthCol = mix(uShallow, uDeep, far * 0.82 + 0.12);
-        vec3 surface = mix(uDeep, uShallow, 0.28 + chop * 0.22);
-        surface += uGlint * spec * (0.12 + chop * 0.35);
-        surface = mix(surface, uGlint, fresnel * 0.08);
+        vec3 surface = mix(uDeep, uShallow, 0.3 + crest * 0.12);
+        surface *= mix(0.62, 1.18, lit);
+        surface += uGlint * spec * (0.28 + crest * 0.35);
+        surface = mix(surface, uGlint, fresnel * 0.1);
         vec3 color = mix(surface, depthCol, into);
-        float shore = smoothstep(0.9, 0.995, vUv.x) * (0.35 + noise(xz * 0.8 + uTime * 0.15) * 0.65);
+        float shore = smoothstep(0.9, 0.995, vUv.x) * (0.35 + noise(xz * 0.8 + uTime * 0.4) * 0.65);
         color = mix(color, uGlint, shore * 0.08);
         float alpha = mix(0.9, 0.36, into);
         alpha = mix(alpha, alpha * 0.72, smoothstep(0.8, 0.99, vUv.x));
@@ -1135,24 +1170,32 @@ function createCliff(scene) {
     });
   }
 
+  const ringSlots = waterMat.uniforms.uRings.value;
+  let ringCursor = 0;
+
   function splash(x, z, burst = true) {
     const px = Math.min(x, waterNear - 0.4);
     const pz = THREE.MathUtils.clamp(z, -waterDepth / 2 + 1, waterDepth / 2 - 1);
-    const count = burst ? 14 : 5;
+    ringSlots[ringCursor].set(px, pz, 0, burst ? 1 : 0.55);
+    ringCursor = (ringCursor + 1) % ringSlots.length;
+    const count = burst ? 12 : 4;
     for (let i = 0; i < count; i += 1) {
       spray(
-        px + (Math.random() - 0.5) * 0.35,
-        pz + (Math.random() - 0.5) * 0.35,
-        burst ? 0.7 : 0.25,
-        burst ? 0.9 : 0.35,
-        0.12 + Math.random() * (burst ? 0.28 : 0.16),
-        0.45 + Math.random() * 0.4,
+        px + (Math.random() - 0.5) * 0.4,
+        pz + (Math.random() - 0.5) * 0.4,
+        burst ? 1.8 : 0.4,
+        burst ? 1.1 : 0.4,
+        0.22 + Math.random() * (burst ? 0.4 : 0.18),
+        0.55 + Math.random() * 0.45,
       );
     }
   }
 
   function update(dt) {
     waterMat.uniforms.uTime.value += dt;
+    ringSlots.forEach((slot) => {
+      if (slot.w > 0) slot.z += dt;
+    });
     for (let i = ripples.length - 1; i >= 0; i -= 1) {
       const ripple = ripples[i];
       ripple.age += dt;
@@ -1170,7 +1213,7 @@ function createCliff(scene) {
       if (ripple.y < WATER_Y + 0.03) ripple.y = WATER_Y + 0.03;
       ripple.mesh.position.set(ripple.x, ripple.y, ripple.z);
       ripple.mesh.scale.setScalar(ripple.grow * (1 + k * 1.8));
-      ripple.mesh.material.opacity = (0.28 * (1 - k)) * (1 - k);
+      ripple.mesh.material.opacity = 0.55 * (1.0 - k) * (1.0 - k);
     }
   }
 
