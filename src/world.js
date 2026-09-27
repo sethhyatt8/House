@@ -170,7 +170,7 @@ function shellGeometry() {
         const ang = (v - 0.5) * fan;
         const radius = 0.018 + u * 0.108;
         const rib = Math.cos((v * ribs) * Math.PI * 2) * 0.0042 * Math.pow(u, 0.85);
-        const cup = Math.sin(u * Math.PI) * 0.02 * cupScale;
+        const cup = Math.sin(u * Math.PI) * 0.011 * cupScale;
         const ear = Math.pow(Math.sin(v * Math.PI), 0.35);
         positions.push(
           Math.sin(ang) * radius * ear,
@@ -184,7 +184,7 @@ function shellGeometry() {
   pushRing(0.014, 1);
   const topCount = positions.length / 3;
   for (let i = 0; i < topCount; i += 1) {
-    positions.push(positions[i * 3], positions[i * 3 + 1] - 0.016, positions[i * 3 + 2]);
+    positions.push(positions[i * 3], positions[i * 3 + 1] - 0.006, positions[i * 3 + 2]);
     uvs.push(0.985, 0.02);
   }
   const row = segments + 1;
@@ -554,7 +554,7 @@ function clearOfRocks(x, z, reach) {
   return [THREE.MathUtils.clamp(px, -50, -9), THREE.MathUtils.clamp(pz, -22, 18)];
 }
 
-function createSharks(scene) {
+function createSharks(scene, splash) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
   const skin = sharkSkinTexture();
@@ -598,12 +598,12 @@ function createSharks(scene) {
   const swordBody = tubeGeometry(swordfishProfile, 2);
   const whiteBody = tubeGeometry(greatWhiteProfile, 3.1);
   const swordDorsal = finGeometry([
-    [0.55, 0.16],
-    [0.46, 0.32],
-    [0.36, 0.44],
-    [0.16, 0.32],
-    [-0.02, 0.22],
-    [-0.18, 0.16],
+    [0.08, 0.17],
+    [0.0, 0.26],
+    [-0.08, 0.36],
+    [-0.22, 0.26],
+    [-0.36, 0.18],
+    [-0.48, 0.15],
   ]);
   const swordTail = finGeometry([
     [0.06, 0.02],
@@ -728,8 +728,13 @@ function createSharks(scene) {
     pair.shadow.scale.setScalar(route.scale);
     scene.add(pair.shark);
     scene.add(pair.shadow);
+    route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
+    route.finTip = route.kind === 'white' ? 0.62 : 0.36;
+    route.wasAbove = true;
+    route.wake = 0;
     return pair;
   });
+  const places = routes.map(() => ({ x: 0, z: 0 }));
   let time = 0;
   return {
     update(dt) {
@@ -739,11 +744,42 @@ function createSharks(scene) {
         const angle = time * route.speed + route.phase;
         const rawX = route.cx + Math.cos(angle) * route.rx;
         const rawZ = route.cz + Math.sin(angle) * route.rz;
-        const [x, z] = clearOfRocks(rawX, rawZ, route.scale * (route.kind === 'white' ? 1.45 : 1.2));
+        const [x, z] = clearOfRocks(rawX, rawZ, route.reach);
+        places[index].x = x;
+        places[index].z = z;
+        places[index].angle = angle;
+      });
+      for (let pass = 0; pass < 3; pass += 1) {
+        for (let i = 0; i < places.length; i += 1) {
+          for (let j = i + 1; j < places.length; j += 1) {
+            const dx = places[i].x - places[j].x;
+            const dz = places[i].z - places[j].z;
+            const dist = Math.hypot(dx, dz) || 0.001;
+            const limit = routes[i].reach + routes[j].reach;
+            if (dist >= limit) continue;
+            const push = (limit - dist) / 2;
+            const nx = dx / dist;
+            const nz = dz / dist;
+            places[i].x += nx * push;
+            places[i].z += nz * push;
+            places[j].x -= nx * push;
+            places[j].z -= nz * push;
+          }
+        }
+        places.forEach((place, index) => {
+          const [x, z] = clearOfRocks(place.x, place.z, routes[index].reach * 0.65);
+          place.x = x;
+          place.z = z;
+        });
+      }
+      sharks.forEach((pair, index) => {
+        const route = routes[index];
+        const place = places[index];
         const wave = Math.sin(time * 0.62 + route.phase);
         const bob = route.dive ? wave * route.dive - route.dive * 0.35 : Math.sin(time * 1.1 + route.phase) * 0.012;
         const y = WATER_Y - route.scale * waterline[route.kind] + bob;
-        pair.shark.position.set(x, y, z);
+        pair.shark.position.set(place.x, y, place.z);
+        const angle = place.angle;
         const vx = -Math.sin(angle) * route.rx * Math.sign(route.speed);
         const vz = Math.cos(angle) * route.rz * Math.sign(route.speed);
         const yaw = Math.atan2(-vz, vx);
@@ -755,6 +791,18 @@ function createSharks(scene) {
         pair.shadow.position.copy(pair.shark.position);
         pair.shadow.rotation.copy(pair.shark.rotation);
         pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;
+        const tipY = y + Math.cos(pitch) * route.scale * route.finTip;
+        const above = tipY - WATER_Y;
+        if (route.seen && (above > 0) !== (route.wasAbove > 0)) splash(place.x, place.z);
+        route.seen = true;
+        route.wasAbove = above;
+        if (above > 0 && above < route.scale * 0.45) {
+          route.wake += dt;
+          if (route.wake > 0.42) {
+            route.wake = 0;
+            splash(place.x - Math.cos(yaw) * route.reach * 0.35, place.z + Math.sin(yaw) * route.reach * 0.35);
+          }
+        }
       });
     },
   };
@@ -873,9 +921,9 @@ function createCliff(scene) {
       void main() {
         vUv = uv;
         vec3 p = position;
-        float w = sin(p.x * 0.22 + uTime * 0.42) * 0.05
-                + sin(p.z * 0.16 - uTime * 0.28) * 0.04
-                + sin(p.x * 0.09 + p.z * 0.13 + uTime * 0.62) * 0.025;
+        float w = sin(p.x * 0.48 + uTime * 0.62) * 0.04
+                + sin(p.z * 0.41 - uTime * 0.48) * 0.032
+                + sin(p.x * 1.55 + p.z * 1.25 + uTime * 1.25) * 0.014;
         p.y += w;
         vWave = w;
         vec4 worldPos = modelMatrix * vec4(p, 1.0);
@@ -897,13 +945,24 @@ function createCliff(scene) {
       varying vec3 vWorldPos;
       void main() {
         vec3 viewDir = normalize(cameraPosition - vWorldPos);
-        float fresnel = pow(1.0 - clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 3.4);
-        float crest = smoothstep(-0.015, 0.055, vWave);
-        vec3 color = mix(uDeep, uShallow, fresnel * 0.32 + crest * 0.22);
+        float into = pow(clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 0.55);
+        float fresnel = pow(1.0 - clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 2.4);
+        float far = smoothstep(0.92, 0.08, vUv.x);
+        vec3 depthCol = mix(uShallow, uDeep, far * 0.82 + 0.12);
+        float crest = smoothstep(-0.01, 0.045, vWave);
+        float rip = sin(vWorldPos.x * 1.35 + vWorldPos.z * 1.05 + uTime * 1.35);
+        float rip2 = sin(vWorldPos.x * 0.42 - vWorldPos.z * 0.36 + uTime * 0.5);
+        float lines = smoothstep(0.62, 0.98, rip * 0.5 + 0.5);
+        float swell = smoothstep(0.45, 0.9, rip2 * 0.5 + 0.5);
+        vec3 surface = mix(uDeep, uShallow, 0.42);
+        surface = mix(surface, uGlint, fresnel * 0.22 + crest * 0.28 + lines * 0.16 + swell * 0.08);
+        vec3 color = mix(surface, depthCol, into);
         float along = sin(vUv.y * 54.0 + uTime * 0.9) * 0.5 + 0.5;
         float shore = smoothstep(0.975, 0.998, vUv.x) * (0.45 + 0.55 * along);
-        color = mix(color, uGlint, shore * 0.16 + fresnel * 0.05);
-        gl_FragColor = vec4(color, 0.72);
+        color = mix(color, uGlint, shore * 0.22);
+        float alpha = mix(0.9, 0.36, into);
+        alpha = mix(alpha, alpha * 0.72, smoothstep(0.8, 0.99, vUv.x));
+        gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -1198,7 +1257,7 @@ export function createWorld() {
     if (kind === 'ui' || kind === 'plate') targets.splice(i, 1);
   }
   createFinds(scene, targets, rockMap);
-  const sharks = createSharks(scene);
+  const sharks = createSharks(scene, cliff.splash);
 
   return {
     scene,
@@ -1214,9 +1273,9 @@ export function createWorld() {
     layoutTable,
     setRoomCode: roomCard.setRoomCode,
     update(dt) {
+      sharks.update(dt);
       cliff.update(dt);
       puddles.update(dt);
-      sharks.update(dt);
     },
     splash: cliff.splash,
   };
