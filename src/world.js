@@ -77,11 +77,14 @@ function createPuddles(scene) {
       #include <fog_pars_vertex>
       uniform float uTime;
       varying vec2 vUv;
+      varying vec3 vWorld;
       void main() {
         vUv = uv;
         vec3 p = position;
-        p.z += sin(p.x * 9.0 + uTime * 1.3) * 0.012 + sin(p.y * 8.0 - uTime) * 0.008;
-        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+        p.z += sin(p.x * 16.0 + uTime * 2.1) * 0.018 + sin(p.y * 13.0 - uTime * 1.6) * 0.012;
+        vec4 world = modelMatrix * vec4(p, 1.0);
+        vWorld = world.xyz;
+        vec4 mvPosition = viewMatrix * world;
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
       }
@@ -89,14 +92,32 @@ function createPuddles(scene) {
     fragmentShader: `
       #include <common>
       #include <fog_pars_fragment>
+      uniform float uTime;
       uniform vec3 uDeep;
       uniform vec3 uShallow;
       varying vec2 vUv;
+      varying vec3 vWorld;
       void main() {
-        float rim = distance(vUv, vec2(0.5));
-        float alpha = smoothstep(0.5, 0.28, rim);
-        vec3 color = mix(uDeep, uShallow, smoothstep(0.35, 0.05, rim));
-        gl_FragColor = vec4(color, alpha);
+        vec2 c = vUv - vec2(0.5);
+        float rim = length(c);
+        float wobble = sin(atan(c.y, c.x) * 6.0 + uTime * 0.6) * 0.02;
+        float alpha = smoothstep(0.52, 0.26, rim + wobble);
+        vec2 xz = vWorld.xz;
+        float e = 0.04;
+        float h = sin(xz.x * 22.0 - uTime * 2.4) + sin(xz.y * 18.0 + uTime * 1.9);
+        float hx = sin((xz.x + e) * 22.0 - uTime * 2.4) + sin(xz.y * 18.0 + uTime * 1.9);
+        float hz = sin(xz.x * 22.0 - uTime * 2.4) + sin((xz.y + e) * 18.0 + uTime * 1.9);
+        vec3 normal = normalize(vec3((h - hx) * 2.2, e, (h - hz) * 2.2));
+        vec3 viewDir = normalize(cameraPosition - vWorld);
+        vec3 lightDir = normalize(vec3(-0.45, 0.72, 0.12));
+        vec3 halfVec = normalize(lightDir + viewDir);
+        float spec = pow(clamp(dot(normal, halfVec), 0.0, 1.0), 48.0);
+        float fresnel = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 2.4);
+        float deep = smoothstep(0.46, 0.04, rim);
+        vec3 color = mix(uShallow, uDeep, deep * 0.85);
+        color += vec3(0.78, 0.86, 0.88) * spec * 0.65;
+        color = mix(color, vec3(0.72, 0.82, 0.84), fresnel * 0.22);
+        gl_FragColor = vec4(color, alpha * 0.78);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -427,9 +448,10 @@ function tubeGeometry(profile, power) {
       const a = (j / segs) * Math.PI * 2;
       const c = Math.cos(a);
       const s = Math.sin(a);
+      const oy = p.oy || 0;
       positions.push(
         p.x,
-        Math.sign(c) * Math.pow(Math.abs(c), exp) * p.y,
+        oy + Math.sign(c) * Math.pow(Math.abs(c), exp) * p.y,
         Math.sign(s) * Math.pow(Math.abs(s), exp) * p.z,
       );
       uvs.push(i / rings, j / segs);
@@ -445,10 +467,10 @@ function tubeGeometry(profile, power) {
   const nose = profile(1);
   const tail = profile(0);
   const noseCenter = positions.length / 3;
-  positions.push(nose.x, 0, 0);
+  positions.push(nose.x, nose.oy || 0, 0);
   uvs.push(1, 0.5);
   const tailCenter = positions.length / 3;
-  positions.push(tail.x, 0, 0);
+  positions.push(tail.x, tail.oy || 0, 0);
   uvs.push(0, 0.5);
   for (let j = 0; j < segs; j += 1) {
     indices.push(noseCenter, rings * row + j, rings * row + j + 1);
@@ -477,25 +499,27 @@ function swordfishProfile(u) {
 
 function greatWhiteProfile(u) {
   let radius;
-  if (u < 0.15) {
-    const k = u / 0.15;
-    radius = 0.05 + 0.045 * Math.pow(k, 0.75);
-  } else if (u < 0.62) {
-    const k = (u - 0.15) / 0.47;
-    radius = 0.095 + 0.22 * Math.sin(k * Math.PI * 0.5);
-  } else if (u < 0.88) {
-    const k = (u - 0.62) / 0.26;
-    radius = 0.315 - 0.02 * k;
+  let oy = 0;
+  if (u < 0.14) {
+    radius = 0.046 + 0.05 * Math.pow(u / 0.14, 0.75);
+  } else if (u < 0.56) {
+    const k = (u - 0.14) / 0.42;
+    radius = 0.096 + 0.18 * Math.sin(k * Math.PI * 0.5);
+  } else if (u < 0.74) {
+    const k = (u - 0.56) / 0.18;
+    radius = 0.276 - 0.02 * k;
   } else {
-    const k = (u - 0.88) / 0.12;
-    radius = 0.295 * Math.sqrt(Math.max(0.02, 1 - k * k));
+    const k = (u - 0.74) / 0.26;
+    radius = Math.max(0.256 * Math.pow(Math.max(1 - k, 0), 0.78), 0.008);
+    oy = 0.08 * k;
   }
-  const x = -1.18 + u * 2.33;
-  const snout = u > 0.8;
+  const x = -1.15 + u * 2.26;
+  const head = THREE.MathUtils.clamp((u - 0.64) / 0.12, 0, 1);
   return {
     x,
-    y: radius * (snout ? 0.78 : 1),
-    z: radius * (snout ? 1.08 : 0.92),
+    y: radius * (0.98 - head * 0.3),
+    z: radius * (0.86 + head * 0.36),
+    oy,
   };
 }
 
@@ -649,11 +673,11 @@ function createSharks(scene, splash) {
     [0.02, -0.01],
   ], 0.012);
   const whiteDorsal = finGeometry([
-    [0.34, 0.32],
-    [0.2, 0.46],
-    [0.08, 0.58],
-    [-0.06, 0.4],
-    [-0.2, 0.28],
+    [0.22, 0.27],
+    [0.1, 0.4],
+    [0.0, 0.5],
+    [-0.12, 0.36],
+    [-0.24, 0.26],
   ], 0.026);
   const whiteTail = finGeometry([
     [0.04, 0.05],
@@ -800,7 +824,7 @@ function createSharks(scene, splash) {
     scene.add(pair.shark);
     scene.add(pair.shadow);
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
-    route.finTip = route.kind === 'white' ? 0.58 : 0.36;
+    route.finTip = route.kind === 'white' ? 0.5 : 0.36;
     route.wasAbove = true;
     route.wake = 0;
     return pair;
@@ -967,31 +991,33 @@ const waterWaveGlsl = `
   float ringWave(vec4 s, vec2 xz) {
     float age = s.z;
     float amp = s.w;
-    float live = step(0.02, amp) * step(age, 1.8);
-    float dist = length(xz - s.xy);
-    float front = age * 2.4;
-    float band = exp(-abs(dist - front) * 2.8);
-    return sin(dist * 7.5 - age * 16.0) * band * amp * exp(-age * 1.15) * live;
+    float live = step(0.02, amp) * step(age, 1.5);
+    vec2 wind = normalize(vec2(-0.22, 0.98));
+    vec2 center = s.xy + wind * age * 1.15;
+    float dist = length(xz - center);
+    float front = age * 1.7;
+    float band = exp(-abs(dist - front) * 3.6);
+    return sin(dist * 8.0 - age * 13.0) * band * amp * exp(-age * 1.35) * live;
   }
   float heightAt(vec2 xz) {
-    float region = noise(xz * 0.048);
-    float gust = noise(xz * 0.1 + vec2(2.4, 6.1));
-    float turn = (gust - 0.5) * 0.38;
-    vec2 wind = vec2(-0.22, 0.98);
+    vec2 wind = normalize(vec2(-0.22, 0.98));
+    vec2 flow = xz - wind * uTime * 0.62;
+    float region = noise(flow * 0.05);
+    float gust = noise(flow * 0.1 + vec2(2.4, 6.1));
+    float turn = (gust - 0.5) * 0.3;
     float cs = cos(turn);
     float sn = sin(turn);
     vec2 dir = normalize(vec2(wind.x * cs - wind.y * sn, wind.x * sn + wind.y * cs));
     float along = dot(xz, dir);
     float crossw = dot(xz, vec2(-dir.y, dir.x));
-    float amp = mix(0.35, 1.15, smoothstep(0.12, 0.88, region));
-    float freq = mix(1.25, 2.7, gust);
-    float phase = region * 12.0;
-    float speed = 1.45 + noise(xz * 0.07 + 9.0) * 0.7;
-    float primary = sin(along * freq + uTime * speed + phase);
-    float ripple = sin(along * freq * 1.9 + crossw * 0.28 - uTime * speed * 1.35 + phase * 2.0);
-    float sea = (primary * 0.72 + ripple * 0.5) * amp;
+    float amp = mix(0.4, 1.1, smoothstep(0.15, 0.85, region));
+    float freq = mix(1.35, 2.3, gust);
+    float phase = region * 5.0;
+    float primary = sin(along * freq - uTime * 1.75 + phase);
+    float ripple = sin(along * freq * 1.7 + crossw * 0.2 - uTime * 2.2 + phase);
+    float sea = (primary * 0.7 + ripple * 0.4) * amp;
     float wake = ringWave(uRings[0], xz) + ringWave(uRings[1], xz) + ringWave(uRings[2], xz) + ringWave(uRings[3], xz);
-    return sea * 0.12 + wake * 0.07;
+    return sea * 0.11 + wake * 0.045;
   }
 `;
 
@@ -1174,8 +1200,8 @@ function createCliff(scene) {
   let ringCursor = 0;
 
   function splash(x, z, burst = true) {
-    const px = Math.min(x, waterNear - 0.4);
-    const pz = THREE.MathUtils.clamp(z, -waterDepth / 2 + 1, waterDepth / 2 - 1);
+    const px = THREE.MathUtils.clamp(x, waterFar + 3.2, waterNear - 3.2);
+    const pz = THREE.MathUtils.clamp(z, -waterDepth / 2 + 3.2, waterDepth / 2 - 3.2);
     ringSlots[ringCursor].set(px, pz, 0, burst ? 1 : 0.55);
     ringCursor = (ringCursor + 1) % ringSlots.length;
     const count = burst ? 12 : 4;
@@ -1291,11 +1317,11 @@ function createRoomCard(scene) {
   return { mesh, setRoomCode };
 }
 
-function createLadder(scene, targets, x, z) {
+function createLadder(scene, targets, x, z, roofY) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d5342, roughness: 0.88 });
   const group = new THREE.Group();
   group.position.set(x, 0, z);
-  const top = 3.48;
+  const top = roofY + 0.28;
   const railH = top - 0.08;
   const railGeo = new THREE.BoxGeometry(0.05, railH, 0.045);
   [-0.18, 0.18].forEach((side) => {
@@ -1317,9 +1343,9 @@ function createLadder(scene, targets, x, z) {
     new THREE.BoxGeometry(0.35, top, 0.5),
     new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   );
-  hit.position.set(0, top / 2, 0);
+  hit.position.set(-0.1, top / 2, 0);
   group.add(hit);
-  group.userData = { type: 'ladder', rungs };
+  group.userData = { type: 'ladder', rungs, roofY };
   scene.add(group);
   targets.push(group);
 }
@@ -1365,7 +1391,7 @@ export function createWorld() {
   [[-1.4, 0.55, 0.85], [0.2, 0.7, 1.05], [1.7, 0.42, 0.75]].forEach(([z, hang, depth]) => {
     addRock(0.85, 0.38, depth, coverFrom + 0.15, 2.55 - hang * 0.15, z);
   });
-  createLadder(scene, targets, coverFrom + 0.15, 0.2);
+  createLadder(scene, targets, coverFrom - 0.06, 0.05, 2.95 + 0.31);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomSpan, roomZ * 2),

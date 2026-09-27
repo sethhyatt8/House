@@ -145,8 +145,9 @@ function teleportNext() {
 
 let climb = null;
 const roomPolar = Math.PI * 0.62;
+const pullPixels = 78;
 
-function beginClimb(ladder, hitY) {
+function nearestRung(ladder, hitY) {
   const rungs = ladder.userData.rungs;
   let rung = 0;
   let best = Infinity;
@@ -157,20 +158,26 @@ function beginClimb(ladder, hitY) {
       rung = index;
     }
   });
-  climb = { ladder, rung, onRoof: false };
+  return rung;
+}
+
+function beginClimb(ladder, hitY) {
+  climb = { ladder, rung: nearestRung(ladder, hitY), onRoof: false, pulling: false, pull: 0, pointerY: null };
   applyClimbView();
-  setStatus('On the ladder. W climbs, S goes down.');
+  setStatus('Hold a rung and drag up to pull yourself up.');
 }
 
 function moveClimb(dir) {
   if (!climb) return;
+  climb.pull = 0;
+  climb.pulling = false;
   const rungs = climb.ladder.userData.rungs;
   if (climb.onRoof) {
     if (dir > 0) return;
     climb.onRoof = false;
     climb.rung = rungs.length - 1;
     applyClimbView();
-    setStatus('On the ladder. W climbs, S goes down.');
+    setStatus('Hold a rung and drag up to pull yourself up.');
     return;
   }
   const next = climb.rung + dir;
@@ -188,24 +195,72 @@ function moveClimb(dir) {
   applyClimbView();
 }
 
+function grabRung(pointerY) {
+  if (!climb || climb.onRoof) return;
+  climb.pulling = true;
+  climb.pointerY = pointerY;
+  climb.pull = 0;
+  controls.enabled = false;
+  renderer.domElement.style.cursor = 'grabbing';
+}
+
+function pullClimb(pointerY) {
+  if (!climb?.pulling || climb.pointerY == null) return;
+  const rungs = climb.ladder.userData.rungs;
+  climb.pull = (climb.pointerY - pointerY) / pullPixels;
+  if (climb.pull >= 1) {
+    climb.pointerY = pointerY;
+    climb.pull = 0;
+    if (climb.rung >= rungs.length - 1) {
+      climb.onRoof = true;
+      climb.pulling = false;
+      applyClimbView();
+      return;
+    }
+    climb.rung += 1;
+  } else if (climb.pull <= -1) {
+    climb.pointerY = pointerY;
+    climb.pull = 0;
+    if (climb.rung <= 0) {
+      leaveClimb();
+      setStatus('Middle of the room. Press A for the other spot.');
+      return;
+    }
+    climb.rung -= 1;
+  }
+  applyClimbView();
+}
+
+function releasePull() {
+  if (!climb?.pulling) return;
+  climb.pulling = false;
+  climb.pull = 0;
+  climb.pointerY = null;
+  renderer.domElement.style.cursor = 'grab';
+  applyClimbView();
+}
+
 function applyClimbView() {
   if (!climb) return;
   const base = climb.ladder.position;
+  const roof = climb.ladder.userData.roofY;
   if (climb.onRoof) {
     controls.maxPolarAngle = Math.PI * 0.92;
     controls.minPolarAngle = 0.2;
     controls.maxDistance = 5.5;
     controls.enabled = true;
-    camera.position.set(base.x + 0.85, 3.72, base.z + 0.15);
-    controls.target.set(base.x + 1.8, 3.35, base.z - 0.7);
+    camera.position.set(base.x + 1.05, roof + 1.5, base.z + 0.2);
+    controls.target.set(base.x + 2.6, roof + 1.05, base.z - 0.45);
     controls.update();
     setStatus('On the roof. Press S to climb down.');
     return;
   }
   controls.enabled = false;
-  const y = climb.ladder.userData.rungs[climb.rung];
-  camera.position.set(base.x - 0.52, y + 0.2, base.z);
-  camera.lookAt(base.x + 0.08, y + 1.15, base.z);
+  const rungs = climb.ladder.userData.rungs;
+  const span = rungs.length > 1 ? rungs[1] - rungs[0] : 0.32;
+  const y = rungs[climb.rung] + (climb.pull || 0) * span;
+  camera.position.set(base.x - 0.72, y + 0.08, base.z);
+  camera.lookAt(base.x + 0.02, y + 0.95, base.z);
 }
 
 function leaveClimb() {
@@ -1449,6 +1504,7 @@ function onPointerMove(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  if (climb?.pulling) pullClimb(event.clientY);
   if (renderer.xr.isPresenting) return;
   if (pegDrag) {
     const pegHit = hitFromCamera();
@@ -1493,7 +1549,10 @@ function onPointerDown(event) {
     return;
   }
   if (owner?.userData.type === 'ladder') {
-    beginClimb(owner, hit.point.y);
+    if (!climb || climb.ladder !== owner || climb.onRoof) beginClimb(owner, hit.point.y);
+    else climb.rung = nearestRung(owner, hit.point.y);
+    grabRung(event.clientY);
+    try { renderer.domElement.setPointerCapture(event.pointerId); } catch { /* already grabbing */ }
     return;
   }
   press = {
@@ -1525,6 +1584,7 @@ function onPointerDown(event) {
 
 function onPointerUp(event) {
   if (watching) return;
+  if (climb?.pulling) releasePull();
   if (pegDrag) {
     pegDrag = false;
     controls.enabled = true;
@@ -1588,6 +1648,13 @@ function onXrTrigger(controller) {
     teleportTo(hit.owner.userData.spot);
     return;
   }
+  if (hit?.owner?.userData.type === 'ladder') {
+    beginClimb(hit.owner, hit.point.y);
+    climb.hand = controller;
+    controller.getWorldPosition(handPoint);
+    climb.handY = handPoint.y;
+    return;
+  }
   if (hit?.owner?.userData.type === 'ui') activateUi(hit.owner);
 }
 
@@ -1616,6 +1683,10 @@ function piecePoint() {
 }
 
 function onXrRelease(controller) {
+  if (climb?.hand === controller) {
+    climb.hand = null;
+    climb.pull = 0;
+  }
   if (controller.userData.pegDrag) {
     controller.userData.pegDrag = false;
     return;
@@ -2058,7 +2129,17 @@ function frame(time, frame) {
   world.update(dt);
   for (const controller of controllers) updateLaser(controller);
   if (!renderer.xr.isPresenting) controls.update();
-  if (climb && !climb.onRoof) applyClimbView();
+  if (climb && !climb.onRoof) {
+    if (renderer.xr.isPresenting && climb.hand) {
+      climb.hand.getWorldPosition(handPoint);
+      const dy = handPoint.y - climb.handY;
+      if (Math.abs(dy) > 0.2) {
+        climb.handY = handPoint.y;
+        moveClimb(dy > 0 ? 1 : -1);
+      }
+    }
+    if (!renderer.xr.isPresenting) applyClimbView();
+  }
   else {
     for (const controller of controllers) {
       pollTeleport(controller);
