@@ -196,6 +196,21 @@ function shellGeometry() {
   };
   stitch(0, false);
   stitch((rings + 1) * row, true);
+  const lip = (rings + 1) * row;
+  const seal = (t0, t1, outward) => {
+    const b0 = lip + t0;
+    const b1 = lip + t1;
+    if (outward) indices.push(t0, t1, b0, t1, b1, b0);
+    else indices.push(t0, b0, t1, t1, b0, b1);
+  };
+  for (let j = 0; j < segments; j += 1) {
+    seal(j, j + 1, false);
+    seal(rings * row + j, rings * row + j + 1, true);
+  }
+  for (let i = 0; i < rings; i += 1) {
+    seal(i * row, (i + 1) * row, false);
+    seal(i * row + segments, (i + 1) * row + segments, true);
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -245,7 +260,7 @@ function starfishGeometry(warmth) {
         const z = Math.sin(theta) * rr;
         const dome = top ? 0.014 * Math.cos(u * Math.PI * 0.5) * (0.65 + (1 - u) * 0.7) : 0;
         const tuber = top ? Math.max(0, Math.sin(theta * 14) * Math.sin(u * 10)) * 0.007 : 0;
-        positions.push(x, (top ? 0.009 : 0.003) + dome + tuber, z);
+        positions.push(x, (top ? 0.012 : 0.001) + dome + tuber, z);
         colors.push(...paint(theta, u, top));
       }
     }
@@ -265,6 +280,14 @@ function starfishGeometry(warmth) {
   };
   stitch(0, false);
   stitch((steps + 1) * row, true);
+  const starLip = (steps + 1) * row;
+  for (let i = 0; i < steps; i += 1) {
+    const t0 = i * row + rings;
+    const t1 = (i + 1) * row + rings;
+    const b0 = starLip + t0;
+    const b1 = starLip + t1;
+    indices.push(t0, t1, b0, t1, b1, b0);
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -374,6 +397,7 @@ function sharkBodyGeometry() {
   const rings = 24;
   const segs = 16;
   const positions = [];
+  const uvs = [];
   const indices = [];
   const profile = (u) => {
     const hump = Math.exp(-((u - 0.4) ** 2) / 0.055);
@@ -389,6 +413,7 @@ function sharkBodyGeometry() {
     for (let j = 0; j <= segs; j += 1) {
       const a = (j / segs) * Math.PI * 2;
       positions.push(p.x, Math.cos(a) * p.y, Math.sin(a) * p.z);
+      uvs.push(i / rings, j / segs);
     }
   }
   const row = segs + 1;
@@ -400,19 +425,58 @@ function sharkBodyGeometry() {
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
 }
 
-function finGeometry(points) {
-  const shape = new THREE.Shape();
-  points.forEach(([x, y], index) => {
-    if (index === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
+function sharkSkinTexture() {
+  const { texture } = canvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#3c5566';
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 70; i += 1) {
+      const shade = 48 + Math.random() * 70;
+      ctx.fillStyle = `rgba(${shade * 0.62}, ${shade * 0.78}, ${shade}, 0.45)`;
+      ctx.beginPath();
+      ctx.ellipse(
+        Math.random() * w,
+        Math.random() * h,
+        8 + Math.random() * 28,
+        4 + Math.random() * 14,
+        Math.random() * Math.PI,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+    for (let i = 0; i < 900; i += 1) {
+      const shade = 40 + Math.random() * 50;
+      ctx.fillStyle = `rgba(${shade * 0.55}, ${shade * 0.72}, ${shade * 0.9}, 0.7)`;
+      ctx.fillRect(Math.random() * w, Math.random() * h, 2, 3);
+    }
   });
-  shape.closePath();
-  return new THREE.ShapeGeometry(shape);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 1.4);
+  return texture;
+}
+
+function finGeometry(points, depth = 0.02) {
+  const shape = new THREE.Shape();
+  const curve = new THREE.SplineCurve(points.map(([x, y]) => new THREE.Vector2(x, y)));
+  const spaced = curve.getPoints(40);
+  shape.moveTo(spaced[0].x, spaced[0].y);
+  spaced.slice(1).forEach((point) => shape.lineTo(point.x, point.y));
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: true,
+    bevelThickness: 0.003,
+    bevelSize: 0.003,
+    bevelSegments: 1,
+  });
+  geometry.translate(0, 0, -depth / 2);
+  return geometry;
 }
 
 const SEA_ROCKS = [
@@ -443,10 +507,16 @@ function clearOfRocks(x, z, reach) {
 function createSharks(scene) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
+  const skin = sharkSkinTexture();
+  const skinBump = skin.clone();
+  skinBump.colorSpace = THREE.LinearSRGBColorSpace;
   const backMat = new THREE.MeshStandardMaterial({
-    color: 0x6a767e,
-    roughness: 0.48,
-    metalness: 0.05,
+    map: skin,
+    bumpMap: skinBump,
+    bumpScale: 0.05,
+    color: 0xffffff,
+    roughness: 0.74,
+    metalness: 0.03,
     clippingPlanes: [aboveWater],
   });
   const darkMat = new THREE.MeshStandardMaterial({
@@ -463,22 +533,36 @@ function createSharks(scene) {
   finMat.side = THREE.DoubleSide;
   const bodyGeo = sharkBodyGeometry();
   const dorsalGeo = finGeometry([
-    [0.32, 0.2],
-    [-0.18, 0.18],
-    [-0.02, 0.68],
+    [0.72, 0.17],
+    [0.5, 0.2],
+    [0.28, 0.3],
+    [0.08, 0.46],
+    [-0.06, 0.6],
+    [-0.14, 0.66],
+    [-0.22, 0.46],
+    [-0.24, 0.3],
+    [-0.2, 0.18],
   ]);
   const caudalGeo = finGeometry([
-    [0.04, 0.02],
-    [-0.58, 0.24],
-    [-0.2, 0.0],
-    [-0.62, -0.3],
-    [-0.02, -0.05],
-  ]);
+    [0.06, 0.02],
+    [-0.1, 0.1],
+    [-0.28, 0.2],
+    [-0.46, 0.26],
+    [-0.34, 0.1],
+    [-0.18, 0.03],
+    [-0.32, -0.08],
+    [-0.48, -0.22],
+    [-0.28, -0.08],
+    [-0.06, -0.02],
+  ], 0.014);
   const pecGeo = finGeometry([
-    [0.02, 0.02],
-    [0.48, -0.04],
-    [0.16, -0.22],
-  ]);
+    [0.02, 0.04],
+    [0.18, 0.06],
+    [0.4, 0.0],
+    [0.56, -0.08],
+    [0.34, -0.14],
+    [0.1, -0.05],
+  ], 0.012);
   const makeShark = () => {
     const shark = new THREE.Group();
     const body = new THREE.Mesh(bodyGeo, backMat);
