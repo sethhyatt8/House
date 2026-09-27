@@ -37,8 +37,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
+renderer.localClippingEnabled = true;
 const envScene = new THREE.Scene();
-envScene.add(new THREE.HemisphereLight(0xffffff, 0xd5dee8, 1.5));
+envScene.add(new THREE.HemisphereLight(0x9aafd4, 0x2a3038, 0.85));
 envScene.add(new THREE.Mesh(
   new THREE.SphereGeometry(8, 20, 14),
   new THREE.MeshBasicMaterial({ color: 0xb7c4d0, side: THREE.BackSide }),
@@ -57,10 +58,89 @@ document.body.appendChild(XRButton.createButton(renderer, {
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0.12, 1.02, -0.42);
 controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.49;
+controls.maxPolarAngle = Math.PI * 0.62;
 controls.minDistance = 0.45;
-controls.maxDistance = 3.4;
+controls.maxDistance = 4.2;
 controls.update();
+
+const teleportSpots = [];
+let teleportIndex = -1;
+const spotRingGeo = new THREE.RingGeometry(0.18, 0.3, 40);
+const spotDiscGeo = new THREE.CircleGeometry(0.16, 28);
+
+function addTeleportSpot(spec) {
+  const group = new THREE.Group();
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xb8ffe8,
+    transparent: true,
+    opacity: 0.82,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const ring = new THREE.Mesh(spotRingGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.04;
+  const disc = new THREE.Mesh(
+    spotDiscGeo,
+    new THREE.MeshBasicMaterial({
+      color: 0xf4fffb,
+      transparent: true,
+      opacity: 0.34,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = 0.03;
+  group.add(ring, disc);
+  group.position.set(spec.x, 0, spec.z);
+  group.userData = { type: 'teleport', spot: teleportSpots.length };
+  scene.add(group);
+  targets.push(group);
+  teleportSpots.push({ ...spec, ringMat });
+}
+
+addTeleportSpot({
+  x: 0.9,
+  z: 0.85,
+  eye: new THREE.Vector3(0.9, 1.55, 0.85),
+  look: new THREE.Vector3(0.15, 1.15, -0.45),
+  status: 'Middle of the room.',
+});
+addTeleportSpot({
+  x: -1.4,
+  z: 0.05,
+  eye: new THREE.Vector3(-1.34, 1.55, 0.62),
+  look: new THREE.Vector3(-5.2, 0.85, 0.15),
+  status: 'Cliff edge.',
+});
+
+function teleportTo(index) {
+  const spot = teleportSpots[index];
+  if (!spot) return;
+  teleportIndex = index;
+  if (renderer.xr.isPresenting && xrFrame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (ref && pose) {
+      const head = pose.transform.position;
+      renderer.xr.setReferenceSpace(ref.getOffsetReferenceSpace(new XRRigidTransform({
+        x: head.x - spot.x,
+        y: 0,
+        z: head.z - spot.z,
+      })));
+    }
+  } else {
+    camera.position.copy(spot.eye);
+    controls.target.copy(spot.look);
+    controls.update();
+  }
+  setStatus(`${spot.status} Press A for the other spot.`);
+}
+
+function teleportNext() {
+  teleportTo(teleportIndex === 1 ? 0 : 1);
+}
 
 const raycaster = new THREE.Raycaster();
 const buildPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -world.tableTop);
@@ -389,9 +469,6 @@ function startChallenge(first) {
     setStatus('You got it. Press NEW for another.');
     return;
   }
-  setStatus(first
-    ? `${chosenLabel()} is selected. Match the build behind the table. Press NEW for another.`
-    : 'New build behind the table. Match the colors and the heights.');
 }
 
 function ownerOf(object) {
@@ -1335,6 +1412,10 @@ function onPointerDown(event) {
     setPegFromHit(hit);
   }
   const owner = hit?.owner ?? null;
+  if (owner?.userData.type === 'teleport') {
+    teleportTo(owner.userData.spot);
+    return;
+  }
   press = {
     x: event.clientX,
     y: event.clientY,
@@ -1397,7 +1478,9 @@ function onPointerUp(event) {
 }
 
 function onKeyDown(event) {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
   if (watching || event.repeat) return;
+  if (event.key === 'a' || event.key === 'A') teleportNext();
   if (event.key === 'r' || event.key === 'R') rotateHeld();
   if (event.key === 'Enter') orderSelection();
   if (event.key === 'n' || event.key === 'N') startChallenge(false);
@@ -1409,6 +1492,10 @@ function onXrTrigger(controller) {
   if (hit?.owner?.userData.action === 'peg') {
     controller.userData.pegDrag = true;
     setPegFromHit(hit);
+    return;
+  }
+  if (hit?.owner?.userData.type === 'teleport') {
+    teleportTo(hit.owner.userData.spot);
     return;
   }
   if (hit?.owner?.userData.type === 'ui') activateUi(hit.owner);
@@ -1450,6 +1537,14 @@ function onXrRelease(controller) {
   }
   updateSnapFromPoint(piecePoint());
   releaseHeld();
+}
+
+function pollTeleport(controller) {
+  const pressed = !!controller.userData.inputSource?.gamepad?.buttons?.[4]?.pressed;
+  if (pressed && !controller.userData.teleportLatch) {
+    controller.userData.teleportLatch = true;
+    teleportNext();
+  } else if (!pressed) controller.userData.teleportLatch = false;
 }
 
 function pollRotate(controller) {
@@ -1838,7 +1933,10 @@ function startRelay() {
   }
 }
 
-function frame() {
+let xrFrame = null;
+
+function frame(time, frame) {
+  xrFrame = frame ?? null;
   const dt = Math.min(clock.getDelta(), 0.05);
   for (let i = jobs.length - 1; i >= 0; i -= 1) {
     jobs[i].t += dt;
@@ -1853,6 +1951,7 @@ function frame() {
   if (!renderer.xr.isPresenting) controls.update();
   else {
     for (const controller of controllers) {
+      pollTeleport(controller);
       pollRotate(controller);
       if (controller.userData.pegDrag) {
         const hit = hitFromController(controller);
@@ -1861,6 +1960,10 @@ function frame() {
     }
     updateHeldXr();
   }
+  const spotGlow = 0.62 + Math.sin(performance.now() * 0.004) * 0.22;
+  teleportSpots.forEach((spot, index) => {
+    spot.ringMat.opacity = index === teleportIndex ? 1 : spotGlow;
+  });
   const pulse = 0.12 + Math.sin(performance.now() * 0.004) * 0.08;
   if (!held) machine.orderButton.material.emissiveIntensity = pulse;
   world.challenge.newButton.material.emissiveIntensity = challengeMatched ? 0.55 : pulse;
