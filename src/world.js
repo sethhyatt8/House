@@ -150,6 +150,8 @@ function shellTexture(hinge, mid, lip, rib) {
       ctx.ellipse(Math.random() * w, Math.random() * h, 1 + Math.random() * 2.4, 0.6 + Math.random(), Math.random(), 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.fillStyle = lip;
+    ctx.fillRect(w - 24, 0, 24, 28);
   }).texture;
 }
 
@@ -175,7 +177,7 @@ function shellGeometry() {
           lift + cup + (cupScale > 0.5 ? rib : rib * 0.25),
           -Math.cos(ang) * radius * 0.92 + 0.03,
         );
-        uvs.push(u, v);
+        uvs.push(cupScale > 0.5 ? u : 0.985, cupScale > 0.5 ? v : 0.02);
       }
     }
   };
@@ -209,8 +211,8 @@ function starfishGeometry(warmth) {
   const positions = [];
   const colors = [];
   const radiusAt = (theta) => {
-    const lobe = Math.pow(Math.max(0, Math.cos(theta * (arms / 2))), 0.38);
-    return 0.02 + lobe * 0.082;
+    const lobe = 0.5 + 0.5 * Math.cos(arms * theta);
+    return 0.038 + 0.1 * Math.pow(lobe, 2.6);
   };
   const bodyC = new THREE.Color(warmth > 0.6 ? '#d15a22' : '#b84a18');
   const centerC = new THREE.Color('#6a2a10');
@@ -218,7 +220,7 @@ function starfishGeometry(warmth) {
   const spotC = new THREE.Color('#7c3412');
   const underC = new THREE.Color('#f3d7c0');
   const paint = (theta, u, top) => {
-    const tip = Math.pow(Math.max(0, Math.cos(theta * (arms / 2))), 0.38);
+    const tip = Math.pow(0.5 + 0.5 * Math.cos(arms * theta), 3.2);
     const spot = Math.sin(theta * 11.0 + u * 19.0) * Math.sin(theta * 7.0 - u * 5.0);
     const color = new THREE.Color();
     if (!top) {
@@ -241,7 +243,7 @@ function starfishGeometry(warmth) {
         const rr = reach * u;
         const x = Math.cos(theta) * rr;
         const z = Math.sin(theta) * rr;
-        const dome = top ? (0.018 * Math.cos(u * Math.PI * 0.5) * (0.4 + reach * 6)) : 0;
+        const dome = top ? 0.014 * Math.cos(u * Math.PI * 0.5) * (0.65 + (1 - u) * 0.7) : 0;
         const tuber = top ? Math.max(0, Math.sin(theta * 14) * Math.sin(u * 10)) * 0.007 : 0;
         positions.push(x, (top ? 0.009 : 0.003) + dome + tuber, z);
         colors.push(...paint(theta, u, top));
@@ -291,14 +293,21 @@ function pebbleGeometry(seed) {
 }
 
 function createFinds(scene, targets, rockMap) {
-  const pebbleMat = new THREE.MeshStandardMaterial({ map: rockMap, color: 0xb3aaa0, roughness: 0.96 });
-  const pebbleDark = new THREE.MeshStandardMaterial({ map: rockMap, color: 0x857c72, roughness: 1 });
+  const pebbleMap = rockMap.clone();
+  pebbleMap.repeat.set(1, 1);
+  pebbleMap.offset.set(0.15, 0.2);
+  pebbleMap.needsUpdate = true;
+  const pebbleMat = new THREE.MeshStandardMaterial({ map: pebbleMap, color: 0xc4bbb2, roughness: 0.94 });
+  const pebbleDarkMap = pebbleMap.clone();
+  pebbleDarkMap.offset.set(0.62, 0.48);
+  pebbleDarkMap.needsUpdate = true;
+  const pebbleDark = new THREE.MeshStandardMaterial({ map: pebbleDarkMap, color: 0x8d847a, roughness: 1 });
   const cream = shellTexture('#f4e2cf', '#e7c3a2', '#f7efe4', 'rgba(176, 122, 78, 0.55)');
   const rose = shellTexture('#f0d0c4', '#e29a86', '#f6e4da', 'rgba(150, 78, 62, 0.5)');
   const shellMat = new THREE.MeshStandardMaterial({ map: cream, roughness: 0.42, metalness: 0.06 });
   const shellPink = new THREE.MeshStandardMaterial({ map: rose, roughness: 0.38, metalness: 0.08 });
   const starMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82 });
-  const starRed = new THREE.MeshStandardMaterial({ vertexColors: true, color: 0xffc2ad, roughness: 0.8 });
+  const starRed = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
   const shellGeo = shellGeometry();
   const starGeo = starfishGeometry(0.35);
   const starWarm = starfishGeometry(0.85);
@@ -361,6 +370,76 @@ function createFinds(scene, targets, rockMap) {
   }
 }
 
+function sharkBodyGeometry() {
+  const rings = 24;
+  const segs = 16;
+  const positions = [];
+  const indices = [];
+  const profile = (u) => {
+    const hump = Math.exp(-((u - 0.4) ** 2) / 0.055);
+    const pinch = u > 0.88 ? (1 - u) / 0.12 : 1;
+    return {
+      x: -1.05 + u * 2.2,
+      y: (0.02 + 0.2 * hump) * pinch,
+      z: (0.016 + 0.15 * hump) * pinch,
+    };
+  };
+  for (let i = 0; i <= rings; i += 1) {
+    const p = profile(i / rings);
+    for (let j = 0; j <= segs; j += 1) {
+      const a = (j / segs) * Math.PI * 2;
+      positions.push(p.x, Math.cos(a) * p.y, Math.sin(a) * p.z);
+    }
+  }
+  const row = segs + 1;
+  for (let i = 0; i < rings; i += 1) {
+    for (let j = 0; j < segs; j += 1) {
+      const a = i * row + j;
+      indices.push(a, a + row, a + 1, a + 1, a + row, a + row + 1);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function finGeometry(points) {
+  const shape = new THREE.Shape();
+  points.forEach(([x, y], index) => {
+    if (index === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  });
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+}
+
+const SEA_ROCKS = [
+  { x: -24, z: -9, r: 3.1 },
+  { x: -36, z: 4, r: 3.6 },
+  { x: -18, z: 14, r: 2.6 },
+  { x: -44, z: -16, r: 3.3 },
+];
+
+function clearOfRocks(x, z, reach) {
+  let px = x;
+  let pz = z;
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const rock of SEA_ROCKS) {
+      const dx = px - rock.x;
+      const dz = pz - rock.z;
+      const dist = Math.hypot(dx, dz) || 0.001;
+      const limit = rock.r + reach;
+      if (dist < limit) {
+        px = rock.x + (dx / dist) * limit;
+        pz = rock.z + (dz / dist) * limit;
+      }
+    }
+  }
+  return [THREE.MathUtils.clamp(px, -50, -9), THREE.MathUtils.clamp(pz, -22, 18)];
+}
+
 function createSharks(scene) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
@@ -368,11 +447,6 @@ function createSharks(scene) {
     color: 0x6a767e,
     roughness: 0.48,
     metalness: 0.05,
-    clippingPlanes: [aboveWater],
-  });
-  const bellyMat = new THREE.MeshStandardMaterial({
-    color: 0xd7dbdf,
-    roughness: 0.62,
     clippingPlanes: [aboveWater],
   });
   const darkMat = new THREE.MeshStandardMaterial({
@@ -385,53 +459,55 @@ function createSharks(scene) {
     side: THREE.DoubleSide,
     clippingPlanes: [belowWater],
   });
+  const finMat = backMat.clone();
+  finMat.side = THREE.DoubleSide;
+  const bodyGeo = sharkBodyGeometry();
+  const dorsalGeo = finGeometry([
+    [0.32, 0.2],
+    [-0.18, 0.18],
+    [-0.02, 0.68],
+  ]);
+  const caudalGeo = finGeometry([
+    [0.04, 0.02],
+    [-0.58, 0.24],
+    [-0.2, 0.0],
+    [-0.62, -0.3],
+    [-0.02, -0.05],
+  ]);
+  const pecGeo = finGeometry([
+    [0.02, 0.02],
+    [0.48, -0.04],
+    [0.16, -0.22],
+  ]);
   const makeShark = () => {
     const shark = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 18, 12), backMat);
-    body.scale.set(3.5, 0.7, 0.95);
+    const body = new THREE.Mesh(bodyGeo, backMat);
     body.castShadow = true;
     shark.add(body);
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), bellyMat);
-    belly.scale.set(2.7, 0.38, 0.7);
-    belly.position.y = -0.08;
-    shark.add(belly);
-    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), backMat);
-    snout.scale.set(1.8, 0.55, 0.7);
-    snout.position.set(0.95, 0.02, 0);
-    shark.add(snout);
+    const dorsal = new THREE.Mesh(dorsalGeo, finMat);
+    dorsal.castShadow = true;
+    shark.add(dorsal);
     const tail = new THREE.Group();
     tail.name = 'tail';
-    const peduncle = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), backMat);
-    peduncle.scale.set(2.4, 0.7, 0.55);
-    peduncle.position.x = -0.95;
-    tail.add(peduncle);
-    const upper = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.28, 6), backMat);
-    upper.position.set(-1.22, 0.02, 0);
-    upper.rotation.z = 0.55;
-    tail.add(upper);
-    const lower = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.26, 6), backMat);
-    lower.position.set(-1.18, -0.1, 0);
-    lower.rotation.z = -0.7;
-    tail.add(lower);
+    tail.position.set(-1.05, 0, 0);
+    const caudal = new THREE.Mesh(caudalGeo, finMat);
+    caudal.castShadow = true;
+    tail.add(caudal);
     shark.add(tail);
-    const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.16, 5), backMat);
-    dorsal.position.set(-0.06, 0.16, 0);
-    shark.add(dorsal);
-    const pecGeo = new THREE.ConeGeometry(0.05, 0.36, 5);
-    const pec = new THREE.Mesh(pecGeo, backMat);
-    pec.position.set(0.28, -0.06, 0.2);
-    pec.rotation.set(0.4, 0.2, 1.15);
+    const pec = new THREE.Mesh(pecGeo, finMat);
+    pec.position.set(0.22, -0.04, 0.12);
+    pec.rotation.y = 1.15;
     shark.add(pec);
-    const pecL = new THREE.Mesh(pecGeo, backMat);
-    pecL.position.set(0.28, -0.06, -0.2);
-    pecL.rotation.set(-0.4, -0.2, 1.15);
+    const pecL = new THREE.Mesh(pecGeo, finMat);
+    pecL.position.set(0.22, -0.04, -0.12);
+    pecL.rotation.y = -1.15;
     shark.add(pecL);
     const eyeGeo = new THREE.SphereGeometry(0.028, 8, 6);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(0.78, 0.07, 0.16);
+    eye.position.set(0.72, 0.06, 0.1);
     shark.add(eye);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(0.78, 0.07, -0.16);
+    eyeL.position.set(0.72, 0.06, -0.1);
     shark.add(eyeL);
     const shadow = shark.clone(true);
     shadow.traverse((child) => {
@@ -444,11 +520,11 @@ function createSharks(scene) {
     shadow.userData.tail = shadow.getObjectByName('tail');
     return { shark, shadow };
   };
-  const waterline = 0.188;
+  const waterline = 0.16;
   const routes = [
-    { cx: -18, cz: 1.2, rx: 5, rz: 7, speed: 0.28, phase: 0.3, scale: 2.2 },
-    { cx: -24, cz: -3, rx: 4.5, rz: 6, speed: -0.36, phase: 1.6, scale: 1.7 },
-    { cx: -15, cz: 4, rx: 3.5, rz: 5, speed: 0.44, phase: 2.4, scale: 1.45 },
+    { cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.28, phase: 0.3, scale: 2.2 },
+    { cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.36, phase: 1.6, scale: 1.7 },
+    { cx: -22, cz: 6.5, rx: 3.2, rz: 3.6, speed: 0.44, phase: 2.4, scale: 1.45 },
   ];
   const sharks = routes.map((route) => {
     const pair = makeShark();
@@ -465,8 +541,9 @@ function createSharks(scene) {
       sharks.forEach((pair, index) => {
         const route = routes[index];
         const angle = time * route.speed + route.phase;
-        const x = route.cx + Math.cos(angle) * route.rx;
-        const z = route.cz + Math.sin(angle) * route.rz;
+        const rawX = route.cx + Math.cos(angle) * route.rx;
+        const rawZ = route.cz + Math.sin(angle) * route.rz;
+        const [x, z] = clearOfRocks(rawX, rawZ, route.scale * 1.2);
         const y = WATER_Y - route.scale * waterline + Math.sin(time * 1.1 + route.phase) * 0.012;
         pair.shark.position.set(x, y, z);
         const vx = -Math.sin(angle) * route.rx * Math.sign(route.speed);
@@ -474,7 +551,7 @@ function createSharks(scene) {
         const yaw = Math.atan2(-vz, vx);
         const roll = Math.sin(time * 0.8 + route.phase) * 0.04;
         pair.shark.rotation.set(0, yaw, roll);
-        pair.shark.userData.tail.rotation.y = Math.sin(time * 4.5 + route.phase) * 0.28;
+        pair.shark.userData.tail.rotation.y = Math.sin(time * 4.2 + route.phase) * 0.38;
         pair.shadow.position.copy(pair.shark.position);
         pair.shadow.rotation.copy(pair.shark.rotation);
         pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;

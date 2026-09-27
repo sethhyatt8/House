@@ -1388,6 +1388,7 @@ function onPointerMove(event) {
     if (aim) {
       scene.attach(held);
       held.position.copy(aim);
+      presentHeld(held);
       notePropMotion();
     }
     return;
@@ -1429,6 +1430,7 @@ function onPointerDown(event) {
     const aim = propCarryPoint();
     if (aim && held) {
       held.position.copy(aim);
+      presentHeld(held);
       notePropMotion();
     }
   } else if (!held && owner?.userData.type === 'brick') {
@@ -1562,6 +1564,7 @@ function pollRotate(controller) {
 function updateHeldXr() {
   if (!held || !heldFrom) return;
   if (held.userData.type === 'prop') {
+    presentHeld(held);
     notePropMotion();
     return;
   }
@@ -1570,6 +1573,22 @@ function updateHeldXr() {
 
 const carryPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.05);
 const propSamples = [];
+const faceUp = new THREE.Vector3(0, 1, 0);
+const towardEye = new THREE.Vector3();
+const presentQuat = new THREE.Quaternion();
+
+function presentHeld(prop) {
+  if (!prop) return;
+  if (heldFrom) {
+    presentQuat.setFromUnitVectors(faceUp, towardEye.set(0, 0.35, 1).normalize());
+  } else {
+    towardEye.subVectors(camera.position, prop.position);
+    if (towardEye.lengthSq() < 1e-6) return;
+    towardEye.normalize();
+    presentQuat.setFromUnitVectors(faceUp, towardEye);
+  }
+  prop.quaternion.copy(presentQuat);
+}
 
 function propCarryPoint() {
   const point = new THREE.Vector3();
@@ -1591,8 +1610,10 @@ function grabProp(prop, holder) {
   if (holder) {
     holder.attach(prop);
     prop.position.set(0, -0.05, -0.24);
+    presentHeld(prop);
   } else {
     scene.attach(prop);
+    presentHeld(prop);
   }
   setStatus(`Holding a ${prop.userData.label}. Let go to throw it.`);
 }
