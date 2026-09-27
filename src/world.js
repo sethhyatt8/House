@@ -28,6 +28,176 @@ function canvasTexture(width, height, draw) {
   return { canvas, ctx, texture };
 }
 
+function rockTexture() {
+  return canvasTexture(512, 512, (ctx, w, h) => {
+    ctx.fillStyle = '#6a635c';
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1800; i += 1) {
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      const span = 3 + Math.random() * 22;
+      const shade = 62 + Math.random() * 58;
+      ctx.fillStyle = `rgba(${shade}, ${shade - 8}, ${shade - 16}, 0.42)`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, span, span * (0.35 + Math.random() * 0.7), Math.random() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(36, 32, 28, 0.55)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 14; i += 1) {
+      ctx.beginPath();
+      let x = Math.random() * w;
+      let y = Math.random() * h;
+      ctx.moveTo(x, y);
+      for (let step = 0; step < 7; step += 1) {
+        x += (Math.random() - 0.5) * 48;
+        y += (Math.random() - 0.5) * 48;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }).texture;
+}
+
+function createPuddles(scene) {
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    fog: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uTime: { value: 0 },
+        uDeep: { value: new THREE.Color(0x07141a) },
+        uShallow: { value: new THREE.Color(0x1a4e58) },
+      },
+    ]),
+    vertexShader: `
+      #include <common>
+      #include <fog_pars_vertex>
+      uniform float uTime;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        p.z += sin(p.x * 9.0 + uTime * 1.3) * 0.012 + sin(p.y * 8.0 - uTime) * 0.008;
+        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }
+    `,
+    fragmentShader: `
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform vec3 uDeep;
+      uniform vec3 uShallow;
+      varying vec2 vUv;
+      void main() {
+        float rim = distance(vUv, vec2(0.5));
+        float alpha = smoothstep(0.5, 0.28, rim);
+        vec3 color = mix(uDeep, uShallow, smoothstep(0.35, 0.05, rim));
+        gl_FragColor = vec4(color, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }
+    `,
+  });
+  [[0.45, 0.2, 0.58, 0.36], [1.55, -1.05, 0.34, 0.46], [-0.25, 1.2, 0.26, 0.2], [1.85, 0.8, 0.2, 0.15]].forEach(([x, z, rx, rz]) => {
+    const puddle = new THREE.Mesh(new THREE.CircleGeometry(1, 24), material);
+    puddle.rotation.x = -Math.PI / 2;
+    puddle.scale.set(rx, rz, 1);
+    puddle.position.set(x, 0.018, z);
+    scene.add(puddle);
+  });
+  return {
+    update(dt) {
+      material.uniforms.uTime.value += dt;
+    },
+  };
+}
+
+function shellGeometry() {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0.01);
+  shape.absarc(0, 0, 0.075, 0.25, Math.PI - 0.25, false);
+  shape.lineTo(0, 0.01);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.016,
+    bevelEnabled: true,
+    bevelThickness: 0.006,
+    bevelSize: 0.005,
+    bevelSegments: 1,
+  });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, 0.012, 0);
+  return geometry;
+}
+
+function starfishGeometry() {
+  const shape = new THREE.Shape();
+  const arms = 5;
+  for (let i = 0; i < arms * 2; i += 1) {
+    const radius = i % 2 === 0 ? 0.09 : 0.032;
+    const angle = (i / (arms * 2)) * Math.PI * 2 - Math.PI / 2;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.016,
+    bevelEnabled: true,
+    bevelThickness: 0.004,
+    bevelSize: 0.004,
+    bevelSegments: 1,
+  });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, 0.01, 0);
+  return geometry;
+}
+
+function createFinds(scene, targets) {
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x7d756c, roughness: 1 });
+  const rockDark = new THREE.MeshStandardMaterial({ color: 0x5e584f, roughness: 1 });
+  const shellMat = new THREE.MeshStandardMaterial({ color: 0xf0d2c0, roughness: 0.55 });
+  const shellPink = new THREE.MeshStandardMaterial({ color: 0xe7b7a8, roughness: 0.5 });
+  const starMat = new THREE.MeshStandardMaterial({ color: 0xd4652e, roughness: 0.72 });
+  const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+  const shellGeo = shellGeometry();
+  const starGeo = starfishGeometry();
+  const pieces = [
+    ['rock', rockGeo, rockMat, 0.55, 0.45, 0.08, 0.4],
+    ['rock', rockGeo, rockDark, -0.85, -0.25, 0.06, 1.1],
+    ['rock', rockGeo, rockMat, 1.75, 0.55, 0.1, 0.3],
+    ['rock', rockGeo, rockDark, 0.15, -1.25, 0.07, 2.1],
+    ['rock', rockGeo, rockMat, -0.35, 0.55, 0.055, 0.8],
+    ['rock', rockGeo, rockDark, 1.05, 0.95, 0.075, 1.6],
+    ['shell', shellGeo, shellMat, 0.9, -0.85, 1, 0.4],
+    ['shell', shellGeo, shellPink, -1.05, 0.85, 1, 1.7],
+    ['shell', shellGeo, shellMat, 1.95, -0.15, 1, 2.4],
+    ['shell', shellGeo, shellPink, 0.35, 1.85, 1, 0.9],
+    ['starfish', starGeo, starMat, -0.55, -1.15, 1, 0.2],
+    ['starfish', starGeo, starMat, 1.4, 1.35, 1, 1.1],
+    ['starfish', starGeo, starMat, 0.05, -0.05, 1, 2.2],
+    ['starfish', starGeo, starMat, 2.05, 1.05, 1, 0.6],
+  ];
+  for (const [label, geometry, material, x, z, size, spin] of pieces) {
+    const mesh = new THREE.Mesh(geometry, material);
+    const floorY = label === 'rock' ? size * 0.55 : 0;
+    mesh.scale.setScalar(size);
+    mesh.position.set(x, floorY, z);
+    mesh.rotation.y = spin;
+    if (label === 'rock') mesh.rotation.x = spin * 0.4;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData = { type: 'prop', label, role: 'loose', floorY };
+    scene.add(mesh);
+    targets.push(mesh);
+  }
+}
+
 function plankTexture() {
   return canvasTexture(512, 512, (ctx, w, h) => {
     ctx.fillStyle = '#8d6a45';
@@ -260,7 +430,6 @@ function createRoomCard(scene) {
     new THREE.MeshBasicMaterial({ map: screen.texture }),
   );
   mesh.position.set(-0.82, 1.18, 0.18);
-  scene.add(mesh);
 
   function setRoomCode(code, caption) {
     const { ctx, texture, canvas } = screen;
@@ -295,33 +464,47 @@ export function createWorld() {
   const roomZ = 2.7;
   const roomSpan = roomRight - CLIFF_X;
   const roomMidX = (roomRight + CLIFF_X) / 2;
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe4ddd2, roughness: 1 });
-  const addWall = (w, h, d, x, y, z) => {
+  const rockMap = rockTexture();
+  rockMap.wrapS = THREE.RepeatWrapping;
+  rockMap.wrapT = THREE.RepeatWrapping;
+  rockMap.repeat.set(2.4, 2.2);
+  const wallMat = new THREE.MeshStandardMaterial({ map: rockMap, roughness: 1 });
+  const floorMap = rockMap.clone();
+  floorMap.repeat.set(3.1, 2.6);
+  const addRock = (w, h, d, x, y, z) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
     mesh.position.set(x, y, z);
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
   };
-  addWall(roomSpan, 4.4, 0.12, roomMidX, 2.2, -roomZ - 0.06);
-  addWall(roomSpan, 4.4, 0.12, roomMidX, 2.2, roomZ + 0.06);
-  addWall(0.12, 4.4, roomZ * 2, roomRight + 0.06, 2.2, 0);
-  addWall(roomSpan, 0.1, roomZ * 2, roomMidX, 4.45, 0);
+  addRock(roomSpan + 0.8, 2.7, 0.7, roomMidX, 1.35, -roomZ - 0.2);
+  addRock(roomSpan + 0.5, 1.7, 0.55, roomMidX, 0.85, roomZ + 0.16);
+  addRock(0.7, 3.1, roomZ * 2 + 0.6, roomRight + 0.28, 1.55, 0);
+  addRock(1.1, 1.15, 0.8, 1.15, 0.58, -2.15);
+  addRock(0.7, 0.85, 1.3, 2.15, 0.42, 1.55);
 
-  const floorMap = plankTexture();
-  floorMap.wrapS = THREE.RepeatWrapping;
-  floorMap.wrapT = THREE.RepeatWrapping;
-  floorMap.repeat.set(3.2, 4);
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomSpan, roomZ * 2),
-    new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.92 }),
+    new THREE.MeshStandardMaterial({ map: floorMap, color: 0xc8bfb4, roughness: 1 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(roomMidX, 0.001, 0);
   floor.receiveShadow = true;
   scene.add(floor);
+  const boulderMat = new THREE.MeshStandardMaterial({ map: rockMap, color: 0x9a9186, roughness: 1 });
+  [[1.35, -0.35, 0.34, 0.7], [0.15, 1.55, 0.22, 1.4], [2.05, -1.7, 0.28, 0.4]].forEach(([x, z, radius, spin]) => {
+    const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 0), boulderMat);
+    boulder.position.set(x, radius * 0.45, z);
+    boulder.rotation.set(spin, spin * 0.6, spin * 0.2);
+    boulder.castShadow = true;
+    boulder.receiveShadow = true;
+    scene.add(boulder);
+  });
+  const puddles = createPuddles(scene);
   const cliff = createCliff(scene);
 
-  const hemi = new THREE.HemisphereLight(0xfff7ee, 0x6d5c4c, 0.9);
+  const hemi = new THREE.HemisphereLight(0xfff7ee, 0x4a453f, 0.85);
   scene.add(hemi);
   const key = new THREE.DirectionalLight(0xfffaf3, 1.45);
   key.position.set(1.8, 3.4, 1.4);
@@ -345,7 +528,6 @@ export function createWorld() {
   const plateD = GRID_Z * STUD;
   const buildRoot = new THREE.Group();
   buildRoot.position.set(0, TABLE_TOP, -0.55);
-  scene.add(buildRoot);
   const gridGroup = new THREE.Group();
   gridGroup.position.set(-plateW / 2, 0, -plateD / 2);
   buildRoot.add(gridGroup);
@@ -364,7 +546,6 @@ export function createWorld() {
   const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.78 });
   const woodDark = new THREE.MeshStandardMaterial({ color: 0x5c3b22, roughness: 0.8 });
   const table = new THREE.Group();
-  scene.add(table);
   const topW = plateW + 0.16;
   const topD = plateD + 0.16;
   const top = new THREE.Mesh(new THREE.BoxGeometry(topW, 0.045, topD), wood);
@@ -397,11 +578,7 @@ export function createWorld() {
   layoutTable(1);
 
   const machine = createMachine(targets);
-  scene.add(machine.group);
   const challenge = createChallengeStand(targets);
-  scene.add(challenge.group);
-  scene.add(challenge.sign);
-  scene.add(challenge.newButton);
   challenge.sign.position.set(-0.34, 0.9, WALL_Z + 0.01);
   challenge.sign.rotation.set(0, 0, 0);
   challenge.sign.scale.setScalar(1.22);
@@ -412,8 +589,12 @@ export function createWorld() {
   challenge.newButton.scale.setScalar(1.22);
   machine.pressables.push(challenge.newButton);
   const bin = createBin();
-  scene.add(bin);
   const roomCard = createRoomCard(scene);
+  for (let i = targets.length - 1; i >= 0; i -= 1) {
+    const kind = targets[i].userData?.type;
+    if (kind === 'ui' || kind === 'plate') targets.splice(i, 1);
+  }
+  createFinds(scene, targets);
 
   return {
     scene,
@@ -428,7 +609,10 @@ export function createWorld() {
     tableTop: TABLE_TOP,
     layoutTable,
     setRoomCode: roomCard.setRoomCode,
-    update: cliff.update,
+    update(dt) {
+      cliff.update(dt);
+      puddles.update(dt);
+    },
     splash: cliff.splash,
   };
 }

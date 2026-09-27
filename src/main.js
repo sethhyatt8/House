@@ -106,7 +106,7 @@ world.setRoomCode(roomCode || '----', watching ? 'WATCH' : 'ROOM');
 roomCodeEl.textContent = roomCode || '----';
 if (watching) {
   roomLabelEl.textContent = 'Watching';
-  scalePanel.style.display = 'none';
+  if (scalePanel) scalePanel.style.display = 'none';
   watchNote.textContent = roomCode.length === 4 ? 'Connecting...' : 'Enter the 4-letter room code.';
   setStatus(roomCode.length === 4 ? `Waiting for headset room ${roomCode}...` : 'Enter the 4-letter room code.');
 } else {
@@ -128,12 +128,12 @@ watchForm.addEventListener('submit', (event) => {
 
 renderer.xr.addEventListener('sessionstart', () => {
   hudEl.style.display = 'none';
-  scalePanel.style.display = 'none';
+  if (scalePanel) scalePanel.style.display = 'none';
   controls.enabled = false;
 });
 renderer.xr.addEventListener('sessionend', () => {
   hudEl.style.display = '';
-  if (!watching) scalePanel.style.display = '';
+  if (!watching && scalePanel) scalePanel.style.display = '';
   controls.enabled = true;
 });
 
@@ -883,6 +883,10 @@ function rotateAssembly() {
 
 function rotateHeld() {
   if (!held) return;
+  if (held.userData.type === 'prop') {
+    held.rotation.y += Math.PI / 2;
+    return;
+  }
   if (assembly) rotateAssembly();
   else if (heldFrom) {
     held.rotation.y += Math.PI / 2;
@@ -1256,19 +1260,19 @@ function setPegScale(next) {
   const side = (GRID_X * STUD * pegScale + 0.16) / 2;
   world.bin.position.set(-(side + 0.34), 0, -0.42);
   if (assembly) assembly.carry.scale.setScalar(inBuild(assembly.carry) ? 1 : pegScale);
-  pegReadout.textContent = `${(STUD * pegScale * 100).toFixed(1)} cm`;
-  if (document.activeElement !== pegInput) pegInput.value = String(pegScale);
+  if (pegReadout) pegReadout.textContent = `${(STUD * pegScale * 100).toFixed(1)} cm`;
+  if (pegInput && document.activeElement !== pegInput) pegInput.value = String(pegScale);
 }
 
 function setPegFromHit(hit) {
   const local = hit.owner.worldToLocal(hit.point.clone());
   const t = THREE.MathUtils.clamp((local.x + 0.42) / 0.84, 0, 1);
   const next = PEG_MIN + t * (PEG_MAX - PEG_MIN);
-  pegInput.value = String(next);
+  if (pegInput) pegInput.value = String(next);
   setPegScale(next);
 }
 
-pegInput.addEventListener('input', () => {
+pegInput?.addEventListener('input', () => {
   setPegScale(Number(pegInput.value));
 });
 setPegScale(1);
@@ -1301,6 +1305,16 @@ function onPointerMove(event) {
   }
   const hit = hitFromCamera();
   hover(hit?.owner ?? null);
+  if (held?.userData.type === 'prop' && !heldFrom) {
+    raycaster.setFromCamera(pointer, camera);
+    const aim = propCarryPoint();
+    if (aim) {
+      scene.attach(held);
+      held.position.copy(aim);
+      notePropMotion();
+    }
+    return;
+  }
   if (held && !heldFrom) {
     raycaster.setFromCamera(pointer, camera);
     const aim = placementPoint();
@@ -1327,14 +1341,23 @@ function onPointerDown(event) {
     owner,
     grabbedNow: false,
   };
-  if (!held && owner?.userData.type === 'brick') {
+  if (!held && owner?.userData.type === 'prop') {
+    grabProp(owner, null);
+    press.grabbedNow = true;
+    raycaster.setFromCamera(pointer, camera);
+    const aim = propCarryPoint();
+    if (aim && held) {
+      held.position.copy(aim);
+      notePropMotion();
+    }
+  } else if (!held && owner?.userData.type === 'brick') {
     grab(owner, null, event.shiftKey);
     press.grabbedNow = true;
     raycaster.setFromCamera(pointer, camera);
     const aim = placementPoint();
     if (aim) updateSnapFromPoint(aim);
   }
-  const interactive = owner && (owner.userData.type === 'ui' || owner.userData.type === 'brick' || held);
+  const interactive = owner && (owner.userData.type === 'ui' || owner.userData.type === 'brick' || owner.userData.type === 'prop' || held);
   if (interactive || held) controls.enabled = false;
 }
 
@@ -1361,6 +1384,10 @@ function onPointerUp(event) {
   }
   if (!held || heldFrom) {
     if (owner?.userData.type === 'ui' && clicked) activateUi(owner);
+    return;
+  }
+  if (held.userData.type === 'prop') {
+    releaseProp();
     return;
   }
   raycaster.setFromCamera(pointer, camera);
@@ -1398,6 +1425,10 @@ function onXrSqueeze(controller) {
   tmpDir.set(0, 0, -1).applyQuaternion(controller.quaternion);
   controller.getWorldPosition(handPoint);
   const hit = hitFromController(controller);
+  if (hit?.owner?.userData.type === 'prop') {
+    grabProp(hit.owner, controller);
+    return;
+  }
   const target = (hit?.owner?.userData.type === 'brick' ? hit.owner : null) || closestBrickToRay(handPoint, tmpDir);
   if (target) grab(target, controller, whole);
 }
@@ -1413,6 +1444,10 @@ function onXrRelease(controller) {
     return;
   }
   if (!held || heldFrom !== controller) return;
+  if (held.userData.type === 'prop') {
+    releaseProp();
+    return;
+  }
   updateSnapFromPoint(piecePoint());
   releaseHeld();
 }
@@ -1431,7 +1466,130 @@ function pollRotate(controller) {
 
 function updateHeldXr() {
   if (!held || !heldFrom) return;
+  if (held.userData.type === 'prop') {
+    notePropMotion();
+    return;
+  }
   updateSnapFromPoint(piecePoint());
+}
+
+const carryPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.05);
+const propSamples = [];
+
+function propCarryPoint() {
+  const point = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(carryPlane, point)) return null;
+  return point;
+}
+
+function grabProp(prop, holder) {
+  if (watching) return;
+  held = prop;
+  heldFrom = holder;
+  heldHome = null;
+  assembly = null;
+  prop.userData.role = 'held';
+  const index = targets.indexOf(prop);
+  if (index >= 0) targets.splice(index, 1);
+  setBrickRaycast(prop, false);
+  propSamples.length = 0;
+  if (holder) {
+    holder.attach(prop);
+    prop.position.set(0, -0.05, -0.24);
+  } else {
+    scene.attach(prop);
+  }
+  setStatus(`Holding a ${prop.userData.label}. Let go to throw it.`);
+}
+
+function notePropMotion() {
+  if (!held || held.userData.type !== 'prop') return;
+  const point = new THREE.Vector3();
+  held.getWorldPosition(point);
+  propSamples.push({ t: performance.now() / 1000, p: point.clone() });
+  const cutoff = propSamples[propSamples.length - 1].t - 0.18;
+  while (propSamples.length > 1 && propSamples[0].t < cutoff) propSamples.shift();
+}
+
+function releaseProp() {
+  const prop = held;
+  const holder = heldFrom;
+  held = null;
+  heldFrom = null;
+  heldHome = null;
+  assembly = null;
+  scene.attach(prop);
+  let velocity = new THREE.Vector3();
+  if (propSamples.length >= 2) {
+    const first = propSamples[0];
+    const last = propSamples[propSamples.length - 1];
+    const span = Math.max(0.016, last.t - first.t);
+    velocity.subVectors(last.p, first.p).divideScalar(span);
+  }
+  propSamples.length = 0;
+  if (holder) velocity.y = Math.max(velocity.y, 0.8);
+  const speed = velocity.length();
+  if (speed > 7) velocity.multiplyScalar(7 / speed);
+  throwProp(prop, velocity);
+  setStatus(`Threw the ${prop.userData.label}.`);
+}
+
+function throwProp(prop, velocity) {
+  let vx = velocity.x;
+  let vy = velocity.y;
+  let vz = velocity.z;
+  const floorY = prop.userData.floorY ?? 0.03;
+  const job = {
+    t: 0,
+    d: 6,
+    last: 0,
+    update() {
+      const dt = Math.min(0.05, Math.max(0, job.t - job.last));
+      job.last = job.t;
+      if (dt === 0) return;
+      vy -= 9.2 * dt;
+      prop.position.x += vx * dt;
+      prop.position.y += vy * dt;
+      prop.position.z += vz * dt;
+      prop.rotation.x += dt * 2.4;
+      prop.rotation.z += dt * 1.7;
+      const overCliff = prop.position.x < CLIFF_X;
+      if (!overCliff) {
+        if (prop.position.x > 2.35) {
+          prop.position.x = 2.35;
+          vx = -Math.abs(vx) * 0.45;
+        }
+        if (prop.position.z < -2.25) {
+          prop.position.z = -2.25;
+          vz = Math.abs(vz) * 0.45;
+        }
+        if (prop.position.z > 2.25) {
+          prop.position.z = 2.25;
+          vz = -Math.abs(vz) * 0.45;
+        }
+      }
+      if (overCliff && prop.position.y <= WATER_Y) {
+        world.splash(prop.position.x, prop.position.z);
+        prop.parent?.remove(prop);
+        job.t = job.d;
+        return;
+      }
+      if (!overCliff && prop.position.y <= floorY && vy <= 0) {
+        prop.position.y = floorY;
+        if (vy < -1.3) {
+          vy = -vy * 0.32;
+          vx *= 0.55;
+          vz *= 0.55;
+          return;
+        }
+        prop.userData.role = 'loose';
+        setBrickRaycast(prop, true);
+        if (!targets.includes(prop)) targets.push(prop);
+        job.t = job.d;
+      }
+    },
+  };
+  jobs.push(job);
 }
 
 function round3(value) {
