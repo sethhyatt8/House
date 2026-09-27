@@ -118,6 +118,7 @@ addTeleportSpot({
 function teleportTo(index) {
   const spot = teleportSpots[index];
   if (!spot) return;
+  leaveClimb();
   teleportIndex = index;
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
@@ -140,6 +141,80 @@ function teleportTo(index) {
 
 function teleportNext() {
   teleportTo(teleportIndex === 1 ? 0 : 1);
+}
+
+let climb = null;
+const roomPolar = Math.PI * 0.62;
+
+function beginClimb(ladder, hitY) {
+  const rungs = ladder.userData.rungs;
+  let rung = 0;
+  let best = Infinity;
+  rungs.forEach((y, index) => {
+    const dist = Math.abs(y - hitY);
+    if (dist < best) {
+      best = dist;
+      rung = index;
+    }
+  });
+  climb = { ladder, rung, onRoof: false };
+  applyClimbView();
+  setStatus('On the ladder. W climbs, S goes down.');
+}
+
+function moveClimb(dir) {
+  if (!climb) return;
+  const rungs = climb.ladder.userData.rungs;
+  if (climb.onRoof) {
+    if (dir > 0) return;
+    climb.onRoof = false;
+    climb.rung = rungs.length - 1;
+    applyClimbView();
+    setStatus('On the ladder. W climbs, S goes down.');
+    return;
+  }
+  const next = climb.rung + dir;
+  if (next < 0) {
+    leaveClimb();
+    setStatus('Middle of the room. Press A for the other spot.');
+    return;
+  }
+  if (next >= rungs.length) {
+    climb.onRoof = true;
+    applyClimbView();
+    return;
+  }
+  climb.rung = next;
+  applyClimbView();
+}
+
+function applyClimbView() {
+  if (!climb) return;
+  const base = climb.ladder.position;
+  if (climb.onRoof) {
+    controls.maxPolarAngle = Math.PI * 0.92;
+    controls.minPolarAngle = 0.2;
+    controls.maxDistance = 5.5;
+    controls.enabled = true;
+    camera.position.set(base.x + 0.85, 3.72, base.z + 0.15);
+    controls.target.set(base.x + 1.8, 3.35, base.z - 0.7);
+    controls.update();
+    setStatus('On the roof. Press S to climb down.');
+    return;
+  }
+  controls.enabled = false;
+  const y = climb.ladder.userData.rungs[climb.rung];
+  camera.position.set(base.x - 0.52, y + 0.2, base.z);
+  camera.lookAt(base.x + 0.08, y + 1.15, base.z);
+}
+
+function leaveClimb() {
+  if (!climb) return;
+  climb = null;
+  controls.maxPolarAngle = roomPolar;
+  controls.minPolarAngle = 0;
+  controls.maxDistance = 4.2;
+  controls.enabled = true;
 }
 
 const raycaster = new THREE.Raycaster();
@@ -1417,6 +1492,10 @@ function onPointerDown(event) {
     teleportTo(owner.userData.spot);
     return;
   }
+  if (owner?.userData.type === 'ladder') {
+    beginClimb(owner, hit.point.y);
+    return;
+  }
   press = {
     x: event.clientX,
     y: event.clientY,
@@ -1460,7 +1539,7 @@ function onPointerUp(event) {
   const clicked = moved < 8;
   const { owner } = press;
   press = null;
-  controls.enabled = true;
+  controls.enabled = !(climb && !climb.onRoof);
   if (owner?.userData.type === 'ui' && clicked && !held) {
     activateUi(owner);
     return;
@@ -1481,7 +1560,16 @@ function onPointerUp(event) {
 
 function onKeyDown(event) {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-  if (watching || event.repeat) return;
+  if (watching) return;
+  if (climb && (event.key === 'w' || event.key === 'W' || event.key === 'ArrowUp')) {
+    moveClimb(1);
+    return;
+  }
+  if (climb && (event.key === 's' || event.key === 'S' || event.key === 'ArrowDown')) {
+    moveClimb(-1);
+    return;
+  }
+  if (event.repeat) return;
   if (event.key === 'a' || event.key === 'A') teleportNext();
   if (event.key === 'r' || event.key === 'R') rotateHeld();
   if (event.key === 'Enter') orderSelection();
@@ -1970,6 +2058,7 @@ function frame(time, frame) {
   world.update(dt);
   for (const controller of controllers) updateLaser(controller);
   if (!renderer.xr.isPresenting) controls.update();
+  if (climb && !climb.onRoof) applyClimbView();
   else {
     for (const controller of controllers) {
       pollTeleport(controller);

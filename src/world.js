@@ -463,22 +463,25 @@ function tubeGeometry(profile, power) {
 }
 
 function swordfishProfile(u) {
-  const hump = Math.exp(-((u - 0.4) ** 2) / 0.055);
-  const pinch = u > 0.88 ? (1 - u) / 0.12 : 1;
-  return {
-    x: -1.05 + u * 2.2,
-    y: (0.02 + 0.2 * hump) * pinch,
-    z: (0.016 + 0.15 * hump) * pinch,
-  };
+  const body = Math.exp(-((u - 0.34) ** 2) / 0.055);
+  const head = Math.exp(-((u - 0.7) ** 2) / 0.014);
+  let y = 0.02 + 0.19 * body + 0.05 * head;
+  let z = 0.016 + 0.14 * body + 0.042 * head;
+  if (u > 0.78) {
+    const point = Math.pow(1 - (u - 0.78) / 0.22, 1.05);
+    y *= point;
+    z *= point;
+  }
+  return { x: -1.08 + u * 2.72, y: Math.max(y, 0.002), z: Math.max(z, 0.0016) };
 }
 
 function greatWhiteProfile(u) {
-  const snout = u > 0.76 ? Math.pow((1 - u) / 0.24, 0.48) : 1;
-  const hump = Math.sin(Math.PI * Math.min(u, 1));
-  const block = 0.55 + 0.45 * Math.pow(Math.max(hump, 0), 0.65);
-  const stock = u < 0.18 ? 0.28 + 0.72 * Math.pow(u / 0.18, 0.8) : 1;
-  const depth = (0.05 + 0.36 * block) * snout * stock;
-  return { x: -1.22 + u * 2.58, y: depth, z: depth * 0.84 };
+  const hump = Math.sin(Math.PI * Math.pow(Math.min(u, 1), 0.9));
+  const body = 0.07 + 0.3 * Math.pow(Math.max(hump, 0), 0.85);
+  const snout = u > 0.68 ? Math.pow((1 - u) / 0.32, 0.62) : 1;
+  const stock = u < 0.16 ? 0.32 + 0.68 * Math.pow(u / 0.16, 0.7) : 1;
+  const depth = Math.max(0.012, body * snout * stock);
+  return { x: -1.22 + u * 2.52, y: depth, z: depth * 0.94 };
 }
 
 function sharkSkinTexture(base = '#3c5566') {
@@ -579,6 +582,19 @@ function createSharks(scene, splash) {
     side: THREE.DoubleSide,
     clippingPlanes: [belowWater],
   });
+  const toothBelow = new THREE.MeshStandardMaterial({
+    color: 0xf4f1ea,
+    roughness: 0.45,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
+    clippingPlanes: [belowWater],
+  });
+  const mouthBelow = new THREE.MeshStandardMaterial({
+    color: 0x2a1214,
+    roughness: 0.92,
+    side: THREE.DoubleSide,
+    clippingPlanes: [belowWater],
+  });
   const finMat = backMat.clone();
   finMat.side = THREE.DoubleSide;
   const whiteSkin = sharkSkinTexture('#5e686e');
@@ -596,7 +612,7 @@ function createSharks(scene, splash) {
   const whiteFin = whiteMat.clone();
   whiteFin.side = THREE.DoubleSide;
   const swordBody = tubeGeometry(swordfishProfile, 2);
-  const whiteBody = tubeGeometry(greatWhiteProfile, 3.1);
+  const whiteBody = tubeGeometry(greatWhiteProfile, 2.2);
   const swordDorsal = finGeometry([
     [0.08, 0.17],
     [0.0, 0.26],
@@ -618,12 +634,12 @@ function createSharks(scene, splash) {
     [0.02, -0.01],
   ], 0.012);
   const whiteDorsal = finGeometry([
-    [0.46, 0.34],
-    [0.32, 0.52],
-    [0.18, 0.62],
-    [0.02, 0.44],
-    [-0.18, 0.32],
-  ], 0.028);
+    [0.38, 0.26],
+    [0.24, 0.44],
+    [0.1, 0.54],
+    [-0.02, 0.38],
+    [-0.16, 0.24],
+  ], 0.026);
   const whiteTail = finGeometry([
     [0.04, 0.05],
     [-0.16, 0.2],
@@ -646,10 +662,11 @@ function createSharks(scene, splash) {
     const fish = build();
     const shadow = fish.clone(true);
     shadow.traverse((child) => {
-      if (child.isMesh) {
-        child.material = shadowMat;
-        child.castShadow = false;
-      }
+      if (!child.isMesh) return;
+      child.castShadow = false;
+      if (child.name === 'tooth') child.material = toothBelow;
+      else if (child.name === 'mouth') child.material = mouthBelow;
+      else child.material = shadowMat;
     });
     fish.userData.tail = fish.getObjectByName('tail');
     shadow.userData.tail = shadow.getObjectByName('tail');
@@ -665,10 +682,6 @@ function createSharks(scene, splash) {
     const dorsal = new THREE.Mesh(swordDorsal, finMat);
     dorsal.castShadow = true;
     fish.add(dorsal);
-    const bill = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.72, 7), finMat);
-    bill.rotation.z = -Math.PI / 2;
-    bill.position.set(1.5, 0.015, 0);
-    fish.add(bill);
     const tail = new THREE.Group();
     tail.name = 'tail';
     tail.position.set(-1.05, 0, 0);
@@ -676,12 +689,42 @@ function createSharks(scene, splash) {
     fish.add(tail);
     const eyeGeo = new THREE.SphereGeometry(0.026, 8, 6);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(0.78, 0.05, 0.08);
+    eye.position.set(0.82, 0.04, 0.062);
     fish.add(eye);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(0.78, 0.05, -0.08);
+    eyeL.position.set(0.82, 0.04, -0.062);
     fish.add(eyeL);
     return fish;
+  };
+  const addSharkMouth = (fish) => {
+    const gum = new THREE.MeshStandardMaterial({
+      color: 0x3a1818,
+      roughness: 0.92,
+      clippingPlanes: [aboveWater],
+    });
+    const ivory = new THREE.MeshStandardMaterial({
+      color: 0xf4f0e6,
+      roughness: 0.38,
+      clippingPlanes: [aboveWater],
+    });
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.22), gum);
+    mouth.name = 'mouth';
+    mouth.position.set(0.98, -0.05, 0);
+    mouth.rotation.z = -0.5;
+    fish.add(mouth);
+    const toothGeo = new THREE.ConeGeometry(0.013, 0.06, 4);
+    for (let i = 0; i < 9; i += 1) {
+      const across = i / 8 - 0.5;
+      const upper = new THREE.Mesh(toothGeo, ivory);
+      upper.name = 'tooth';
+      upper.position.set(1.08 - Math.abs(across) * 0.18, -0.01, across * 0.16);
+      upper.rotation.z = Math.PI;
+      fish.add(upper);
+      const lower = new THREE.Mesh(toothGeo, ivory);
+      lower.name = 'tooth';
+      lower.position.set(1.02 - Math.abs(across) * 0.14, -0.09, across * 0.15);
+      fish.add(lower);
+    }
   };
   const makeWhite = () => {
     const fish = new THREE.Group();
@@ -691,6 +734,7 @@ function createSharks(scene, splash) {
     const dorsal = new THREE.Mesh(whiteDorsal, whiteFin);
     dorsal.castShadow = true;
     fish.add(dorsal);
+    addSharkMouth(fish);
     const tail = new THREE.Group();
     tail.name = 'tail';
     tail.position.set(-1.22, 0.02, 0);
@@ -707,14 +751,14 @@ function createSharks(scene, splash) {
     fish.add(pecL);
     const eyeGeo = new THREE.SphereGeometry(0.04, 8, 6);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(0.72, 0.08, 0.16);
+    eye.position.set(0.7, 0.07, 0.16);
     fish.add(eye);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(0.72, 0.08, -0.16);
+    eyeL.position.set(0.7, 0.07, -0.16);
     fish.add(eyeL);
     return fish;
   };
-  const waterline = { sword: 0.16, white: 0.34 };
+  const waterline = { sword: 0.16, white: 0.3 };
   const routes = [
     { kind: 'sword', cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.42, phase: 0.3, scale: 2.15, dive: 0.7 },
     { kind: 'sword', cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.52, phase: 1.6, scale: 1.7, dive: 0.55 },
@@ -729,7 +773,7 @@ function createSharks(scene, splash) {
     scene.add(pair.shark);
     scene.add(pair.shadow);
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
-    route.finTip = route.kind === 'white' ? 0.62 : 0.36;
+    route.finTip = route.kind === 'white' ? 0.54 : 0.36;
     route.wasAbove = true;
     route.wake = 0;
     return pair;
@@ -755,9 +799,9 @@ function createSharks(scene, splash) {
             const dx = places[i].x - places[j].x;
             const dz = places[i].z - places[j].z;
             const dist = Math.hypot(dx, dz) || 0.001;
-            const limit = routes[i].reach + routes[j].reach;
+            const limit = (routes[i].reach + routes[j].reach) * 0.72;
             if (dist >= limit) continue;
-            const push = (limit - dist) / 2;
+            const push = Math.min((limit - dist) / 2, 2.2 * dt);
             const nx = dx / dist;
             const nz = dz / dist;
             places[i].x += nx * push;
@@ -767,14 +811,35 @@ function createSharks(scene, splash) {
           }
         }
         places.forEach((place, index) => {
-          const [x, z] = clearOfRocks(place.x, place.z, routes[index].reach * 0.65);
-          place.x = x;
-          place.z = z;
+          const [x, z] = clearOfRocks(place.x, place.z, routes[index].reach * 0.45);
+          const dx = x - place.x;
+          const dz = z - place.z;
+          const dist = Math.hypot(dx, dz);
+          const maxNudge = 2.4 * dt;
+          if (dist > maxNudge) {
+            place.x += (dx / dist) * maxNudge;
+            place.z += (dz / dist) * maxNudge;
+          } else {
+            place.x = x;
+            place.z = z;
+          }
         });
       }
       sharks.forEach((pair, index) => {
         const route = routes[index];
         const place = places[index];
+        const maxStep = 4.2 * dt;
+        if (route.px != null) {
+          const dx = place.x - route.px;
+          const dz = place.z - route.pz;
+          const dist = Math.hypot(dx, dz);
+          if (dist > maxStep) {
+            place.x = route.px + (dx / dist) * maxStep;
+            place.z = route.pz + (dz / dist) * maxStep;
+          }
+        }
+        route.px = place.x;
+        route.pz = place.z;
         const wave = Math.sin(time * 0.62 + route.phase);
         const bob = route.dive ? wave * route.dive - route.dive * 0.35 : Math.sin(time * 1.1 + route.phase) * 0.012;
         const y = WATER_Y - route.scale * waterline[route.kind] + bob;
@@ -793,14 +858,14 @@ function createSharks(scene, splash) {
         pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;
         const tipY = y + Math.cos(pitch) * route.scale * route.finTip;
         const above = tipY - WATER_Y;
-        if (route.seen && (above > 0) !== (route.wasAbove > 0)) splash(place.x, place.z);
+        if (route.seen && (above > 0) !== (route.wasAbove > 0)) splash(place.x, place.z, true);
         route.seen = true;
         route.wasAbove = above;
         if (above > 0 && above < route.scale * 0.45) {
           route.wake += dt;
           if (route.wake > 0.42) {
             route.wake = 0;
-            splash(place.x - Math.cos(yaw) * route.reach * 0.35, place.z + Math.sin(yaw) * route.reach * 0.35);
+            splash(place.x - Math.cos(yaw) * route.reach * 0.35, place.z + Math.sin(yaw) * route.reach * 0.35, false);
           }
         }
       });
@@ -896,7 +961,7 @@ function createCliff(scene) {
   const waterFar = -56;
   const waterWidth = waterNear - waterFar;
   const waterDepth = 64;
-  const waterGeo = new THREE.PlaneGeometry(waterWidth, waterDepth, 56, 40);
+  const waterGeo = new THREE.PlaneGeometry(waterWidth, waterDepth, 168, 120);
   waterGeo.rotateX(-Math.PI / 2);
   const waterMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -921,9 +986,10 @@ function createCliff(scene) {
       void main() {
         vUv = uv;
         vec3 p = position;
-        float w = sin(p.x * 0.48 + uTime * 0.62) * 0.04
-                + sin(p.z * 0.41 - uTime * 0.48) * 0.032
-                + sin(p.x * 1.55 + p.z * 1.25 + uTime * 1.25) * 0.014;
+        float w = sin(p.x * 0.72 + uTime * 0.7) * 0.028
+                + sin(p.z * 0.64 - uTime * 0.52) * 0.022
+                + sin(p.x * 2.4 + p.z * 1.8 + uTime * 1.45) * 0.01
+                + sin(p.x * 4.6 - p.z * 3.8 + uTime * 1.9) * 0.0045;
         p.y += w;
         vWave = w;
         vec4 worldPos = modelMatrix * vec4(p, 1.0);
@@ -950,12 +1016,14 @@ function createCliff(scene) {
         float far = smoothstep(0.92, 0.08, vUv.x);
         vec3 depthCol = mix(uShallow, uDeep, far * 0.82 + 0.12);
         float crest = smoothstep(-0.01, 0.045, vWave);
-        float rip = sin(vWorldPos.x * 1.35 + vWorldPos.z * 1.05 + uTime * 1.35);
-        float rip2 = sin(vWorldPos.x * 0.42 - vWorldPos.z * 0.36 + uTime * 0.5);
-        float lines = smoothstep(0.62, 0.98, rip * 0.5 + 0.5);
-        float swell = smoothstep(0.45, 0.9, rip2 * 0.5 + 0.5);
+        float rip = sin(vWorldPos.x * 2.1 + vWorldPos.z * 1.6 + uTime * 1.5);
+        float rip2 = sin(vWorldPos.x * 0.55 - vWorldPos.z * 0.48 + uTime * 0.55);
+        float rip3 = sin(vWorldPos.x * 4.4 + vWorldPos.z * 3.6 - uTime * 2.1);
+        float lines = smoothstep(0.55, 0.96, rip * 0.5 + 0.5);
+        float swell = smoothstep(0.4, 0.88, rip2 * 0.5 + 0.5);
+        float fine = smoothstep(0.72, 0.98, rip3 * 0.5 + 0.5);
         vec3 surface = mix(uDeep, uShallow, 0.42);
-        surface = mix(surface, uGlint, fresnel * 0.22 + crest * 0.28 + lines * 0.16 + swell * 0.08);
+        surface = mix(surface, uGlint, fresnel * 0.22 + crest * 0.22 + lines * 0.1 + swell * 0.07 + fine * 0.08);
         vec3 color = mix(surface, depthCol, into);
         float along = sin(vUv.y * 54.0 + uTime * 0.9) * 0.5 + 0.5;
         float shore = smoothstep(0.975, 0.998, vUv.x) * (0.45 + 0.55 * along);
@@ -984,28 +1052,81 @@ function createCliff(scene) {
     scene.add(peak);
   });
 
-  const ringGeo = new THREE.RingGeometry(0.18, 0.32, 28);
+  function foamRing() {
+    const shape = new THREE.Shape();
+    const points = 18;
+    for (let i = 0; i <= points; i += 1) {
+      const a = (i / points) * Math.PI * 2;
+      const wobble = 0.55 + Math.random() * 0.7;
+      const x = Math.cos(a) * wobble;
+      const y = Math.sin(a) * wobble * (0.75 + Math.random() * 0.4);
+      if (i === 0) shape.moveTo(x, y);
+      else shape.lineTo(x, y);
+    }
+    const hole = new THREE.Path();
+    for (let i = points; i >= 0; i -= 1) {
+      const a = (i / points) * Math.PI * 2;
+      const wobble = 0.18 + Math.random() * 0.22;
+      const x = Math.cos(a) * wobble;
+      const y = Math.sin(a) * wobble;
+      if (i === points) hole.moveTo(x, y);
+      else hole.lineTo(x, y);
+    }
+    shape.holes.push(hole);
+    return new THREE.ShapeGeometry(shape);
+  }
+  const foamGeos = [foamRing(), foamRing(), foamRing()];
+  const dropGeo = new THREE.SphereGeometry(0.045, 6, 5);
   const ripples = [];
 
-  function splash(x, z) {
+  function splash(x, z, burst = true) {
     const px = Math.min(x, waterNear - 0.4);
     const pz = THREE.MathUtils.clamp(z, -waterDepth / 2 + 1, waterDepth / 2 - 1);
-    for (let i = 0; i < 2; i += 1) {
-      const ring = new THREE.Mesh(
-        ringGeo,
+    const ring = new THREE.Mesh(
+      foamGeos[Math.floor(Math.random() * foamGeos.length)],
+      new THREE.MeshBasicMaterial({
+        color: 0xd5e4e2,
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.rotation.z = Math.random() * Math.PI * 2;
+    ring.position.set(px, WATER_Y + 0.05, pz);
+    ring.scale.setScalar(0.35 + Math.random() * 0.25);
+    scene.add(ring);
+    ripples.push({ kind: 'ring', mesh: ring, age: 0, life: 1.05, spin: (Math.random() - 0.5) * 0.8 });
+    if (!burst) return;
+    const drops = 7 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < drops; i += 1) {
+      const drop = new THREE.Mesh(
+        dropGeo,
         new THREE.MeshBasicMaterial({
-          color: 0xc5d4d2,
+          color: i % 3 === 0 ? 0xf2f7f6 : 0xb7c9c8,
           transparent: true,
-          opacity: 0.6,
-          side: THREE.DoubleSide,
+          opacity: 0.85,
           depthWrite: false,
         }),
       );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(px, WATER_Y + 0.06, pz);
-      ring.scale.setScalar(0.3);
-      scene.add(ring);
-      ripples.push({ mesh: ring, age: -i * 0.14, life: 1.15 });
+      const ang = Math.random() * Math.PI * 2;
+      const speed = 0.4 + Math.random() * 1.5;
+      drop.position.set(px, WATER_Y + 0.08, pz);
+      drop.scale.setScalar(0.45 + Math.random() * 1.1);
+      scene.add(drop);
+      ripples.push({
+        kind: 'drop',
+        mesh: drop,
+        age: 0,
+        life: 0.55 + Math.random() * 0.35,
+        x: px,
+        y: WATER_Y + 0.08,
+        z: pz,
+        vx: Math.cos(ang) * speed,
+        vz: Math.sin(ang) * speed,
+        vy: 0.8 + Math.random() * 2.2,
+      });
     }
   }
 
@@ -1015,15 +1136,30 @@ function createCliff(scene) {
       const ripple = ripples[i];
       ripple.age += dt;
       const k = ripple.age / ripple.life;
-      if (k < 0) continue;
       if (k >= 1) {
         ripple.mesh.material.dispose();
         scene.remove(ripple.mesh);
         ripples.splice(i, 1);
         continue;
       }
-      ripple.mesh.scale.setScalar(0.35 + k * 2.8);
-      ripple.mesh.material.opacity = 0.55 * (1 - k);
+      if (ripple.kind === 'drop') {
+        ripple.vy -= 9.2 * dt;
+        ripple.x += ripple.vx * dt;
+        ripple.y += ripple.vy * dt;
+        ripple.z += ripple.vz * dt;
+        if (ripple.y < WATER_Y + 0.04) {
+          ripple.y = WATER_Y + 0.04;
+          ripple.vy *= -0.15;
+          ripple.vx *= 0.5;
+          ripple.vz *= 0.5;
+        }
+        ripple.mesh.position.set(ripple.x, ripple.y, ripple.z);
+        ripple.mesh.material.opacity = 0.85 * (1 - k);
+        continue;
+      }
+      ripple.mesh.scale.setScalar(0.4 + k * 2.4);
+      ripple.mesh.rotation.z += ripple.spin * dt;
+      ripple.mesh.material.opacity = 0.5 * (1 - k * k);
     }
   }
 
@@ -1101,6 +1237,39 @@ function createRoomCard(scene) {
   return { mesh, setRoomCode };
 }
 
+function createLadder(scene, targets, x, z) {
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6d5342, roughness: 0.88 });
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const top = 3.48;
+  const railH = top - 0.08;
+  const railGeo = new THREE.BoxGeometry(0.05, railH, 0.045);
+  [-0.18, 0.18].forEach((side) => {
+    const rail = new THREE.Mesh(railGeo, wood);
+    rail.position.set(-0.04, 0.08 + railH / 2, side);
+    rail.castShadow = true;
+    group.add(rail);
+  });
+  const rungs = [];
+  const rungGeo = new THREE.BoxGeometry(0.05, 0.03, 0.4);
+  for (let y = 0.42; y <= top - 0.05; y += 0.32) {
+    const rung = new THREE.Mesh(rungGeo, wood);
+    rung.position.set(-0.02, y, 0);
+    rung.castShadow = true;
+    group.add(rung);
+    rungs.push(y);
+  }
+  const hit = new THREE.Mesh(
+    new THREE.BoxGeometry(0.35, top, 0.5),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  hit.position.set(0, top / 2, 0);
+  group.add(hit);
+  group.userData = { type: 'ladder', rungs };
+  scene.add(group);
+  targets.push(group);
+}
+
 export function createWorld() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
@@ -1142,6 +1311,7 @@ export function createWorld() {
   [[-1.4, 0.55, 0.85], [0.2, 0.7, 1.05], [1.7, 0.42, 0.75]].forEach(([z, hang, depth]) => {
     addRock(0.85, 0.38, depth, coverFrom + 0.15, 2.55 - hang * 0.15, z);
   });
+  createLadder(scene, targets, coverFrom + 0.15, 0.2);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomSpan, roomZ * 2),
