@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Brick Room</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #1c1915;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+      #hud {
+        position: fixed;
+        left: 16px;
+        bottom: 16px;
+        max-width: min(440px, calc(100vw - 32px));
+        color: #f7f2ea;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+        pointer-events: none;
+      }
+      #status {
+        font-size: 16px;
+        font-weight: 650;
+      }
+      #hint {
+        margin-top: 6px;
+        font-size: 13px;
+        opacity: 0.86;
+      }
+      #scale-panel {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        width: min(280px, calc(100vw - 32px));
+        padding: 10px 12px 12px;
+        border-radius: 10px;
+        background: rgba(22, 24, 28, 0.82);
+        color: #f7f2ea;
+        font-size: 14px;
+      }
+      #scale-panel label {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        font-weight: 650;
+      }
+      #peg-size {
+        width: 100%;
+        accent-color: #1f7a45;
+      }
+      #watch-panel {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        width: min(240px, calc(100vw - 32px));
+        padding: 10px 12px 12px;
+        border-radius: 10px;
+        background: rgba(22, 24, 28, 0.82);
+        color: #f7f2ea;
+        font-size: 14px;
+      }
+      #room-line {
+        font-weight: 650;
+        letter-spacing: 0.04em;
+      }
+      #room-code {
+        font-size: 22px;
+        letter-spacing: 0.14em;
+      }
+      #watch-form {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #watch-code {
+        flex: 1;
+        min-width: 0;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: #2a3038;
+        color: #f7f2ea;
+        font: inherit;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      #watch-form button,
+      #watch-leave {
+        border: 0;
+        border-radius: 6px;
+        background: #1f7a45;
+        color: #f7fff8;
+        font: inherit;
+        font-weight: 650;
+        padding: 6px 10px;
+        text-decoration: none;
+      }
+      #watch-note {
+        margin-top: 6px;
+        min-height: 1.2em;
+        opacity: 0.86;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="scale-panel">
+      <label for="peg-size">Peg size <span id="peg-readout">6.0 cm</span></label>
+      <input id="peg-size" type="range" min="0.3" max="2" step="0.01" value="1" />
+    </div>
+    <div id="watch-panel">
+      <div id="room-line"><span id="room-label">Room</span> <strong id="room-code">----</strong></div>
+      <form id="watch-form">
+        <input id="watch-code" maxlength="4" autocomplete="off" spellcheck="false" placeholder="Code" />
+        <button type="submit">Watch</button>
+      </form>
+      <div id="watch-note"></div>
+    </div>
+    <div id="hud">
+      <div id="status">Pick a color and a shape, then press ORDER.</div>
+      <div id="hint">Squeeze the grip to pick up a brick from any side. It keeps the angle it had on the board. Hold the trigger and squeeze to lift a connected build, then turn your hand to set it down at a new angle. Let go of the grip to drop it. HIDE tucks the order screen into the back wall, and PARTS, next to NEW, brings it back. Match the build turning behind the table: colors and heights have to line up, any turn or mirror counts, and smaller bricks can fill in for a bigger one. Drop a piece in the TOSS bin on your left, or let go away from the table, to throw it away. The red X on a pedestal clears that part. The room code is for watching from a laptop. NEW makes another. R rotates. Hold Shift on desktop to lift a connected build.</div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
