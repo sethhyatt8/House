@@ -748,7 +748,7 @@ const SEA_ROCKS = [
   { x: -44, z: -16, r: 4.4 },
   { x: -22.5, z: -4.2, r: 2.4 },
   { x: -29, z: 2.4, r: 2.2 },
-  { x: -17.2, z: -1.6, r: 5.4 },
+  { x: -45.5, z: 12.5, r: 6.5 },
 ];
 
 function clearOfRocks(x, z, reach) {
@@ -1520,8 +1520,8 @@ function wreckHullGeometry() {
       const y = section.sheer * (1 - Math.sin(ang)) - Math.sin(ang) * section.depth;
       positions.push(section.x, y, Math.cos(ang) * section.beam);
       uvs.push(u, v);
-      const algae = Math.sin(ang) * 0.55;
-      colors.push(1 - algae * 0.35, 1 - algae * 0.12, 1 - algae * 0.2);
+      const algae = Math.sin(ang);
+      colors.push(0.35 - algae * 0.12, 0.38 - algae * 0.08, 0.36 - algae * 0.06);
     }
   }
   const row = around + 1;
@@ -1529,8 +1529,8 @@ function wreckHullGeometry() {
     const u = i / (stations - 1);
     for (let j = 0; j < around; j += 1) {
       const v = j / around;
-      if (u > 0.3 && u < 0.62 && v < 0.38) continue;
-      if (u > 0.58 && u < 0.8 && v > 0.64) continue;
+      if (u > 0.2 && u < 0.82 && v < 0.62) continue;
+      if (u > 0.38 && u < 0.72 && v > 0.62) continue;
       const a = i * row + j;
       const b = a + row;
       indices.push(a, b, a + 1, a + 1, b, b + 1);
@@ -1545,121 +1545,62 @@ function wreckHullGeometry() {
   return geometry;
 }
 
-function ragGeometry() {
-  const shape = new THREE.Shape();
-  shape.moveTo(-0.15, 0.7);
-  shape.lineTo(1.35, 0.45);
-  shape.lineTo(1.05, -0.05);
-  shape.lineTo(1.4, -0.7);
-  shape.lineTo(0.15, -0.35);
-  shape.lineTo(-0.2, 0.05);
-  return new THREE.ShapeGeometry(shape);
-}
-
 function createWreck(scene) {
   const wreck = new THREE.Group();
-  const planks = plankTexture();
-  planks.wrapS = THREE.RepeatWrapping;
-  planks.wrapT = THREE.RepeatWrapping;
-  planks.repeat.set(1, 3);
-  const timber = new THREE.MeshStandardMaterial({
-    map: planks,
-    color: 0xd7c2a8,
-    roughness: 0.9,
-    vertexColors: true,
-    side: THREE.DoubleSide,
-  });
-  const bare = new THREE.MeshStandardMaterial({ color: 0x7a6248, roughness: 0.92 });
-  const ribMat = new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 0.88 });
-  const soaked = new THREE.MeshStandardMaterial({ color: 0x3a332c, roughness: 1 });
-  const iron = new THREE.MeshStandardMaterial({ color: 0x3a4044, roughness: 0.55, metalness: 0.55 });
-  const sailMat = new THREE.MeshStandardMaterial({
-    color: 0xc2b49a,
-    roughness: 0.96,
-    side: THREE.DoubleSide,
-  });
+  const shadow = new THREE.MeshBasicMaterial({ color: 0x07141c, side: THREE.DoubleSide });
+  const ribMat = new THREE.MeshBasicMaterial({ color: 0x0c1a22 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6e5844, roughness: 0.96 });
 
-  wreck.add(new THREE.Mesh(wreckHullGeometry(), timber));
+  const hull = new THREE.Mesh(wreckHullGeometry(), shadow);
+  wreck.add(hull);
 
-  [0.18, 0.32, 0.46, 0.6, 0.74].forEach((u, index) => {
+  [0.16, 0.3, 0.44, 0.58, 0.72, 0.86].forEach((u, index) => {
     const section = hullSection(u);
-    const broken = index === 1 || index === 3;
+    const reach = section.depth * (index % 2 ? 0.85 : 1.35);
     [-1, 1].forEach((side) => {
-      if (broken && side > 0) return;
-      const height = section.depth * (broken ? 0.7 : 1.25);
-      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.08, height, 0.05), ribMat);
-      piece.position.set(section.x, section.sheer - height * 0.32, side * section.beam * 0.78);
-      piece.rotation.x = side * 0.48;
+      if (index % 3 === 0 && side > 0) return;
+      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.07, reach, 0.045), ribMat);
+      piece.position.set(section.x, section.sheer - reach * 0.42, side * section.beam * 0.72);
+      piece.rotation.x = side * 0.55;
       wreck.add(piece);
     });
-    if (index === 0 || index === 2 || index === 4) {
-      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, section.beam * 1.5), bare);
-      deck.position.set(section.x, section.sheer + 0.02, sideShift(index));
-      deck.rotation.z = index === 2 ? 0.35 : 0.04;
-      deck.rotation.y = 0.08;
-      wreck.add(deck);
-    }
   });
 
-  const keel = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.16, 0.18), soaked);
-  keel.position.set(0.2, -0.95, 0);
+  const keel = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.14, 0.16), shadow);
+  keel.position.set(0.2, -0.9, 0);
   wreck.add(keel);
 
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 6.4, 7), bare);
-  mast.position.set(-0.2, 2.7, 0.05);
-  mast.rotation.z = 0.22;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.15, 6), wood);
+  mast.position.set(0.15, 0.62, 0);
   wreck.add(mast);
-  const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.5, 6), bare);
-  stub.position.set(1.7, 3.6, 0.15);
-  stub.rotation.z = 1.15;
-  wreck.add(stub);
-  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6), bare);
-  yard.position.set(0.15, 4.5, 0.1);
-  yard.rotation.z = 1.35;
-  wreck.add(yard);
-  const sail = new THREE.Mesh(ragGeometry(), sailMat);
-  sail.position.set(-0.15, 3.55, 0.16);
-  sail.rotation.y = 0.4;
-  wreck.add(sail);
 
-  const sprit = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 2.1, 6), bare);
-  sprit.position.set(4.5, 0.35, 0.05);
-  sprit.rotation.z = -0.85;
-  wreck.add(sprit);
+  const nest = new THREE.Group();
+  const platform = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.07, 8), wood);
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.76, 0.035, 5, 12), wood);
+  hoop.rotation.x = Math.PI / 2;
+  hoop.position.y = 0.34;
+  nest.add(platform, hoop);
+  for (let i = 0; i < 6; i += 1) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.38, 4), wood);
+    const a = (i / 6) * Math.PI * 2;
+    post.position.set(Math.cos(a) * 0.7, 0.16, Math.sin(a) * 0.7);
+    nest.add(post);
+  }
+  nest.position.set(0.15, 1.2, 0);
+  wreck.add(nest);
 
-  wreck.position.set(-17.2, WATER_Y - 0.55, -1.6);
-  wreck.rotation.y = 0.62;
-  wreck.rotation.z = 0.46;
+  wreck.position.set(-45.5, WATER_Y - 0.42, 12.5);
+  wreck.rotation.y = -0.4;
+  wreck.rotation.z = 0.22;
   scene.add(wreck);
 
   const sand = new THREE.Mesh(
-    sandPatch(8.5),
-    new THREE.MeshStandardMaterial({ color: 0x3e433c, roughness: 1 }),
+    sandPatch(11),
+    new THREE.MeshBasicMaterial({ color: 0x061018 }),
   );
   sand.rotation.x = -Math.PI / 2;
-  sand.position.set(-16.6, WATER_Y - 2.15, -1.2);
+  sand.position.set(-44.6, WATER_Y - 0.28, 12);
   scene.add(sand);
-
-  const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 1.45, 8), iron);
-  cannon.rotation.z = Math.PI / 2;
-  cannon.rotation.y = 0.4;
-  cannon.position.set(-14.8, WATER_Y - 1.95, 0.55);
-  scene.add(cannon);
-
-  const anchor = new THREE.Group();
-  const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.95, 6), iron);
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.05, 0.05), iron);
-  stock.position.y = 0.32;
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.05), iron);
-  arm.position.y = -0.42;
-  anchor.add(shank, stock, arm);
-  anchor.rotation.z = 0.9;
-  anchor.position.set(-19.4, WATER_Y - 1.85, -2.6);
-  scene.add(anchor);
-}
-
-function sideShift(index) {
-  return index === 2 ? 0.25 : 0;
 }
 
 function sandPatch(radius) {
