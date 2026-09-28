@@ -161,10 +161,48 @@ function nearestRung(ladder, hitY) {
   return rung;
 }
 
-function beginClimb(ladder, hitY) {
-  climb = { ladder, rung: nearestRung(ladder, hitY), onRoof: false, pulling: false, pull: 0, pointerY: null };
+function createGripHand() {
+  const skin = new THREE.MeshStandardMaterial({ color: 0xc9956b, roughness: 0.62 });
+  const hand = new THREE.Group();
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.055, 0.09), skin);
+  palm.position.set(-0.055, -0.02, 0);
+  hand.add(palm);
+  for (let i = 0; i < 4; i += 1) {
+    const root = new THREE.Group();
+    root.position.set(-0.042, -0.008, -0.033 + i * 0.022);
+    root.rotation.z = 0.95;
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.012, 0.014), skin);
+    seg.position.x = 0.023;
+    root.add(seg);
+    const mid = new THREE.Group();
+    mid.position.x = 0.046;
+    mid.rotation.z = -1.25;
+    const bend = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.011, 0.013), skin);
+    bend.position.x = 0.02;
+    mid.add(bend);
+    const end = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.011, 0.012), skin);
+    end.position.set(0.034, -0.008, 0);
+    end.rotation.z = -1.05;
+    mid.add(end);
+    root.add(mid);
+    hand.add(root);
+  }
+  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.012, 0.014), skin);
+  thumb.position.set(-0.03, -0.03, 0.048);
+  thumb.rotation.z = 1.1;
+  hand.add(thumb);
+  hand.visible = false;
+  scene.add(hand);
+  return hand;
+}
+
+const gripHand = createGripHand();
+
+function beginClimb(ladder, hitY, rungIndex) {
+  const rung = rungIndex ?? nearestRung(ladder, hitY);
+  climb = { ladder, rung, onRoof: false, pulling: false, pull: 0, pointerY: null, hand: null };
   applyClimbView();
-  setStatus('Hold a rung and drag up to pull yourself up.');
+  setStatus('Holding a rung. Drag up to pull yourself up.');
 }
 
 function moveClimb(dir) {
@@ -201,6 +239,7 @@ function grabRung(pointerY) {
   climb.pointerY = pointerY;
   climb.pull = 0;
   controls.enabled = false;
+  gripHand.visible = true;
   renderer.domElement.style.cursor = 'grabbing';
 }
 
@@ -236,8 +275,10 @@ function releasePull() {
   climb.pulling = false;
   climb.pull = 0;
   climb.pointerY = null;
+  gripHand.visible = false;
   renderer.domElement.style.cursor = 'grab';
   applyClimbView();
+  setStatus('Grab the next rung and drag up.');
 }
 
 function applyClimbView() {
@@ -245,6 +286,7 @@ function applyClimbView() {
   const base = climb.ladder.position;
   const roof = climb.ladder.userData.roofY;
   if (climb.onRoof) {
+    gripHand.visible = false;
     controls.maxPolarAngle = Math.PI * 0.92;
     controls.minPolarAngle = 0.2;
     controls.maxDistance = 5.5;
@@ -259,13 +301,16 @@ function applyClimbView() {
   const rungs = climb.ladder.userData.rungs;
   const span = rungs.length > 1 ? rungs[1] - rungs[0] : 0.32;
   const y = rungs[climb.rung] + (climb.pull || 0) * span;
-  camera.position.set(base.x - 0.72, y + 0.08, base.z);
-  camera.lookAt(base.x + 0.02, y + 0.95, base.z);
+  camera.position.set(base.x - 0.34, y + 0.18, base.z + 0.48);
+  camera.lookAt(base.x + 0.02, y, base.z);
+  gripHand.position.set(base.x + 0.02, y, base.z);
+  gripHand.rotation.set(0, 0, 0);
 }
 
 function leaveClimb() {
   if (!climb) return;
   climb = null;
+  gripHand.visible = false;
   controls.maxPolarAngle = roomPolar;
   controls.minPolarAngle = 0;
   controls.maxDistance = 4.2;
@@ -1548,9 +1593,10 @@ function onPointerDown(event) {
     teleportTo(owner.userData.spot);
     return;
   }
-  if (owner?.userData.type === 'ladder') {
-    if (!climb || climb.ladder !== owner || climb.onRoof) beginClimb(owner, hit.point.y);
-    else climb.rung = nearestRung(owner, hit.point.y);
+  if (!held && (owner?.userData.type === 'rung' || owner?.userData.type === 'ladder')) {
+    const ladder = owner.userData.ladder || owner;
+    const index = owner.userData.type === 'rung' ? owner.userData.index : nearestRung(ladder, hit.point.y);
+    beginClimb(ladder, hit.point.y, index);
     grabRung(event.clientY);
     try { renderer.domElement.setPointerCapture(event.pointerId); } catch { /* already grabbing */ }
     return;
@@ -1648,8 +1694,10 @@ function onXrTrigger(controller) {
     teleportTo(hit.owner.userData.spot);
     return;
   }
-  if (hit?.owner?.userData.type === 'ladder') {
-    beginClimb(hit.owner, hit.point.y);
+  if (hit?.owner?.userData.type === 'rung' || hit?.owner?.userData.type === 'ladder') {
+    const ladder = hit.owner.userData.ladder || hit.owner;
+    const index = hit.owner.userData.type === 'rung' ? hit.owner.userData.index : nearestRung(ladder, hit.point.y);
+    beginClimb(ladder, hit.point.y, index);
     climb.hand = controller;
     controller.getWorldPosition(handPoint);
     climb.handY = handPoint.y;

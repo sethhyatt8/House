@@ -72,15 +72,13 @@ function basinGeometry(seed) {
   };
   const push = (x, y, z, wet) => {
     positions.push(x, y, z);
-    const damp = 1 - wet * 0.28;
+    const damp = 1 - wet * 0.55;
     colors.push(damp, damp, damp * 0.98);
   };
-  push(0, 0, 0, 1);
+  push(0, -0.22, 0, 1);
   for (let i = 1; i <= rings; i += 1) {
     const t = i / rings;
-    const y = t < 0.72
-      ? 0.006 + 0.1 * (t / 0.72) ** 1.1
-      : 0.106 - 0.1 * ((t - 0.72) / 0.28) ** 2;
+    const y = -0.22 * (1 - t) ** 1.05;
     for (let j = 0; j < segs; j += 1) {
       const a = (j / segs) * Math.PI * 2;
       const radius = t * wobble(i, j);
@@ -126,12 +124,48 @@ function stampFloorUv(geometry, x, z, rx, rz) {
 
 const PUDDLES = [[1.15, 0.12, 0.4, 0.3, 1.2], [1.7, -1.15, 0.36, 0.42, 2.4], [0.05, -1.35, 0.3, 0.36, 3.1], [-0.9, 0.85, 0.24, 0.18, 4.2]];
 
-function createPuddles(scene, floorMap) {
+function punchFloor(floor) {
+  const roomRight = 2.7;
+  const roomZ = 2.7;
+  const roomMidX = (roomRight + CLIFF_X) / 2;
+  const spanX = roomRight - CLIFF_X;
+  const spanZ = roomZ * 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-spanX / 2, -spanZ / 2);
+  shape.lineTo(spanX / 2, -spanZ / 2);
+  shape.lineTo(spanX / 2, spanZ / 2);
+  shape.lineTo(-spanX / 2, spanZ / 2);
+  PUDDLES.forEach(([x, z, rx, rz]) => {
+    const hole = new THREE.Path();
+    const cx = x - roomMidX;
+    const cy = -z;
+    const steps = 24;
+    for (let i = 0; i <= steps; i += 1) {
+      const a = -(i / steps) * Math.PI * 2;
+      const px = cx + Math.cos(a) * rx * 0.86;
+      const py = cy + Math.sin(a) * rz * 0.86;
+      if (i === 0) hole.moveTo(px, py);
+      else hole.lineTo(px, py);
+    }
+    shape.holes.push(hole);
+  });
+  const geometry = new THREE.ShapeGeometry(shape);
+  const pos = geometry.attributes.position;
+  const uv = geometry.attributes.uv;
+  for (let i = 0; i < pos.count; i += 1) {
+    uv.setXY(i, pos.getX(i) / spanX + 0.5, pos.getY(i) / spanZ + 0.5);
+  }
+  floor.geometry.dispose();
+  floor.geometry = geometry;
+}
+
+function createPuddles(scene, floor, floorMap) {
   const rock = new THREE.MeshStandardMaterial({
     map: floorMap,
     color: 0xc8bfb4,
     roughness: 0.94,
     vertexColors: true,
+    side: THREE.DoubleSide,
   });
   const waterMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -171,8 +205,9 @@ function createPuddles(scene, floorMap) {
         float band = smoothstep(0.07, 0.0, abs(p.y - mix(-0.45, 0.45, sweep)));
         float rare = step(0.78, fract(seed * 17.0 + floor(uTime * 0.12)));
         float shimmer = band * rare * smoothstep(0.35, 0.9, sin(uTime * 0.9 + seed * 6.2) * 0.5 + 0.5);
-        vec3 color = mix(vec3(0.12, 0.14, 0.13), vec3(0.9, 0.94, 0.92), shimmer);
-        float alpha = edge * mix(0.02, 0.1, depth) + shimmer * 0.45;
+        vec3 color = mix(vec3(0.04, 0.2, 0.24), vec3(0.14, 0.4, 0.42), depth);
+        color += vec3(0.8, 0.9, 0.88) * shimmer;
+        float alpha = edge * mix(0.5, 0.82, depth) + shimmer * 0.22;
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -180,19 +215,20 @@ function createPuddles(scene, floorMap) {
       }
     `,
   });
-  const waterGeo = new THREE.CircleGeometry(0.4, 24);
+  punchFloor(floor);
+  const waterGeo = new THREE.CircleGeometry(0.72, 28);
   PUDDLES.forEach(([x, z, rx, rz, seed]) => {
     const geometry = basinGeometry(seed);
     stampFloorUv(geometry, x, z, rx, rz);
     const bowl = new THREE.Mesh(geometry, rock);
     bowl.scale.set(rx, 1, rz);
-    bowl.position.set(x, 0.012, z);
+    bowl.position.set(x, -0.01, z);
     bowl.receiveShadow = true;
     scene.add(bowl);
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
     water.scale.set(rx, rz, 1);
-    water.position.set(x, 0.068, z);
+    water.position.set(x, -0.06, z);
     water.renderOrder = 2;
     scene.add(water);
   });
@@ -817,33 +853,32 @@ function createSharks(scene, splash) {
       clippingPlanes: [aboveWater],
     });
     const toothGeo = new THREE.ConeGeometry(0.008, 0.018, 3);
-    const count = 13;
+    const count = 11;
     const lip = [];
     for (let i = 0; i < count; i += 1) {
       const across = i / (count - 1) - 0.5;
       const edge = Math.abs(across) * 2;
-      const slice = sharkSlice(0.93 - edge * 0.2);
-      const point = new THREE.Vector3(
-        slice.x - 0.01,
-        slice.belly + 0.01,
-        across * 2 * slice.half * 0.58,
-      );
+      const slice = sharkSlice(0.93 - edge * 0.045);
+      const z = across * 2 * slice.half * 0.58;
+      const nz = Math.min(Math.abs(z) / Math.max(slice.half, 0.001), 0.86);
+      const ySurf = slice.mid - (slice.mid - slice.belly) * Math.sqrt(1 - nz * nz);
+      const point = new THREE.Vector3(slice.x, ySurf + 0.006, z);
       lip.push(point);
-      if (edge > 0.86) continue;
+      if (edge > 0.84) continue;
       const upper = new THREE.Mesh(toothGeo, ivory);
       upper.name = 'tooth';
-      upper.position.set(point.x, point.y + 0.008, point.z);
+      upper.position.set(point.x, point.y + 0.006, point.z);
       upper.rotation.z = Math.PI;
       fish.add(upper);
       const lower = new THREE.Mesh(toothGeo, ivory);
       lower.name = 'tooth';
-      lower.position.set(point.x, point.y - 0.008, point.z);
+      lower.position.set(point.x, point.y - 0.005, point.z);
       fish.add(lower);
     }
     const positions = [];
     const indices = [];
     lip.forEach((point, index) => {
-      positions.push(point.x, point.y, point.z, point.x - 0.016, point.y + 0.012, point.z * 0.86);
+      positions.push(point.x, point.y, point.z, point.x - 0.008, point.y + 0.006, point.z * 0.94);
       if (index === lip.length - 1) return;
       const k = index * 2;
       indices.push(k, k + 1, k + 2, k + 2, k + 1, k + 3);
@@ -877,18 +912,20 @@ function createSharks(scene, splash) {
     addSharkMouth(fish);
     const tail = new THREE.Group();
     tail.name = 'tail';
-    tail.position.set(-1.18, 0.02, 0);
+    tail.position.set(-0.36, 0.0, 0);
     tail.add(new THREE.Mesh(whiteTail, whiteFin));
     fish.add(tail);
-    const pecSlice = sharkSlice(0.55);
+    const pecSlice = sharkSlice(0.56);
+    const pecY = pecSlice.mid - (pecSlice.mid - pecSlice.belly) * 0.28;
     const pec = new THREE.Mesh(pecGeo, whiteFin);
-    pec.position.set(pecSlice.x, pecSlice.belly + 0.02, pecSlice.half * 0.62);
-    pec.rotation.y = Math.PI - 0.65;
-    pec.scale.set(1.05, 1.05, 1.05);
+    pec.position.set(pecSlice.x, pecY, pecSlice.half * 0.7);
+    pec.rotation.order = 'YXZ';
+    pec.rotation.set(Math.PI / 2, -2.55, 0);
+    pec.scale.set(1.15, 1.65, 1.15);
     fish.add(pec);
     const pecL = pec.clone();
-    pecL.position.z = -pecSlice.half * 0.62;
-    pecL.rotation.y = Math.PI + 0.65;
+    pecL.position.z = -pecSlice.half * 0.7;
+    pecL.rotation.set(-Math.PI / 2, 2.55, 0);
     fish.add(pecL);
     const eyeSlice = sharkSlice(0.78);
     const eyeGeo = new THREE.SphereGeometry(0.026, 10, 8);
@@ -1502,20 +1539,21 @@ function createLadder(scene, targets, x, z, roofY) {
     group.add(rail);
   });
   const rungs = [];
-  const rungGeo = new THREE.BoxGeometry(0.05, 0.03, 0.4);
+  const rungGeo = new THREE.BoxGeometry(0.06, 0.035, 0.4);
+  const padGeo = new THREE.BoxGeometry(0.36, 0.32, 0.56);
+  const padMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   for (let y = 0.42; y <= top - 0.05; y += 0.32) {
     const rung = new THREE.Mesh(rungGeo, wood);
     rung.position.set(0.02, y, 0);
     rung.castShadow = true;
+    rung.userData = { type: 'rung', ladder: group, index: rungs.length };
     group.add(rung);
+    const pad = new THREE.Mesh(padGeo, padMat);
+    pad.position.set(-0.08, 0, 0);
+    pad.userData = rung.userData;
+    rung.add(pad);
     rungs.push(y);
   }
-  const hit = new THREE.Mesh(
-    new THREE.BoxGeometry(0.42, top, 0.52),
-    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
-  );
-  hit.position.set(-0.04, top / 2, 0);
-  group.add(hit);
   group.userData = { type: 'ladder', rungs, roofY };
   scene.add(group);
   targets.push(group);
@@ -1584,7 +1622,7 @@ export function createWorld() {
     scene.add(boulder);
     targets.push(boulder);
   });
-  const puddles = createPuddles(scene, floorMap);
+  const puddles = createPuddles(scene, floor, floorMap);
   const cliff = createCliff(scene);
 
   const hemi = new THREE.HemisphereLight(0x8ea4cc, 0x2a2622, 0.62);
