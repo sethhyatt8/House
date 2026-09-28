@@ -687,8 +687,8 @@ function silverScaleTexture() {
     wash.addColorStop(1, '#0e2244');
     ctx.fillStyle = wash;
     ctx.fillRect(0, 0, w, h);
-    const cols = 34;
-    const rows = 20;
+    const cols = 78;
+    const rows = 40;
     const rw = w / cols;
     const rh = h / rows;
     const bands = [];
@@ -710,7 +710,7 @@ function silverScaleTexture() {
         ctx.fill();
         ctx.globalAlpha = 0.7 + strength * 0.3;
         ctx.strokeStyle = '#07111c';
-        ctx.lineWidth = 3.2;
+        ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.arc(x + rw * 0.28, y, Math.min(rw, rh) * 0.72, Math.PI * 0.55, Math.PI * 1.45);
         ctx.stroke();
@@ -827,6 +827,21 @@ function createSharks(scene, splash) {
   whiteFin.side = THREE.DoubleSide;
   const swordBody = tubeGeometry(swordfishProfile, 2);
   const whiteBody = tubeGeometry(greatWhiteProfile, 2);
+  const swordAnal = finGeometry([
+    [0.04, -0.12],
+    [-0.1, -0.24],
+    [-0.26, -0.32],
+    [-0.44, -0.2],
+    [-0.32, -0.1],
+    [-0.12, -0.08],
+  ], 0.01);
+  const swordPelvic = finGeometry([
+    [0.04, -0.01],
+    [-0.02, -0.08],
+    [-0.1, -0.13],
+    [-0.14, -0.05],
+    [-0.04, 0.0],
+  ], 0.007);
   const swordDorsal = finGeometry([
     [0.08, 0.17],
     [0.0, 0.26],
@@ -903,6 +918,20 @@ function createSharks(scene, splash) {
     const dorsal = new THREE.Mesh(swordDorsal, swordFinMat);
     dorsal.castShadow = true;
     fish.add(dorsal);
+    const anal = new THREE.Mesh(swordAnal, swordFinMat);
+    anal.castShadow = true;
+    fish.add(anal);
+    const pelvic = new THREE.Mesh(swordPelvic, swordFinMat);
+    pelvic.position.set(0.5, -0.12, 0.03);
+    pelvic.rotation.order = 'YXZ';
+    pelvic.rotation.y = -0.4;
+    pelvic.scale.set(1.35, 1.35, 1.35);
+    pelvic.castShadow = true;
+    fish.add(pelvic);
+    const pelvicL = pelvic.clone();
+    pelvicL.position.z = -0.045;
+    pelvicL.rotation.y = 0.4;
+    fish.add(pelvicL);
     const tail = new THREE.Group();
     tail.name = 'tail';
     tail.position.set(-1.05, 0, 0);
