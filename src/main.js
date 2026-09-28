@@ -124,6 +124,7 @@ addTeleportSpot({
 });
 
 function teleportTo(index) {
+  if (biteHold) return;
   const spot = teleportSpots[index];
   if (!spot) return;
   leaveClimb();
@@ -157,6 +158,7 @@ function teleportNext() {
 
 let climb = null;
 let fallVy = 0;
+let biteHold = false;
 let xrBaseSpace = null;
 const xrOffset = new THREE.Vector3();
 const roomPolar = Math.PI * 0.62;
@@ -497,8 +499,40 @@ function groundUnder(x, z, feetY) {
   return WATER_Y;
 }
 
+function startWaterBite(x, z) {
+  if (biteHold || world.biteActive()) return;
+  biteHold = true;
+  fallVy = 0;
+  if (climb) leaveClimb();
+  world.splash(x, z, true);
+  if (renderer.xr.isPresenting && xrFrame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (pose) {
+      const head = pose.transform.position;
+      shiftPlayer(x - head.x, (WATER_Y + 0.48) - head.y, z - head.z);
+    }
+  }
+  world.startBite(x, z);
+  setStatus('Something in the water.');
+}
+
+function finishWaterBite() {
+  if (!world.biteDone()) {
+    if (world.takeStrike()) {
+      playBite();
+      world.splash(camera.position.x, camera.position.z, true);
+      if (renderer.xr.isPresenting) shiftPlayer(0.16, -0.1, 0);
+    }
+    return;
+  }
+  world.clearBite();
+  biteHold = false;
+  teleportTo(1);
+}
+
 function updatePlayerFall(dt) {
-  if (watching || !renderer.xr.isPresenting || !xrFrame) return;
+  if (watching || biteHold || !renderer.xr.isPresenting || !xrFrame) return;
   if (climb?.hand) {
     fallVy = 0;
     return;
@@ -513,9 +547,8 @@ function updatePlayerFall(dt) {
   if (gap <= 0.12) {
     if (gap < -0.01) shiftPlayer(0, ground - feetY, 0);
     if (fallVy < -1.2 && ground <= WATER_Y + 0.05) {
-      world.splash(head.x, head.z);
       fallVy = 0;
-      teleportTo(1);
+      startWaterBite(head.x, head.z);
       return;
     }
     fallVy = 0;
@@ -527,9 +560,8 @@ function updatePlayerFall(dt) {
   if (next <= ground) {
     shiftPlayer(0, ground - feetY, 0);
     if (ground <= WATER_Y + 0.05) {
-      world.splash(head.x, head.z);
       fallVy = 0;
-      teleportTo(1);
+      startWaterBite(head.x, head.z);
       return;
     }
     fallVy = 0;
@@ -705,6 +737,32 @@ function envGain(ctx, start, peak, attack, release) {
   gain.gain.exponentialRampToValueAtTime(0.0001, start + attack + release);
   gain.connect(ctx.destination);
   return gain;
+}
+
+function playBite() {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(120, t);
+  osc.frequency.exponentialRampToValueAtTime(36, t + 0.22);
+  const tone = envGain(ctx, t, 0.32, 0.008, 0.26);
+  osc.connect(tone);
+  osc.start(t);
+  osc.stop(t + 0.28);
+  const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.2), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const burst = ctx.createBufferSource();
+  burst.buffer = noise;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(900, t);
+  const noiseGain = envGain(ctx, t, 0.4, 0.005, 0.18);
+  burst.connect(filter);
+  filter.connect(noiseGain);
+  burst.start(t);
+  burst.stop(t + 0.2);
 }
 
 function playDispense() {
@@ -2462,6 +2520,16 @@ function frame(time, frame) {
   world.update(dt);
   for (const controller of controllers) updateLaser(controller);
   if (!renderer.xr.isPresenting) controls.update();
+  if (biteHold) {
+    finishWaterBite();
+    if (biteHold && !renderer.xr.isPresenting) {
+      const focus = world.biteFocus();
+      if (focus) {
+        camera.position.copy(focus.eye);
+        camera.lookAt(focus.look);
+      }
+    }
+  }
   if (climb && !climb.onRoof) {
     if (renderer.xr.isPresenting && climb.hand) pullXrClimb();
     if (!renderer.xr.isPresenting) applyClimbView();

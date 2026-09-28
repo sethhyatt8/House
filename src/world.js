@@ -997,36 +997,31 @@ function createSharks(scene, splash) {
       clippingPlanes: [aboveWater],
     });
     const toothGeo = new THREE.ConeGeometry(0.008, 0.018, 3);
-    const count = 11;
-    const lip = [];
-    for (let i = 0; i < count; i += 1) {
-      const across = i / (count - 1) - 0.5;
-      const edge = Math.abs(across) * 2;
-      const slice = sharkSlice(0.93 - edge * 0.045);
-      const z = across * 2 * slice.half * 0.58;
-      const nz = Math.min(Math.abs(z) / Math.max(slice.half, 0.001), 0.86);
-      const ySurf = slice.mid - (slice.mid - slice.belly) * Math.sqrt(1 - nz * nz);
-      const point = new THREE.Vector3(slice.x, ySurf + 0.006, z);
-      lip.push(point);
-      if (edge > 0.84) continue;
+    const slice = sharkSlice(0.9);
+    const width = slice.half * 0.86;
+    const yTop = slice.belly - 0.004;
+    const yBot = slice.belly - 0.072;
+    const segments = 16;
+    const positions = [slice.x + 0.008, (yTop + yBot) * 0.5, 0];
+    const indices = [];
+    for (let i = 0; i <= segments; i += 1) {
+      const ang = Math.PI * (i / segments);
+      const z = Math.cos(ang) * width;
+      const y = yTop - Math.sin(ang) * (yTop - yBot);
+      positions.push(slice.x + 0.012, y, z);
+      if (i === 0) continue;
+      indices.push(0, i, i + 1);
+      if (i % 2 !== 0 || ang < 0.35 || ang > Math.PI - 0.35) continue;
       const upper = new THREE.Mesh(toothGeo, ivory);
       upper.name = 'tooth';
-      upper.position.set(point.x, point.y + 0.006, point.z);
+      upper.position.set(slice.x + 0.012, y + 0.008, z);
       upper.rotation.z = Math.PI;
       fish.add(upper);
       const lower = new THREE.Mesh(toothGeo, ivory);
       lower.name = 'tooth';
-      lower.position.set(point.x, point.y - 0.005, point.z);
+      lower.position.set(slice.x + 0.012, y - 0.006, z);
       fish.add(lower);
     }
-    const positions = [];
-    const indices = [];
-    lip.forEach((point, index) => {
-      positions.push(point.x, point.y, point.z, point.x - 0.008, point.y + 0.006, point.z * 0.94);
-      if (index === lip.length - 1) return;
-      const k = index * 2;
-      indices.push(k, k + 1, k + 2, k + 2, k + 1, k + 3);
-    });
     const mouth = new THREE.Mesh(new THREE.BufferGeometry(), gum);
     mouth.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     mouth.geometry.setIndex(indices);
@@ -1231,6 +1226,159 @@ function createSharks(scene, splash) {
     return fish;
   }
   return { update, sword: stillAnimal('sword'), white: stillAnimal('white') };
+}
+
+function createBite(scene, source) {
+  const shark = source.clone(true);
+  shark.visible = false;
+  shark.scale.setScalar(2.6);
+  scene.add(shark);
+  const snoutBox = new THREE.Box3().setFromObject(shark.getObjectByName('mouth') || shark);
+  const snout = snoutBox.max.x - shark.position.x;
+  const dropGeo = new THREE.SphereGeometry(0.05, 6, 5);
+  const chunkGeo = new THREE.SphereGeometry(0.14, 7, 6);
+  const bright = new THREE.MeshBasicMaterial({ color: 0xc41622 });
+  const dark = new THREE.MeshBasicMaterial({ color: 0x6a0c12 });
+  const drops = [];
+  let bite = null;
+
+  function addDrop(mesh, velocity, life) {
+    scene.add(mesh);
+    drops.push({
+      mesh,
+      life,
+      age: 0,
+      vx: velocity.x,
+      vy: velocity.y,
+      vz: velocity.z,
+    });
+  }
+
+  function spray(x, y, z) {
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 22),
+      new THREE.MeshBasicMaterial({
+        color: 0x9a1218,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.set(x, WATER_Y + 0.05, z);
+    scene.add(disc);
+    drops.push({ mesh: disc, life: 2.2, age: 0, disc: true, vx: 0, vy: 0, vz: 0 });
+    for (let i = 0; i < 36; i += 1) {
+      const mesh = new THREE.Mesh(chunkGeo, i % 2 === 0 ? bright : dark);
+      mesh.scale.setScalar(3.2 + Math.random() * 4.8);
+      mesh.position.set(x, y, z);
+      const dir = new THREE.Vector3(0.45 + Math.random() * 0.7, (Math.random() - 0.35) * 0.7, (Math.random() - 0.5) * 1.1);
+      dir.normalize();
+      addDrop(mesh, dir.multiplyScalar(1.4 + Math.random() * 3.2), 1.6);
+    }
+    for (let i = 0; i < 160; i += 1) {
+      const mesh = new THREE.Mesh(i % 6 === 0 ? chunkGeo : dropGeo, i % 3 === 0 ? dark : bright);
+      const scale = i % 6 === 0 ? 1.1 + Math.random() * 2.2 : 0.45 + Math.random() * 1.5;
+      mesh.scale.setScalar(scale);
+      mesh.position.set(x, y, z);
+      const dir = new THREE.Vector3(Math.random() - 0.2, 0.2 + Math.random() * 0.85, Math.random() - 0.5);
+      if (dir.lengthSq() < 1e-4) dir.set(0, 1, 0);
+      dir.normalize();
+      addDrop(mesh, dir.multiplyScalar(2.4 + Math.random() * 8), 1.2 + Math.random() * 0.6);
+    }
+  }
+
+  function clear() {
+    bite = null;
+    shark.visible = false;
+    for (const drop of drops) {
+      scene.remove(drop.mesh);
+      if (drop.disc) {
+        drop.mesh.geometry.dispose();
+        drop.mesh.material.dispose();
+      }
+    }
+    drops.length = 0;
+  }
+
+  function start(x, z) {
+    if (bite && !bite.done) return;
+    clear();
+    bite = { t: 0, x, z, sprayed: false, struck: false, done: false };
+    shark.visible = true;
+    shark.position.set(x - 7.2, WATER_Y - 0.7, z);
+    shark.rotation.set(0.2, 0, 0.18);
+  }
+
+  function update(dt) {
+    if (!bite || bite.done) return;
+    bite.t += dt;
+    const strike = Math.min(1, bite.t / 0.34);
+    const eased = strike * strike;
+    const from = bite.x - 7.2;
+    const to = bite.x - snout - 0.72;
+    shark.position.x = from + (to - from) * eased;
+    shark.position.y = WATER_Y - 0.55 + eased * 0.72;
+    shark.position.z = bite.z + Math.sin(bite.t * 9) * 0.08;
+    shark.rotation.z = 0.2 * (1 - eased);
+    const tail = shark.getObjectByName('tail');
+    if (tail) tail.rotation.y = Math.sin(bite.t * 16) * 0.5;
+    if (strike >= 1) {
+      const shake = Math.sin(bite.t * 34) * 0.12 * Math.max(0, 1 - (bite.t - 0.34) / 0.55);
+      shark.rotation.y = shake;
+      shark.position.x = to + Math.sin(bite.t * 26) * 0.05;
+      if (!bite.sprayed) {
+        bite.sprayed = true;
+        bite.struck = true;
+        spray(bite.x - 0.35, WATER_Y + 0.42, bite.z);
+      }
+    }
+    for (let i = drops.length - 1; i >= 0; i -= 1) {
+      const drop = drops[i];
+      drop.age += dt;
+      if (drop.disc) {
+        const spread = 1 + drop.age * 3.4;
+        drop.mesh.scale.setScalar(spread);
+        drop.mesh.material.opacity = Math.max(0.15, 0.9 - drop.age * 0.28);
+        continue;
+      }
+      drop.vy -= 9.2 * dt;
+      drop.mesh.position.x += drop.vx * dt;
+      drop.mesh.position.y += drop.vy * dt;
+      drop.mesh.position.z += drop.vz * dt;
+      if (drop.mesh.position.y < WATER_Y + 0.04) {
+        drop.mesh.position.y = WATER_Y + 0.04;
+        drop.vy *= -0.18;
+        drop.vx *= 0.7;
+        drop.vz *= 0.7;
+      }
+    }
+    if (bite.t > 1.9) bite.done = true;
+  }
+
+  return {
+    start,
+    clear,
+    update,
+    active: () => !!(bite && !bite.done),
+    done: () => !!(bite && bite.done),
+    takeStrike() {
+      if (!bite?.struck) return false;
+      bite.struck = false;
+      return true;
+    },
+    focus() {
+      if (!bite) return null;
+      const mouth = shark.position.clone();
+      mouth.x += snout * 0.92;
+      mouth.y += 0.2;
+      return {
+        eye: new THREE.Vector3(bite.x + 0.05, WATER_Y + 0.5, bite.z),
+        look: mouth,
+      };
+    },
+  };
 }
 
 function createAnimalCase(scene, targets, sword, white) {
@@ -1635,7 +1783,7 @@ function createWreck(scene) {
   nest.position.set(waist.x, 2.55, 0);
   wreck.add(nest);
 
-  wreck.position.set(-45.5, WATER_Y + 0.55, 12.5);
+  wreck.position.set(-45.5, WATER_Y - 1.15, 12.5);
   wreck.rotation.y = 1.15;
   wreck.rotation.z = 0.05;
   scene.add(wreck);
@@ -2255,6 +2403,7 @@ export function createWorld() {
   }
   createFinds(scene, targets, rockMap);
   const sharks = createSharks(scene, cliff.splash);
+  const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
 
   return {
@@ -2272,10 +2421,17 @@ export function createWorld() {
     setRoomCode: roomCard.setRoomCode,
     update(dt) {
       sharks.update(dt);
+      bite.update(dt);
       cliff.update(dt);
       puddles.update(dt);
     },
     splash: cliff.splash,
+    startBite: bite.start,
+    clearBite: bite.clear,
+    biteActive: bite.active,
+    biteDone: bite.done,
+    takeStrike: bite.takeStrike,
+    biteFocus: bite.focus,
     roof,
   };
 }
