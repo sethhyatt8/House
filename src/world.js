@@ -742,10 +742,13 @@ function finGeometry(points, depth = 0.02) {
 }
 
 const SEA_ROCKS = [
-  { x: -24, z: -9, r: 3.1 },
-  { x: -36, z: 4, r: 3.6 },
-  { x: -18, z: 14, r: 2.6 },
-  { x: -44, z: -16, r: 3.3 },
+  { x: -24, z: -9, r: 4.2 },
+  { x: -36, z: 4, r: 4.8 },
+  { x: -18, z: 14, r: 3.4 },
+  { x: -44, z: -16, r: 4.4 },
+  { x: -22.5, z: -4.2, r: 2.4 },
+  { x: -29, z: 2.4, r: 2.2 },
+  { x: -17.2, z: -1.6, r: 5.4 },
 ];
 
 function clearOfRocks(x, z, reach) {
@@ -1386,6 +1389,313 @@ const waterWaveGlsl = `
   }
 `;
 
+function hash01(n) {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function seaRockTexture() {
+  const texture = canvasTexture(512, 512, (ctx, w, h) => {
+    ctx.fillStyle = '#6d6458';
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 70; i += 1) {
+      const y = hash01(i * 3.1) * h;
+      const shade = 78 + hash01(i * 1.7) * 50;
+      ctx.fillStyle = `rgba(${shade}, ${shade - 6}, ${shade - 14}, 0.28)`;
+      ctx.fillRect(0, y, w, 6 + hash01(i * 2.2) * 18);
+    }
+    for (let i = 0; i < 2200; i += 1) {
+      const x = hash01(i * 1.3) * w;
+      const y = hash01(i * 2.7) * h;
+      const span = 2 + hash01(i * 4.1) * 16;
+      const shade = 48 + hash01(i * 5.9) * 80;
+      ctx.fillStyle = `rgba(${shade}, ${shade - 10}, ${shade - 18}, 0.38)`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, span, span * (0.28 + hash01(i) * 0.7), hash01(i * 8) * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(28, 24, 20, 0.7)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 16; i += 1) {
+      ctx.beginPath();
+      let x = hash01(i * 2.2) * w;
+      let y = hash01(i * 4.4) * h;
+      ctx.moveTo(x, y);
+      for (let step = 0; step < 6; step += 1) {
+        x += (hash01(i * 9 + step) - 0.5) * 70;
+        y += (hash01(i * 3 + step * 5) - 0.5) * 36;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }).texture;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1.4, 1.2);
+  return texture;
+}
+
+function seaBoulderGeometry(radius, seed) {
+  const geo = new THREE.IcosahedronGeometry(radius, 2);
+  const pos = geo.attributes.position;
+  const color = new Float32Array(pos.count * 3);
+  const stretch = 0.78 + hash01(seed) * 0.36;
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const len = Math.hypot(x, y, z) || 1;
+    const nx = x / len;
+    const ny = y / len;
+    const nz = z / len;
+    const lump = Math.sin(nx * 3.1 + seed * 1.7) * Math.cos(nz * 2.5 + seed) * 0.14
+      + Math.sin(nx * 6.2 + ny * 4.8 + seed * 2.4) * 0.06;
+    const facet = 0.9 + Math.abs(Math.sin(nx * 2.1 + seed) * Math.cos(nz * 1.7 + ny + seed)) * 0.18;
+    let sy = ny;
+    if (sy < -0.06) sy = -0.06 + (sy + 0.06) * 0.4;
+    sy *= 0.7;
+    const px = nx * stretch * facet * (1 + lump) * radius;
+    const py = sy * facet * (1 + lump) * radius;
+    const pz = nz * (1.08 - stretch * 0.15) * facet * (1 + lump) * radius;
+    pos.setXYZ(i, px, py, pz);
+    const wet = 1 - THREE.MathUtils.smoothstep(py, -radius * 0.22, radius * 0.18);
+    const crown = THREE.MathUtils.smoothstep(py, radius * 0.2, radius * 0.5);
+    color[i * 3] = 1 - wet * 0.48 + crown * 0.06;
+    color[i * 3 + 1] = 1 - wet * 0.34 + crown * 0.08;
+    color[i * 3 + 2] = 1 - wet * 0.28;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(color, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function addSeaOutcrop(scene, material, x, z, scale, seed) {
+  const group = new THREE.Group();
+  group.position.set(x, WATER_Y, z);
+  const stones = [
+    [1, 0.22, 0, 0, 0.4],
+    [0.58, -0.02, 0.78, 0.22, 1.6],
+    [0.46, -0.16, -0.62, -0.36, 2.8],
+    [0.32, -0.2, 0.18, -0.82, 4.1],
+    [0.26, 0.08, -0.28, 0.55, 5.5],
+  ];
+  stones.forEach(([k, yk, dx, dz, salt]) => {
+    const radius = scale * k;
+    const mesh = new THREE.Mesh(seaBoulderGeometry(radius, seed + salt), material);
+    mesh.position.set(dx * scale, yk * scale, dz * scale);
+    mesh.rotation.set(
+      hash01(seed + salt) * 2.4,
+      hash01(seed + salt + 3) * 6.2,
+      hash01(seed + salt + 8) * 1.2,
+    );
+    group.add(mesh);
+  });
+  scene.add(group);
+}
+
+function hullSection(u) {
+  const mid = Math.sin(u * Math.PI);
+  const end = Math.sin(Math.min(1, Math.min(u, 1 - u) / 0.14) * Math.PI * 0.5);
+  return {
+    x: (u - 0.48) * 10.4,
+    beam: (0.34 + mid * 1.15) * (0.4 + 0.6 * end),
+    depth: (0.28 + mid * 0.85) * (0.48 + 0.52 * end),
+    sheer: 0.05 + mid * 0.16 + (u > 0.78 ? (u - 0.78) * 1.1 : 0),
+  };
+}
+
+function wreckHullGeometry() {
+  const stations = 18;
+  const around = 10;
+  const positions = [];
+  const uvs = [];
+  const colors = [];
+  const indices = [];
+  for (let i = 0; i < stations; i += 1) {
+    const u = i / (stations - 1);
+    const section = hullSection(u);
+    for (let j = 0; j <= around; j += 1) {
+      const v = j / around;
+      const ang = v * Math.PI;
+      const y = section.sheer * (1 - Math.sin(ang)) - Math.sin(ang) * section.depth;
+      positions.push(section.x, y, Math.cos(ang) * section.beam);
+      uvs.push(u, v);
+      const algae = Math.sin(ang) * 0.55;
+      colors.push(1 - algae * 0.35, 1 - algae * 0.12, 1 - algae * 0.2);
+    }
+  }
+  const row = around + 1;
+  for (let i = 0; i < stations - 1; i += 1) {
+    const u = i / (stations - 1);
+    for (let j = 0; j < around; j += 1) {
+      const v = j / around;
+      if (u > 0.3 && u < 0.62 && v < 0.38) continue;
+      if (u > 0.58 && u < 0.8 && v > 0.64) continue;
+      const a = i * row + j;
+      const b = a + row;
+      indices.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function ragGeometry() {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.15, 0.7);
+  shape.lineTo(1.35, 0.45);
+  shape.lineTo(1.05, -0.05);
+  shape.lineTo(1.4, -0.7);
+  shape.lineTo(0.15, -0.35);
+  shape.lineTo(-0.2, 0.05);
+  return new THREE.ShapeGeometry(shape);
+}
+
+function createWreck(scene) {
+  const wreck = new THREE.Group();
+  const planks = plankTexture();
+  planks.wrapS = THREE.RepeatWrapping;
+  planks.wrapT = THREE.RepeatWrapping;
+  planks.repeat.set(1, 3);
+  const timber = new THREE.MeshStandardMaterial({
+    map: planks,
+    color: 0xd7c2a8,
+    roughness: 0.9,
+    vertexColors: true,
+    side: THREE.DoubleSide,
+  });
+  const bare = new THREE.MeshStandardMaterial({ color: 0x7a6248, roughness: 0.92 });
+  const ribMat = new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 0.88 });
+  const soaked = new THREE.MeshStandardMaterial({ color: 0x3a332c, roughness: 1 });
+  const iron = new THREE.MeshStandardMaterial({ color: 0x3a4044, roughness: 0.55, metalness: 0.55 });
+  const sailMat = new THREE.MeshStandardMaterial({
+    color: 0xc2b49a,
+    roughness: 0.96,
+    side: THREE.DoubleSide,
+  });
+
+  wreck.add(new THREE.Mesh(wreckHullGeometry(), timber));
+
+  [0.18, 0.32, 0.46, 0.6, 0.74].forEach((u, index) => {
+    const section = hullSection(u);
+    const broken = index === 1 || index === 3;
+    [-1, 1].forEach((side) => {
+      if (broken && side > 0) return;
+      const height = section.depth * (broken ? 0.7 : 1.25);
+      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.08, height, 0.05), ribMat);
+      piece.position.set(section.x, section.sheer - height * 0.32, side * section.beam * 0.78);
+      piece.rotation.x = side * 0.48;
+      wreck.add(piece);
+    });
+    if (index === 0 || index === 2 || index === 4) {
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, section.beam * 1.5), bare);
+      deck.position.set(section.x, section.sheer + 0.02, sideShift(index));
+      deck.rotation.z = index === 2 ? 0.35 : 0.04;
+      deck.rotation.y = 0.08;
+      wreck.add(deck);
+    }
+  });
+
+  const keel = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.16, 0.18), soaked);
+  keel.position.set(0.2, -0.95, 0);
+  wreck.add(keel);
+
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 6.4, 7), bare);
+  mast.position.set(-0.2, 2.7, 0.05);
+  mast.rotation.z = 0.22;
+  wreck.add(mast);
+  const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.5, 6), bare);
+  stub.position.set(1.7, 3.6, 0.15);
+  stub.rotation.z = 1.15;
+  wreck.add(stub);
+  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6), bare);
+  yard.position.set(0.15, 4.5, 0.1);
+  yard.rotation.z = 1.35;
+  wreck.add(yard);
+  const sail = new THREE.Mesh(ragGeometry(), sailMat);
+  sail.position.set(-0.15, 3.55, 0.16);
+  sail.rotation.y = 0.4;
+  wreck.add(sail);
+
+  const sprit = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 2.1, 6), bare);
+  sprit.position.set(4.5, 0.35, 0.05);
+  sprit.rotation.z = -0.85;
+  wreck.add(sprit);
+
+  wreck.position.set(-17.2, WATER_Y - 0.55, -1.6);
+  wreck.rotation.y = 0.62;
+  wreck.rotation.z = 0.46;
+  scene.add(wreck);
+
+  const sand = new THREE.Mesh(
+    sandPatch(8.5),
+    new THREE.MeshStandardMaterial({ color: 0x3e433c, roughness: 1 }),
+  );
+  sand.rotation.x = -Math.PI / 2;
+  sand.position.set(-16.6, WATER_Y - 2.15, -1.2);
+  scene.add(sand);
+
+  const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 1.45, 8), iron);
+  cannon.rotation.z = Math.PI / 2;
+  cannon.rotation.y = 0.4;
+  cannon.position.set(-14.8, WATER_Y - 1.95, 0.55);
+  scene.add(cannon);
+
+  const anchor = new THREE.Group();
+  const shank = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.95, 6), iron);
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.05, 0.05), iron);
+  stock.position.y = 0.32;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.05), iron);
+  arm.position.y = -0.42;
+  anchor.add(shank, stock, arm);
+  anchor.rotation.z = 0.9;
+  anchor.position.set(-19.4, WATER_Y - 1.85, -2.6);
+  scene.add(anchor);
+}
+
+function sideShift(index) {
+  return index === 2 ? 0.25 : 0;
+}
+
+function sandPatch(radius) {
+  const geo = new THREE.CircleGeometry(radius, 28);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const dist = Math.hypot(x, y);
+    if (dist < radius * 0.2) continue;
+    const n = 1 + Math.sin(x * 0.55 + y * 0.4) * 0.14 + Math.sin(x * 1.3 - y * 0.8) * 0.06;
+    pos.setXY(i, x * n, y * n);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function createSeaRocks(scene) {
+  const map = seaRockTexture();
+  const material = new THREE.MeshStandardMaterial({
+    map,
+    color: 0xc4b8a8,
+    roughness: 0.96,
+    flatShading: true,
+    vertexColors: true,
+  });
+  [
+    [-24, -9, 2.8, 1.2],
+    [-36, 4, 3.15, 2.5],
+    [-18, 14, 2.25, 3.4],
+    [-44, -16, 2.85, 4.7],
+    [-22.5, -4.2, 1.45, 6.1],
+    [-29, 2.4, 1.25, 7.3],
+  ].forEach(([x, z, scale, seed]) => addSeaOutcrop(scene, material, x, z, scale, seed));
+}
+
 function createCliff(scene) {
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(120, 20, 16),
@@ -1517,12 +1827,8 @@ function createCliff(scene) {
   farWall.position.set(waterFar - 3.5, WATER_Y + 2.4, 0);
   scene.add(farWall);
 
-  const ridge = new THREE.MeshStandardMaterial({ color: 0x6a645c, roughness: 1 });
-  [[-24, -9, 5.2], [-36, 4, 6.4], [-18, 14, 4.2], [-44, -16, 5.6]].forEach(([x, z, height]) => {
-    const peak = new THREE.Mesh(new THREE.ConeGeometry(height * 0.42, height, 6), ridge);
-    peak.position.set(x, WATER_Y + height * 0.18, z);
-    scene.add(peak);
-  });
+  createSeaRocks(scene);
+  createWreck(scene);
 
   const mistMap = canvasTexture(128, 128, (ctx, w, h) => {
     const glow = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
