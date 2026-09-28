@@ -785,14 +785,14 @@ function createSharks(scene, splash) {
     [-0.24, 0.22],
   ], 0.022);
   const whiteTail = finGeometry([
-    [0.04, 0.05],
+    [0.18, 0.045],
     [-0.16, 0.2],
     [-0.46, 0.4],
     [-0.24, 0.1],
     [-0.08, 0.02],
     [-0.26, -0.12],
     [-0.16, -0.2],
-    [0.02, -0.03],
+    [0.16, -0.025],
   ], 0.02);
   const pecGeo = finGeometry([
     [0.02, 0.04],
@@ -912,21 +912,28 @@ function createSharks(scene, splash) {
     addSharkMouth(fish);
     const tail = new THREE.Group();
     tail.name = 'tail';
-    tail.position.set(-0.36, 0.0, 0);
+    tail.position.set(-1.02, 0.01, 0);
     tail.add(new THREE.Mesh(whiteTail, whiteFin));
     fish.add(tail);
     const pecSlice = sharkSlice(0.56);
     const pecY = pecSlice.mid - (pecSlice.mid - pecSlice.belly) * 0.28;
+    const pecDrop = 24 * Math.PI / 180;
     const pec = new THREE.Mesh(pecGeo, whiteFin);
-    pec.position.set(pecSlice.x, pecY, pecSlice.half * 0.7);
     pec.rotation.order = 'YXZ';
     pec.rotation.set(Math.PI / 2, -2.55, 0);
     pec.scale.set(1.15, 1.65, 1.15);
-    fish.add(pec);
+    const pecHinge = new THREE.Group();
+    pecHinge.position.set(pecSlice.x, pecY, pecSlice.half * 0.7);
+    pecHinge.rotation.x = pecDrop;
+    pecHinge.add(pec);
+    fish.add(pecHinge);
     const pecL = pec.clone();
-    pecL.position.z = -pecSlice.half * 0.7;
     pecL.rotation.set(-Math.PI / 2, 2.55, 0);
-    fish.add(pecL);
+    const pecHingeL = new THREE.Group();
+    pecHingeL.position.set(pecSlice.x, pecY, -pecSlice.half * 0.7);
+    pecHingeL.rotation.x = -pecDrop;
+    pecHingeL.add(pecL);
+    fish.add(pecHingeL);
     const eyeSlice = sharkSlice(0.78);
     const eyeGeo = new THREE.SphereGeometry(0.026, 10, 8);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
