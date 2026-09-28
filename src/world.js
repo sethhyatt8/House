@@ -748,7 +748,7 @@ const SEA_ROCKS = [
   { x: -44, z: -16, r: 4.4 },
   { x: -22.5, z: -4.2, r: 2.4 },
   { x: -29, z: 2.4, r: 2.2 },
-  { x: -45.5, z: 12.5, r: 6.5 },
+  { x: -45.5, z: 12.5, r: 8.5 },
 ];
 
 function clearOfRocks(x, z, reach) {
@@ -1494,13 +1494,16 @@ function addSeaOutcrop(scene, material, x, z, scale, seed) {
 }
 
 function hullSection(u) {
-  const mid = Math.sin(u * Math.PI);
-  const end = Math.sin(Math.min(1, Math.min(u, 1 - u) / 0.14) * Math.PI * 0.5);
+  const waist = Math.sin(u * Math.PI);
+  const sternCastle = Math.exp(-((u - 0.07) ** 2) / 0.011);
+  const foreCastle = Math.exp(-((u - 0.86) ** 2) / 0.007);
+  const bowTaper = u > 0.94 ? (1 - u) / 0.06 : 1;
+  const beam = (1.05 + waist * 0.85) * bowTaper * (u < 0.03 ? 0.98 : 1);
   return {
-    x: (u - 0.48) * 10.4,
-    beam: (0.34 + mid * 1.15) * (0.4 + 0.6 * end),
-    depth: (0.28 + mid * 0.85) * (0.48 + 0.52 * end),
-    sheer: 0.05 + mid * 0.16 + (u > 0.78 ? (u - 0.78) * 1.1 : 0),
+    x: (u - 0.46) * 14.6,
+    beam: Math.max(0.45, beam),
+    depth: (0.85 + waist * 0.45) * (0.72 + bowTaper * 0.28),
+    sheer: 0.22 + waist * 0.06 + sternCastle * 2.25 + foreCastle * 0.95,
   };
 }
 
@@ -1529,8 +1532,7 @@ function wreckHullGeometry() {
     const u = i / (stations - 1);
     for (let j = 0; j < around; j += 1) {
       const v = j / around;
-      if (u > 0.2 && u < 0.82 && v < 0.62) continue;
-      if (u > 0.38 && u < 0.72 && v > 0.62) continue;
+      if (u > 0.36 && u < 0.55 && v < 0.32) continue;
       const a = i * row + j;
       const b = a + row;
       indices.push(a, b, a + 1, a + 1, b, b + 1);
@@ -1554,25 +1556,52 @@ function createWreck(scene) {
   const hull = new THREE.Mesh(wreckHullGeometry(), shadow);
   wreck.add(hull);
 
-  [0.16, 0.3, 0.44, 0.58, 0.72, 0.86].forEach((u, index) => {
+  [0.34, 0.46, 0.56].forEach((u, index) => {
     const section = hullSection(u);
-    const reach = section.depth * (index % 2 ? 0.85 : 1.35);
+    const reach = section.depth * 0.9;
     [-1, 1].forEach((side) => {
-      if (index % 3 === 0 && side > 0) return;
-      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.07, reach, 0.045), ribMat);
-      piece.position.set(section.x, section.sheer - reach * 0.42, side * section.beam * 0.72);
-      piece.rotation.x = side * 0.55;
+      if (index === 1 && side > 0) return;
+      const piece = new THREE.Mesh(new THREE.BoxGeometry(0.08, reach, 0.05), ribMat);
+      piece.position.set(section.x, section.sheer - reach * 0.55, side * section.beam * 0.7);
+      piece.rotation.x = side * 0.4;
       wreck.add(piece);
     });
   });
 
-  const keel = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.14, 0.16), shadow);
-  keel.position.set(0.2, -0.9, 0);
+  const stern = hullSection(0.05);
+  const transom = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.45, stern.beam * 1.9), shadow);
+  transom.position.set(stern.x - 0.2, 0.95, 0);
+  wreck.add(transom);
+  [0.55, 1.2, 1.85].forEach((y) => {
+    const gallery = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.07, stern.beam * 1.72), shadow);
+    gallery.position.set(stern.x + 0.15, y, 0);
+    wreck.add(gallery);
+  });
+  const quarter = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.15, stern.beam * 1.55), shadow);
+  quarter.position.set(stern.x + 0.7, 1.55, 0);
+  wreck.add(quarter);
+
+  const bow = hullSection(0.88);
+  const forecastle = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.85, bow.beam * 1.15), shadow);
+  forecastle.position.set(bow.x, 0.7, 0);
+  wreck.add(forecastle);
+  const sprit = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 2.6, 5), shadow);
+  sprit.position.set(bow.x + 1.7, 0.35, 0);
+  sprit.rotation.z = -0.55;
+  wreck.add(sprit);
+
+  const keel = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.16, 0.2), shadow);
+  keel.position.set(0.1, -1.05, 0);
   wreck.add(keel);
 
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.15, 6), wood);
-  mast.position.set(0.15, 0.62, 0);
+  const waist = hullSection(0.48);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 2.4, 6), wood);
+  mast.position.set(waist.x, 1.35, 0);
   wreck.add(mast);
+  const mizzen = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 1.1, 6), shadow);
+  mizzen.position.set(stern.x + 0.85, 2.15, 0);
+  mizzen.rotation.z = 0.18;
+  wreck.add(mizzen);
 
   const nest = new THREE.Group();
   const platform = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.78, 0.07, 8), wood);
@@ -1586,16 +1615,16 @@ function createWreck(scene) {
     post.position.set(Math.cos(a) * 0.7, 0.16, Math.sin(a) * 0.7);
     nest.add(post);
   }
-  nest.position.set(0.15, 1.2, 0);
+  nest.position.set(waist.x, 2.55, 0);
   wreck.add(nest);
 
-  wreck.position.set(-45.5, WATER_Y - 0.42, 12.5);
-  wreck.rotation.y = -0.4;
-  wreck.rotation.z = 0.22;
+  wreck.position.set(-45.5, WATER_Y + 0.55, 12.5);
+  wreck.rotation.y = 1.15;
+  wreck.rotation.z = 0.05;
   scene.add(wreck);
 
   const sand = new THREE.Mesh(
-    sandPatch(11),
+    sandPatch(14),
     new THREE.MeshBasicMaterial({ color: 0x061018 }),
   );
   sand.rotation.x = -Math.PI / 2;
@@ -1657,10 +1686,75 @@ function createCliff(scene) {
   // beside the room is open air down to the water.
   const drop = -WATER_Y + 1.6;
   const underW = 2.2;
-  const under = new THREE.Mesh(new THREE.BoxGeometry(underW, drop, 24), rock);
-  under.position.set(CLIFF_X + underW / 2, -drop / 2, 0);
-  under.receiveShadow = true;
-  scene.add(under);
+  const faceX = CLIFF_X;
+  const skin = 0.78;
+  const innerX = faceX + skin;
+  const yTop = 0;
+  const yBot = -drop;
+  const shaftZ0 = -2.45;
+  const shaftZ1 = -1.4;
+  const shaftTop = -0.42;
+  const shaftBot = -5.9;
+  const caveZ0 = -3.15;
+  const caveZ1 = -0.7;
+  const caveTop = -5.9;
+  const caveBot = WATER_Y - 0.2;
+  const caveDark = new THREE.MeshBasicMaterial({ color: 0x101418 });
+  const slab = (z0, z1, y0, y1, mat = rock) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(skin, y1 - y0, z1 - z0), mat);
+    mesh.position.set(faceX + skin / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  };
+  const backW = underW - skin;
+  const back = new THREE.Mesh(new THREE.BoxGeometry(backW, drop, 24), rock);
+  back.position.set(innerX + backW / 2, -drop / 2, 0);
+  back.receiveShadow = true;
+  scene.add(back);
+  slab(-12, caveZ0, yBot, yTop);
+  slab(caveZ1, 12, yBot, yTop);
+  slab(caveZ0, caveZ1, yBot, caveBot);
+  slab(caveZ0, shaftZ0, caveTop, yTop);
+  slab(shaftZ1, caveZ1, caveTop, yTop);
+  slab(shaftZ0, shaftZ1, shaftTop, yTop);
+
+  const shaftVoid = new THREE.Mesh(
+    new THREE.BoxGeometry(0.42, shaftTop - shaftBot, shaftZ1 - shaftZ0 - 0.08),
+    caveDark,
+  );
+  shaftVoid.position.set(faceX + 0.52, (shaftTop + shaftBot) / 2, (shaftZ0 + shaftZ1) / 2);
+  scene.add(shaftVoid);
+  const caveVoid = new THREE.Mesh(
+    new THREE.BoxGeometry(1.35, caveTop - caveBot - 0.05, caveZ1 - caveZ0 - 0.1),
+    caveDark,
+  );
+  caveVoid.position.set(faceX + 0.62, (caveTop + caveBot) / 2, (caveZ0 + caveZ1) / 2);
+  scene.add(caveVoid);
+
+  const rungW = shaftZ1 - shaftZ0 - 0.18;
+  for (let y = shaftTop - 0.38; y > caveTop + 0.2; y -= 0.46) {
+    const rung = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, rungW), rock);
+    rung.position.set(faceX + 0.22, y, (shaftZ0 + shaftZ1) / 2);
+    scene.add(rung);
+  }
+  const jamb = (z) => {
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.1, shaftTop - shaftBot, 0.08), rock);
+    edge.position.set(faceX + 0.05, (shaftTop + shaftBot) / 2, z);
+    scene.add(edge);
+  };
+  jamb(shaftZ0);
+  jamb(shaftZ1);
+  const caveMid = (caveZ0 + caveZ1) / 2;
+  const caveHalf = (caveZ1 - caveZ0) / 2;
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, caveZ1 - caveZ0 + 0.35), rock);
+  brow.position.set(faceX + 0.06, caveTop + 0.1, caveMid);
+  scene.add(brow);
+  [-1, 1].forEach((side) => {
+    const haunch = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), rock);
+    haunch.position.set(faceX + 0.05, caveTop - 0.22, caveMid + side * (caveHalf - 0.02));
+    haunch.rotation.x = side * -0.55;
+    scene.add(haunch);
+  });
 
   const lip = new THREE.Mesh(
     new THREE.BoxGeometry(0.22, 0.08, 5.6),
