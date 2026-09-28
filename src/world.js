@@ -1306,7 +1306,7 @@ function plankTexture() {
 }
 
 function skyTexture() {
-  return canvasTexture(1024, 512, (ctx, w, h) => {
+  const { texture } = canvasTexture(2048, 1024, (ctx, w, h) => {
     const sky = ctx.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, '#05070f');
     sky.addColorStop(0.42, '#10182c');
@@ -1314,14 +1314,24 @@ function skyTexture() {
     sky.addColorStop(1, '#24344e');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, w, h);
-    for (let i = 0; i < 520; i += 1) {
+    for (let i = 0; i < 900; i += 1) {
       const bright = Math.random();
-      ctx.fillStyle = `rgba(235, 242, 255, ${0.25 + bright * 0.75})`;
-      ctx.beginPath();
-      ctx.arc(Math.random() * w, Math.random() * h * 0.86, bright > 0.92 ? 1.7 : 0.7, 0, Math.PI * 2);
-      ctx.fill();
+      const x = 1 + Math.floor(Math.random() * (w - 3));
+      const y = 1 + Math.floor(Math.random() * h * 0.84);
+      ctx.fillStyle = `rgba(246, 249, 255, ${bright > 0.92 ? 1 : 0.72 + bright * 0.28})`;
+      ctx.fillRect(x, y, 1, 1);
+      if (bright > 0.94) {
+        ctx.fillRect(x - 1, y, 1, 1);
+        ctx.fillRect(x + 1, y, 1, 1);
+        ctx.fillRect(x, y - 1, 1, 1);
+        ctx.fillRect(x, y + 1, 1, 1);
+      }
     }
-  }).texture;
+  });
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  return texture;
 }
 
 function moonTexture() {
@@ -2038,7 +2048,7 @@ function createLadder(scene, targets, x, z, roofY) {
   });
   const rungs = [];
   const rungGeo = new THREE.BoxGeometry(0.06, 0.035, 0.4);
-  const padGeo = new THREE.BoxGeometry(0.36, 0.32, 0.56);
+  const padGeo = new THREE.BoxGeometry(0.12, 0.09, 0.44);
   const padMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   for (let y = 0.42; y <= top - 0.05; y += 0.32) {
     const rung = new THREE.Mesh(rungGeo, wood);
@@ -2047,12 +2057,12 @@ function createLadder(scene, targets, x, z, roofY) {
     rung.userData = { type: 'rung', ladder: group, index: rungs.length };
     group.add(rung);
     const pad = new THREE.Mesh(padGeo, padMat);
-    pad.position.set(-0.08, 0, 0);
+    pad.position.set(0, 0, 0);
     pad.userData = rung.userData;
     rung.add(pad);
     rungs.push(y);
   }
-  group.userData = { type: 'ladder', rungs, roofY };
+  group.userData = { rungs, roofY };
   scene.add(group);
   targets.push(group);
 }
