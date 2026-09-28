@@ -675,42 +675,48 @@ function sharkSkinTexture(base = '#3c5566', grey = false) {
 
 function silverScaleTexture() {
   const { texture } = canvasTexture(1024, 1024, (ctx, w, h) => {
-    ctx.fillStyle = '#b7c3ca';
+    const wash = ctx.createLinearGradient(0, 0, 0, h);
+    wash.addColorStop(0, '#0e2244');
+    wash.addColorStop(0.05, '#16325a');
+    wash.addColorStop(0.11, '#6a8aa0');
+    wash.addColorStop(0.17, '#e4eaee');
+    wash.addColorStop(0.5, '#f7f9fa');
+    wash.addColorStop(0.83, '#e4eaee');
+    wash.addColorStop(0.89, '#6a8aa0');
+    wash.addColorStop(0.95, '#16325a');
+    wash.addColorStop(1, '#0e2244');
+    ctx.fillStyle = wash;
     ctx.fillRect(0, 0, w, h);
-    const cols = 26;
-    const rows = 12;
+    const cols = 34;
+    const rows = 20;
     const rw = w / cols;
     const rh = h / rows;
+    const bands = [];
     for (let row = 0; row < rows; row += 1) {
+      const fromBack = Math.min((row + 0.5) / rows, 1 - (row + 0.5) / rows);
+      if (fromBack < 0.16) bands.push({ row, strength: 1 - fromBack / 0.16 });
+    }
+    bands.sort((a, b) => a.strength - b.strength);
+    bands.forEach(({ row, strength }) => {
       const shift = row % 2 ? rw * 0.5 : 0;
+      const blue = Math.round(18 + (1 - strength) * 90);
       for (let col = -1; col <= cols; col += 1) {
-        const x = col * rw + shift + rw * 0.5;
-        const y = row * rh + rh * 0.62;
-        const plate = ctx.createLinearGradient(x - rw * 0.4, y, x + rw * 0.45, y);
-        plate.addColorStop(0, '#7e8c96');
-        plate.addColorStop(0.4, '#d5dee4');
-        plate.addColorStop(1, '#f7fafb');
-        ctx.fillStyle = plate;
+        const x = col * rw + shift;
+        const y = row * rh + rh * 0.5;
+        ctx.globalAlpha = 0.45 + strength * 0.55;
+        ctx.fillStyle = `rgb(${blue}, ${blue + 28}, ${blue + 58})`;
         ctx.beginPath();
-        ctx.moveTo(x + rw * 0.22, y - rh * 0.46);
-        ctx.quadraticCurveTo(x - rw * 0.62, y - rh * 0.1, x - rw * 0.35, y);
-        ctx.quadraticCurveTo(x - rw * 0.62, y + rh * 0.1, x + rw * 0.22, y + rh * 0.46);
-        ctx.quadraticCurveTo(x + rw * 0.55, y, x + rw * 0.22, y - rh * 0.46);
+        ctx.ellipse(x + rw * 0.15, y, rw * 0.78, rh * 0.95, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#243038';
-        ctx.lineWidth = 4;
+        ctx.globalAlpha = 0.7 + strength * 0.3;
+        ctx.strokeStyle = '#07111c';
+        ctx.lineWidth = 3.2;
         ctx.beginPath();
-        ctx.moveTo(x + rw * 0.12, y - rh * 0.42);
-        ctx.quadraticCurveTo(x - rw * 0.55, y, x + rw * 0.12, y + rh * 0.42);
-        ctx.stroke();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(x + rw * 0.02, y - rh * 0.22);
-        ctx.quadraticCurveTo(x - rw * 0.22, y, x + rw * 0.02, y + rh * 0.22);
+        ctx.arc(x + rw * 0.28, y, Math.min(rw, rh) * 0.72, Math.PI * 0.55, Math.PI * 1.45);
         ctx.stroke();
       }
-    }
+    });
+    ctx.globalAlpha = 1;
   });
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
@@ -792,10 +798,10 @@ function createSharks(scene, splash) {
   const swordBodyMat = new THREE.MeshStandardMaterial({
     map: scaleSkin,
     bumpMap: scaleBump,
-    bumpScale: 0.18,
+    bumpScale: 0.05,
     color: 0xffffff,
-    roughness: 0.42,
-    metalness: 0.22,
+    roughness: 0.48,
+    metalness: 0.12,
     clippingPlanes: [aboveWater],
   });
   const swordFinMat = new THREE.MeshStandardMaterial({
