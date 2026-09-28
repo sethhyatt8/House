@@ -628,13 +628,25 @@ function sharkSlice(u) {
   return { x: p.x, mid: oy, top: oy + p.y, belly: oy - p.y, half: p.z };
 }
 
-function sharkSkinTexture(base = '#3c5566') {
+function sharkSkinTexture(base = '#3c5566', grey = false) {
   const { texture } = canvasTexture(256, 256, (ctx, w, h) => {
-    ctx.fillStyle = base;
+    if (grey) {
+      const wash = ctx.createLinearGradient(0, 0, 0, h);
+      wash.addColorStop(0, '#7c7f83');
+      wash.addColorStop(0.22, '#6a6d71');
+      wash.addColorStop(0.5, '#e4e1dc');
+      wash.addColorStop(0.78, '#6a6d71');
+      wash.addColorStop(1, '#7c7f83');
+      ctx.fillStyle = wash;
+    } else {
+      ctx.fillStyle = base;
+    }
     ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 70; i += 1) {
       const shade = 48 + Math.random() * 70;
-      ctx.fillStyle = `rgba(${shade * 0.62}, ${shade * 0.78}, ${shade}, 0.45)`;
+      ctx.fillStyle = grey
+        ? `rgba(${shade}, ${shade}, ${shade * 0.96}, 0.38)`
+        : `rgba(${shade * 0.62}, ${shade * 0.78}, ${shade}, 0.45)`;
       ctx.beginPath();
       ctx.ellipse(
         Math.random() * w,
@@ -649,13 +661,52 @@ function sharkSkinTexture(base = '#3c5566') {
     }
     for (let i = 0; i < 900; i += 1) {
       const shade = 40 + Math.random() * 50;
-      ctx.fillStyle = `rgba(${shade * 0.55}, ${shade * 0.72}, ${shade * 0.9}, 0.7)`;
+      ctx.fillStyle = grey
+        ? `rgba(${shade}, ${shade * 0.98}, ${shade * 0.94}, 0.55)`
+        : `rgba(${shade * 0.55}, ${shade * 0.72}, ${shade * 0.9}, 0.7)`;
       ctx.fillRect(Math.random() * w, Math.random() * h, 2, 3);
     }
   });
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 1.4);
+  texture.repeat.set(2, grey ? 1 : 1.4);
+  return texture;
+}
+
+function silverScaleTexture() {
+  const { texture } = canvasTexture(512, 512, (ctx, w, h) => {
+    ctx.fillStyle = '#d7e0e6';
+    ctx.fillRect(0, 0, w, h);
+    const rows = 16;
+    const cols = 22;
+    const rh = h / rows;
+    const rw = w / cols;
+    for (let row = 0; row < rows; row += 1) {
+      const shift = row % 2 ? rw * 0.5 : 0;
+      for (let col = -1; col <= cols; col += 1) {
+        const x = col * rw + shift + rw * 0.5;
+        const y = (row + 1) * rh;
+        const tone = 168 + ((row + col) % 3) * 18;
+        ctx.fillStyle = `rgba(${tone - 8}, ${tone + 2}, ${tone + 8}, 0.55)`;
+        ctx.beginPath();
+        ctx.ellipse(x, y - rh * 0.42, rw * 0.46, rh * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(62, 74, 84, 0.55)';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(x, y - rh * 0.95, rw * 0.5, 0.12 * Math.PI, 0.88 * Math.PI);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(x, y - rh * 1.02, rw * 0.34, 0.28 * Math.PI, 0.72 * Math.PI);
+        ctx.stroke();
+      }
+    }
+  });
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(7, 5);
   return texture;
 }
 
@@ -704,18 +755,6 @@ function clearOfRocks(x, z, reach) {
 function createSharks(scene, splash) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
-  const skin = sharkSkinTexture();
-  const skinBump = skin.clone();
-  skinBump.colorSpace = THREE.LinearSRGBColorSpace;
-  const backMat = new THREE.MeshStandardMaterial({
-    map: skin,
-    bumpMap: skinBump,
-    bumpScale: 0.05,
-    color: 0xffffff,
-    roughness: 0.74,
-    metalness: 0.03,
-    clippingPlanes: [aboveWater],
-  });
   const darkMat = new THREE.MeshStandardMaterial({
     color: 0x1a1e22,
     roughness: 0.35,
@@ -739,9 +778,26 @@ function createSharks(scene, splash) {
     side: THREE.DoubleSide,
     clippingPlanes: [belowWater],
   });
-  const finMat = backMat.clone();
-  finMat.side = THREE.DoubleSide;
-  const whiteSkin = sharkSkinTexture('#5e686e');
+  const scaleSkin = silverScaleTexture();
+  const scaleBump = scaleSkin.clone();
+  scaleBump.colorSpace = THREE.LinearSRGBColorSpace;
+  const swordBodyMat = new THREE.MeshStandardMaterial({
+    map: scaleSkin,
+    bumpMap: scaleBump,
+    bumpScale: 0.08,
+    color: 0xf2f6f8,
+    roughness: 0.32,
+    metalness: 0.62,
+    clippingPlanes: [aboveWater],
+  });
+  const swordFinMat = new THREE.MeshStandardMaterial({
+    color: 0x24303a,
+    roughness: 0.48,
+    metalness: 0.22,
+    side: THREE.DoubleSide,
+    clippingPlanes: [aboveWater],
+  });
+  const whiteSkin = sharkSkinTexture('#7c7f83', true);
   const whiteBump = whiteSkin.clone();
   whiteBump.colorSpace = THREE.LinearSRGBColorSpace;
   const whiteMat = new THREE.MeshStandardMaterial({
@@ -784,6 +840,13 @@ function createSharks(scene, splash) {
     [-0.14, 0.32],
     [-0.24, 0.22],
   ], 0.022);
+  const whiteDorsal2 = finGeometry([
+    [-0.62, 0.1],
+    [-0.7, 0.16],
+    [-0.78, 0.2],
+    [-0.88, 0.13],
+    [-0.96, 0.07],
+  ], 0.01);
   const whiteTail = finGeometry([
     [0.18, 0.045],
     [-0.16, 0.2],
@@ -820,16 +883,16 @@ function createSharks(scene, splash) {
   };
   const makeSwordfish = () => {
     const fish = new THREE.Group();
-    const body = new THREE.Mesh(swordBody, backMat);
+    const body = new THREE.Mesh(swordBody, swordBodyMat);
     body.castShadow = true;
     fish.add(body);
-    const dorsal = new THREE.Mesh(swordDorsal, finMat);
+    const dorsal = new THREE.Mesh(swordDorsal, swordFinMat);
     dorsal.castShadow = true;
     fish.add(dorsal);
     const tail = new THREE.Group();
     tail.name = 'tail';
     tail.position.set(-1.05, 0, 0);
-    tail.add(new THREE.Mesh(swordTail, finMat));
+    tail.add(new THREE.Mesh(swordTail, swordFinMat));
     fish.add(tail);
     const eyeGeo = new THREE.SphereGeometry(0.026, 8, 6);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
@@ -909,6 +972,9 @@ function createSharks(scene, splash) {
     const dorsal = new THREE.Mesh(whiteDorsal, whiteFin);
     dorsal.castShadow = true;
     fish.add(dorsal);
+    const dorsal2 = new THREE.Mesh(whiteDorsal2, whiteFin);
+    dorsal2.castShadow = true;
+    fish.add(dorsal2);
     addSharkMouth(fish);
     const tail = new THREE.Group();
     tail.name = 'tail';
@@ -934,14 +1000,27 @@ function createSharks(scene, splash) {
     pecHingeL.rotation.x = -pecDrop;
     pecHingeL.add(pecL);
     fish.add(pecHingeL);
-    const eyeSlice = sharkSlice(0.78);
-    const eyeGeo = new THREE.SphereGeometry(0.026, 10, 8);
+    const eyeSlice = sharkSlice(0.82);
+    const eyeRise = (eyeSlice.top - eyeSlice.mid) * 0.22;
+    const eyeY = eyeSlice.mid + eyeRise;
+    const eyeNz = Math.sqrt(Math.max(0.2, 1 - (eyeRise / (eyeSlice.top - eyeSlice.mid)) ** 2));
+    const eyeGeo = new THREE.SphereGeometry(0.034, 12, 10);
+    const rimGeo = new THREE.SphereGeometry(0.05, 10, 8);
+    const rimMat = darkMat.clone();
+    rimMat.color.set(0xe6e2db);
+    const eyeZ = eyeSlice.half * eyeNz;
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(eyeSlice.x, eyeSlice.mid + 0.015, eyeSlice.half * 0.78);
+    eye.position.set(eyeSlice.x, eyeY, eyeZ);
     fish.add(eye);
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.position.set(eyeSlice.x, eyeY, eyeZ * 0.9);
+    fish.add(rim);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(eyeSlice.x, eyeSlice.mid + 0.015, -eyeSlice.half * 0.78);
+    eyeL.position.set(eyeSlice.x, eyeY, -eyeZ);
     fish.add(eyeL);
+    const rimL = new THREE.Mesh(rimGeo, rimMat);
+    rimL.position.set(eyeSlice.x, eyeY, -eyeZ * 0.9);
+    fish.add(rimL);
     return fish;
   };
   const waterline = { sword: 0.16, white: 0.2 };
