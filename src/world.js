@@ -816,30 +816,34 @@ function createSharks(scene, splash) {
       roughness: 0.38,
       clippingPlanes: [aboveWater],
     });
-    const toothGeo = new THREE.ConeGeometry(0.01, 0.026, 3);
-    const count = 11;
+    const toothGeo = new THREE.ConeGeometry(0.008, 0.018, 3);
+    const count = 13;
     const lip = [];
     for (let i = 0; i < count; i += 1) {
       const across = i / (count - 1) - 0.5;
       const edge = Math.abs(across) * 2;
-      const slice = sharkSlice(0.9 - edge * 0.08);
-      const point = new THREE.Vector3(slice.x - 0.012, slice.belly - 0.006, across * slice.half * 1.35);
+      const slice = sharkSlice(0.93 - edge * 0.2);
+      const point = new THREE.Vector3(
+        slice.x - 0.01,
+        slice.belly + 0.01,
+        across * 2 * slice.half * 0.58,
+      );
       lip.push(point);
-      if (edge > 0.92) continue;
+      if (edge > 0.86) continue;
       const upper = new THREE.Mesh(toothGeo, ivory);
       upper.name = 'tooth';
-      upper.position.set(point.x, point.y - 0.006, point.z);
+      upper.position.set(point.x, point.y + 0.008, point.z);
       upper.rotation.z = Math.PI;
       fish.add(upper);
       const lower = new THREE.Mesh(toothGeo, ivory);
       lower.name = 'tooth';
-      lower.position.set(point.x, point.y - 0.014, point.z);
+      lower.position.set(point.x, point.y - 0.008, point.z);
       fish.add(lower);
     }
     const positions = [];
     const indices = [];
     lip.forEach((point, index) => {
-      positions.push(point.x, point.y, point.z, point.x - 0.008, point.y - 0.01, point.z);
+      positions.push(point.x, point.y, point.z, point.x - 0.016, point.y + 0.012, point.z * 0.86);
       if (index === lip.length - 1) return;
       const k = index * 2;
       indices.push(k, k + 1, k + 2, k + 2, k + 1, k + 3);
@@ -876,15 +880,15 @@ function createSharks(scene, splash) {
     tail.position.set(-1.18, 0.02, 0);
     tail.add(new THREE.Mesh(whiteTail, whiteFin));
     fish.add(tail);
-    const pecSlice = sharkSlice(0.64);
+    const pecSlice = sharkSlice(0.55);
     const pec = new THREE.Mesh(pecGeo, whiteFin);
-    pec.position.set(pecSlice.x, pecSlice.belly + 0.04, pecSlice.half * 0.55);
-    pec.rotation.y = 0.85;
-    pec.scale.set(1.15, 1.15, 1.15);
+    pec.position.set(pecSlice.x, pecSlice.belly + 0.02, pecSlice.half * 0.62);
+    pec.rotation.y = Math.PI - 0.65;
+    pec.scale.set(1.05, 1.05, 1.05);
     fish.add(pec);
     const pecL = pec.clone();
-    pecL.position.z = -pecSlice.half * 0.55;
-    pecL.rotation.y = -0.85;
+    pecL.position.z = -pecSlice.half * 0.62;
+    pecL.rotation.y = Math.PI + 0.65;
     fish.add(pecL);
     const eyeSlice = sharkSlice(0.78);
     const eyeGeo = new THREE.SphereGeometry(0.026, 10, 8);
@@ -1013,6 +1017,10 @@ function createSharks(scene, splash) {
       if (!child.isMesh || !child.material) return;
       const material = child.material.clone();
       material.clippingPlanes = [];
+      material.transparent = false;
+      material.opacity = 1;
+      material.depthWrite = true;
+      material.side = THREE.DoubleSide;
       child.material = material;
       child.castShadow = true;
     });
@@ -1023,20 +1031,18 @@ function createSharks(scene, splash) {
 
 function createAnimalCase(scene, targets, sword, white) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x5c4638, roughness: 0.86 });
-  const glassMat = new THREE.MeshPhysicalMaterial({
-    color: 0xf7f8f8,
-    roughness: 0.03,
-    metalness: 0,
-    transmission: 0.92,
-    thickness: 0.015,
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0xe7eef0,
+    roughness: 0.06,
+    metalness: 0.04,
     transparent: true,
-    opacity: 0.1,
+    opacity: 0.22,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
   const shelfTop = 0.08;
 
-  function addCase(model, label, x, z, scale) {
+  function addCase(model, label, scale) {
     model.scale.setScalar(scale);
     model.rotation.y = 0.35;
     model.position.set(0, 0, 0);
@@ -1049,41 +1055,44 @@ function createAnimalCase(scene, targets, sword, white) {
     const halfL = length / 2 + 0.1;
     const halfW = Math.max(width / 2 + 0.1, 0.18);
     const wallH = height + 0.12;
+    const group = new THREE.Group();
     const base = new THREE.Mesh(new THREE.BoxGeometry(halfL * 2 + 0.08, shelfTop, halfW * 2 + 0.08), wood);
-    base.position.set(x, shelfTop / 2, z);
+    base.position.set(0, shelfTop / 2, 0);
     base.castShadow = true;
     base.receiveShadow = true;
-    base.userData = { type: 'shelf', top: shelfTop, hx: halfL + 0.04, hz: halfW + 0.04 };
-    scene.add(base);
-    targets.push(base);
+    group.add(base);
     const pane = (w, h, d, px, py, pz) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glassMat);
       mesh.position.set(px, py, pz);
-      scene.add(mesh);
+      group.add(mesh);
     };
     const glassY = shelfTop + wallH / 2;
     const thick = 0.012;
-    pane(thick, wallH, halfW * 2, x - halfL, glassY, z);
-    pane(thick, wallH, halfW * 2, x + halfL, glassY, z);
-    pane(halfL * 2, wallH, thick, x, glassY, z - halfW);
-    pane(halfL * 2, wallH, thick, x, glassY, z + halfW);
-    pane(halfL * 2, thick, halfW * 2, x, shelfTop + wallH, z);
-    model.position.set(x, shelfTop + floorY, z);
-    model.userData = {
+    pane(thick, wallH, halfW * 2, -halfL, glassY, 0);
+    pane(thick, wallH, halfW * 2, halfL, glassY, 0);
+    pane(halfL * 2, wallH, thick, 0, glassY, -halfW);
+    pane(halfL * 2, wallH, thick, 0, glassY, halfW);
+    pane(halfL * 2, thick, halfW * 2, 0, shelfTop + wallH, 0);
+    model.position.set(0, shelfTop + floorY, 0);
+    group.add(model);
+    group.userData = {
       type: 'prop',
-      label,
+      label: `${label} case`,
       role: 'loose',
-      floorY,
-      stackH: height,
-      stackSpan: Math.max(length, width) * 0.55,
+      floorY: 0,
+      stackH: shelfTop + wallH + thick,
+      stackSpan: Math.max(halfL, halfW) * 1.2,
       hold: 'level',
     };
-    scene.add(model);
-    targets.push(model);
+    scene.add(group);
+    targets.push(group);
+    return group;
   }
 
-  addCase(sword, 'swordfish', -1.15, -1.15, 0.46);
-  addCase(white, 'great white', -0.35, -0.22, 0.4);
+  const swordCase = addCase(sword, 'swordfish', 0.4);
+  const whiteCase = addCase(white, 'great white', 0.34);
+  swordCase.position.set(-0.55, 0, 0.2);
+  whiteCase.position.set(-0.55, swordCase.userData.stackH, 0.2);
 }
 
 function plankTexture() {
@@ -1488,7 +1497,7 @@ function createLadder(scene, targets, x, z, roofY) {
   const railGeo = new THREE.BoxGeometry(0.05, railH, 0.045);
   [-0.18, 0.18].forEach((side) => {
     const rail = new THREE.Mesh(railGeo, wood);
-    rail.position.set(-0.04, 0.08 + railH / 2, side);
+    rail.position.set(0.04, 0.08 + railH / 2, side);
     rail.castShadow = true;
     group.add(rail);
   });
@@ -1496,16 +1505,16 @@ function createLadder(scene, targets, x, z, roofY) {
   const rungGeo = new THREE.BoxGeometry(0.05, 0.03, 0.4);
   for (let y = 0.42; y <= top - 0.05; y += 0.32) {
     const rung = new THREE.Mesh(rungGeo, wood);
-    rung.position.set(-0.02, y, 0);
+    rung.position.set(0.02, y, 0);
     rung.castShadow = true;
     group.add(rung);
     rungs.push(y);
   }
   const hit = new THREE.Mesh(
-    new THREE.BoxGeometry(0.35, top, 0.5),
+    new THREE.BoxGeometry(0.42, top, 0.52),
     new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   );
-  hit.position.set(-0.1, top / 2, 0);
+  hit.position.set(-0.04, top / 2, 0);
   group.add(hit);
   group.userData = { type: 'ladder', rungs, roofY };
   scene.add(group);
@@ -1553,7 +1562,7 @@ export function createWorld() {
   [[-1.4, 0.55, 0.85], [0.2, 0.7, 1.05], [1.7, 0.42, 0.75]].forEach(([z, hang, depth]) => {
     addRock(0.85, 0.38, depth, coverFrom + 0.15, 2.55 - hang * 0.15, z);
   });
-  createLadder(scene, targets, coverFrom - 0.06, 0.05, 2.95 + 0.31);
+  createLadder(scene, targets, coverFrom - 0.14, -0.65, 2.95 + 0.31);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomSpan, roomZ * 2),
