@@ -123,13 +123,9 @@ function teleportTo(index) {
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
     const pose = ref && xrFrame.getViewerPose(ref);
-    if (ref && pose) {
+    if (pose) {
       const head = pose.transform.position;
-      renderer.xr.setReferenceSpace(ref.getOffsetReferenceSpace(new XRRigidTransform({
-        x: head.x - spot.x,
-        y: 0,
-        z: head.z - spot.z,
-      })));
+      shiftPlayer(spot.x - head.x, -xrOffset.y, spot.z - head.z);
     }
   } else {
     camera.position.copy(spot.eye);
@@ -144,8 +140,14 @@ function teleportNext() {
 }
 
 let climb = null;
+let xrBaseSpace = null;
+const xrOffset = new THREE.Vector3();
 const roomPolar = Math.PI * 0.62;
 const pullPixels = 78;
+const rungAxis = new THREE.Vector3();
+const rungClosest = new THREE.Vector3();
+const handDelta = new THREE.Vector3();
+const raySample = new THREE.Vector3();
 
 function nearestRung(ladder, hitY) {
   const rungs = ladder.userData.rungs;
@@ -210,60 +212,152 @@ function beginClimb(ladder, hitY, rungIndex) {
     hand: null,
     handY: 0,
     raised: 0,
+    lifted: 0,
   };
   if (!renderer.xr.isPresenting) applyClimbView();
   setStatus(renderer.xr.isPresenting
-    ? 'Holding a rung. Pull your hand up.'
+    ? 'Holding a rung. Pull your hand down to climb.'
     : 'Holding a rung. Drag up to pull yourself up.');
 }
 
 function shiftPlayer(dx, dy, dz) {
   if (!renderer.xr.isPresenting || !xrFrame) return false;
-  const ref = renderer.xr.getReferenceSpace();
-  if (!ref || !xrFrame.getViewerPose(ref)) return false;
-  renderer.xr.setReferenceSpace(ref.getOffsetReferenceSpace(new XRRigidTransform({
-    x: -dx,
-    y: -dy,
-    z: -dz,
-  })));
+  if (!xrBaseSpace) xrBaseSpace = renderer.xr.getReferenceSpace();
+  if (!xrBaseSpace) return false;
+  xrOffset.x += dx;
+  xrOffset.y += dy;
+  xrOffset.z += dz;
+  try {
+    renderer.xr.setReferenceSpace(xrBaseSpace.getOffsetReferenceSpace(new XRRigidTransform({
+      x: -xrOffset.x,
+      y: -xrOffset.y,
+      z: -xrOffset.z,
+    })));
+  } catch {
+    xrOffset.x -= dx;
+    xrOffset.y -= dy;
+    xrOffset.z -= dz;
+    return false;
+  }
   return true;
+}
+
+function closestRungToHand(points, reach = 0.2) {
+  let best = null;
+  let bestDist = reach;
+  for (const item of targets) {
+    if (!item.userData?.rungs) continue;
+    for (const child of item.children) {
+      if (child.userData?.type !== 'rung') continue;
+      child.getWorldPosition(worldPoint);
+      child.getWorldQuaternion(yawQuat);
+      rungAxis.set(0, 0, 1).applyQuaternion(yawQuat);
+      for (const point of points) {
+        handDelta.copy(point).sub(worldPoint);
+        const along = THREE.MathUtils.clamp(handDelta.dot(rungAxis), -0.22, 0.22);
+        rungClosest.copy(worldPoint).addScaledVector(rungAxis, along);
+        const dist = rungClosest.distanceTo(point);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = child;
+        }
+      }
+    }
+  }
+  if (!best) return null;
+  return { owner: best, point: best.getWorldPosition(rungClosest) };
+}
+
+function rungFromController(controller) {
+  const byHand = closestRungToHand(handPoints(controller), 0.2);
+  if (byHand) return byHand;
+  const aimed = hitFromController(controller);
+  if (aimed?.owner?.userData.type === 'rung') return aimed;
+  controller.getWorldPosition(handPoint);
+  tmpDir.set(0, 0, -1).applyQuaternion(controller.quaternion);
+  const stop = aimed ? Math.min(2.6, handPoint.distanceTo(aimed.point)) : 2.6;
+  for (let distance = 0.06; distance < stop; distance += 0.08) {
+    raySample.copy(handPoint).addScaledVector(tmpDir, distance);
+    const hit = closestRungToHand([raySample], 0.14);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function standAtLadder(ladder) {
+  if (!renderer.xr.isPresenting || !xrFrame || !ladder) return;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const head = pose.transform.position;
+  const dx = (ladder.position.x - 0.42) - head.x;
+  const dz = ladder.position.z - head.z;
+  if (Math.hypot(dx, dz) > 0.55) shiftPlayer(dx, 0, dz);
+}
+
+function pulseController(controller) {
+  const pad = controller?.userData?.inputSource?.gamepad;
+  const haptic = pad?.hapticActuators?.[0] || pad?.vibrationActuator;
+  if (haptic?.pulse) haptic.pulse(0.7, 50);
 }
 
 function attachClimb(controller, hit) {
   const ladder = hit.owner.userData.ladder;
   if (!ladder) return;
+  const lifted = climb && climb.ladder === ladder ? climb.lifted : 0;
   const index = hit.owner.userData.type === 'rung' ? hit.owner.userData.index : nearestRung(ladder, hit.point.y);
   beginClimb(ladder, hit.point.y, index);
   climb.hand = controller;
+  climb.lifted = lifted;
+  standAtLadder(ladder);
   controller.getWorldPosition(handPoint);
   climb.handY = handPoint.y;
-  climb.raised = 0;
-  setStatus('Holding a rung. Pull your hand up.');
+  pulseController(controller);
+  setStatus('Holding a rung. Pull your hand down to climb.');
+}
+
+function arriveOnRoof() {
+  const ladder = climb?.ladder;
+  if (!ladder) return;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame && xrFrame.getViewerPose(ref);
+  if (pose) {
+    const head = pose.transform.position;
+    const roof = ladder.userData.roofY;
+    const eye = Math.max(1.4, head.y - climb.lifted);
+    shiftPlayer(
+      ladder.position.x + 0.85 - head.x,
+      roof + eye - head.y,
+      ladder.position.z - head.z,
+    );
+  }
+  climb.onRoof = true;
+  climb.hand = null;
+  setStatus('On the roof.');
 }
 
 function pullXrClimb() {
   if (!climb?.hand) return;
   climb.hand.getWorldPosition(handPoint);
   const dy = handPoint.y - climb.handY;
-  if (dy <= 0.01) {
-    climb.handY = handPoint.y;
+  if (dy < -0.004) {
+    const lift = Math.min(0.35, -dy);
+    if (!shiftPlayer(0, lift, 0)) return;
+    climb.handY = handPoint.y + lift;
+    climb.lifted += lift;
+    if (climb.lifted >= climb.ladder.userData.roofY - 0.45) arriveOnRoof();
     return;
   }
-  const moved = shiftPlayer(0, dy, 0);
-  climb.handY = handPoint.y + (moved ? dy : 0);
-  climb.raised += dy;
-  const span = 0.32;
-  const rungs = climb.ladder.userData.rungs;
-  if (climb.raised < span) return;
-  climb.raised -= span;
-  if (climb.rung >= rungs.length - 1) {
-    climb.onRoof = true;
-    climb.hand = null;
-    setStatus('On the roof.');
+  if (dy > 0.12) {
+    let drop = Math.min(0.35, dy);
+    if (climb.lifted - drop < 0) drop = climb.lifted;
+    if (drop > 0.004 && shiftPlayer(0, -drop, 0)) {
+      climb.handY = handPoint.y - drop;
+      climb.lifted -= drop;
+    }
     return;
   }
-  climb.rung += 1;
-  setStatus('Pull up again for the next rung.');
+  if (dy > 0.004) climb.handY = handPoint.y;
 }
 
 function moveClimb(dir) {
@@ -443,11 +537,16 @@ watchForm.addEventListener('submit', (event) => {
 });
 
 renderer.xr.addEventListener('sessionstart', () => {
+  xrBaseSpace = renderer.xr.getReferenceSpace();
+  xrOffset.set(0, 0, 0);
   hudEl.style.display = 'none';
   if (scalePanel) scalePanel.style.display = 'none';
   controls.enabled = false;
 });
 renderer.xr.addEventListener('sessionend', () => {
+  xrBaseSpace = null;
+  xrOffset.set(0, 0, 0);
+  leaveClimb();
   hudEl.style.display = '';
   if (!watching && scalePanel) scalePanel.style.display = '';
   controls.enabled = true;
@@ -483,9 +582,19 @@ function setupController(index) {
   controller.addEventListener('selectend', () => {
     controller.userData.triggerDown = false;
     if (controller.userData.pegDrag) controller.userData.pegDrag = false;
+    if (climb?.hand === controller && !controller.userData.squeezeDown) {
+      climb.hand = null;
+      climb.pull = 0;
+    }
   });
-  controller.addEventListener('squeezestart', () => onXrSqueeze(controller));
-  controller.addEventListener('squeezeend', () => onXrRelease(controller));
+  controller.addEventListener('squeezestart', () => {
+    controller.userData.squeezeDown = true;
+    onXrSqueeze(controller);
+  });
+  controller.addEventListener('squeezeend', () => {
+    controller.userData.squeezeDown = false;
+    onXrRelease(controller);
+  });
   scene.add(controller);
 
   const beam = new THREE.Mesh(
@@ -1743,6 +1852,11 @@ function onKeyDown(event) {
 
 function onXrTrigger(controller) {
   if (watching || held) return;
+  const near = rungFromController(controller);
+  if (near) {
+    attachClimb(controller, near);
+    return;
+  }
   const hit = hitFromController(controller);
   if (hit?.owner?.userData.action === 'peg') {
     controller.userData.pegDrag = true;
@@ -1762,6 +1876,11 @@ function onXrTrigger(controller) {
 
 function onXrSqueeze(controller) {
   if (watching || held) return;
+  const near = rungFromController(controller);
+  if (near) {
+    attachClimb(controller, near);
+    return;
+  }
   const hit = hitFromController(controller);
   if (hit?.owner?.userData.type === 'rung') {
     attachClimb(controller, hit);
@@ -1789,7 +1908,7 @@ function piecePoint() {
 }
 
 function onXrRelease(controller) {
-  if (climb?.hand === controller) {
+  if (climb?.hand === controller && !controller.userData.triggerDown) {
     climb.hand = null;
     climb.pull = 0;
   }
@@ -2285,6 +2404,10 @@ function frame(time, frame) {
     for (const controller of controllers) {
       pollTeleport(controller);
       pollRotate(controller);
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && !held && !climb?.hand) {
+        const near = rungFromController(controller);
+        if (near) attachClimb(controller, near);
+      }
       if (controller.userData.pegDrag) {
         const hit = hitFromController(controller);
         if (hit?.owner?.userData.action === 'peg') setPegFromHit(hit);

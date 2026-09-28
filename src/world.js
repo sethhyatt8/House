@@ -2048,7 +2048,7 @@ function createLadder(scene, targets, x, z, roofY) {
   });
   const rungs = [];
   const rungGeo = new THREE.BoxGeometry(0.06, 0.035, 0.4);
-  const padGeo = new THREE.BoxGeometry(0.12, 0.09, 0.44);
+  const padGeo = new THREE.BoxGeometry(0.08, 0.05, 0.42);
   const padMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   for (let y = 0.42; y <= top - 0.05; y += 0.32) {
     const rung = new THREE.Mesh(rungGeo, wood);
