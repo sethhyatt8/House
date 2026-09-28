@@ -676,15 +676,17 @@ function sharkSkinTexture(base = '#3c5566', grey = false) {
 function silverScaleTexture() {
   const { texture } = canvasTexture(1024, 1024, (ctx, w, h) => {
     const wash = ctx.createLinearGradient(0, 0, 0, h);
-    wash.addColorStop(0, '#0e2244');
-    wash.addColorStop(0.05, '#16325a');
-    wash.addColorStop(0.11, '#6a8aa0');
-    wash.addColorStop(0.17, '#e4eaee');
+    wash.addColorStop(0, '#1a56b0');
+    wash.addColorStop(0.08, '#1e62c0');
+    wash.addColorStop(0.16, '#2f74b8');
+    wash.addColorStop(0.26, '#8eacbf');
+    wash.addColorStop(0.34, '#e4eaee');
     wash.addColorStop(0.5, '#f7f9fa');
-    wash.addColorStop(0.83, '#e4eaee');
-    wash.addColorStop(0.89, '#6a8aa0');
-    wash.addColorStop(0.95, '#16325a');
-    wash.addColorStop(1, '#0e2244');
+    wash.addColorStop(0.66, '#e4eaee');
+    wash.addColorStop(0.74, '#8eacbf');
+    wash.addColorStop(0.84, '#2f74b8');
+    wash.addColorStop(0.92, '#1e62c0');
+    wash.addColorStop(1, '#1a56b0');
     ctx.fillStyle = wash;
     ctx.fillRect(0, 0, w, h);
     const cols = 78;
@@ -694,17 +696,19 @@ function silverScaleTexture() {
     const bands = [];
     for (let row = 0; row < rows; row += 1) {
       const fromBack = Math.min((row + 0.5) / rows, 1 - (row + 0.5) / rows);
-      if (fromBack < 0.16) bands.push({ row, strength: 1 - fromBack / 0.16 });
+      if (fromBack < 0.2) bands.push({ row, strength: 1 - fromBack / 0.2 });
     }
     bands.sort((a, b) => a.strength - b.strength);
     bands.forEach(({ row, strength }) => {
       const shift = row % 2 ? rw * 0.5 : 0;
-      const blue = Math.round(18 + (1 - strength) * 90);
+      const red = Math.round(22 + (1 - strength) * 36);
+      const green = Math.round(78 + (1 - strength) * 48);
+      const blue = Math.round(176 + (1 - strength) * 24);
       for (let col = -1; col <= cols; col += 1) {
         const x = col * rw + shift;
         const y = row * rh + rh * 0.5;
-        ctx.globalAlpha = 0.45 + strength * 0.55;
-        ctx.fillStyle = `rgb(${blue}, ${blue + 28}, ${blue + 58})`;
+        ctx.globalAlpha = 0.55 + strength * 0.4;
+        ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
         ctx.beginPath();
         ctx.ellipse(x + rw * 0.15, y, rw * 0.78, rh * 0.95, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -814,6 +818,8 @@ function createSharks(scene, splash) {
     side: THREE.DoubleSide,
     clippingPlanes: [aboveWater],
   });
+  const swordDorsalMat = swordFinMat.clone();
+  swordDorsalMat.color.set(0x1a62c8);
   const mouthMat = new THREE.MeshStandardMaterial({
     color: 0x2a1618,
     roughness: 0.86,
@@ -932,7 +938,8 @@ function createSharks(scene, splash) {
     const body = new THREE.Mesh(swordBody, swordBodyMat);
     body.castShadow = true;
     fish.add(body);
-    const dorsal = new THREE.Mesh(swordDorsal, swordFinMat);
+    const dorsal = new THREE.Mesh(swordDorsal, swordDorsalMat);
+    dorsal.name = 'dorsal';
     dorsal.castShadow = true;
     fish.add(dorsal);
     const anal = new THREE.Mesh(swordAnal, swordFinMat);
@@ -2108,7 +2115,21 @@ export function createWorld() {
   [[-1.4, 0.55, 0.85], [0.2, 0.7, 1.05], [1.7, 0.42, 0.75]].forEach(([z, hang, depth]) => {
     addRock(0.85, 0.38, depth, coverFrom + 0.15, 2.55 - hang * 0.15, z);
   });
-  createLadder(scene, targets, coverFrom - 0.14, -0.65, 2.95 + 0.31);
+  const roofTop = 2.95 + 0.31;
+  const roofDepth = roomZ * 2 + 1.15;
+  const roof = {
+    y: roofTop,
+    x: ceilX,
+    z: 0,
+    x0: coverFrom,
+    x1: coverTo,
+    z0: -roofDepth / 2,
+    z1: roofDepth / 2,
+    roomX1: roomRight,
+    roomZ0: -roomZ,
+    roomZ1: roomZ,
+  };
+  createLadder(scene, targets, coverFrom - 0.14, -0.65, roofTop);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomSpan, roomZ * 2),
@@ -2255,6 +2276,7 @@ export function createWorld() {
       puddles.update(dt);
     },
     splash: cliff.splash,
+    roof,
   };
 }
 

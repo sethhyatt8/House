@@ -24,7 +24,7 @@ const watching = watchParam != null;
 const roomCode = watching ? watchCodeFromUrl() : hostRoomCode();
 
 const world = createWorld();
-const { scene, camera, buildRoot, gridGroup, targets, machine } = world;
+const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
 const grid = createGrid();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -93,7 +93,7 @@ function addTeleportSpot(spec) {
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = 0.03;
   group.add(ring, disc);
-  group.position.set(spec.x, 0, spec.z);
+  group.position.set(spec.x, spec.floor ?? 0, spec.z);
   group.userData = { type: 'teleport', spot: teleportSpots.length };
   scene.add(group);
   targets.push(group);
@@ -114,32 +114,49 @@ addTeleportSpot({
   look: new THREE.Vector3(-5.2, 0.85, 0.15),
   status: 'Cliff edge.',
 });
+addTeleportSpot({
+  x: roof.x,
+  z: roof.z,
+  floor: roof.y,
+  eye: new THREE.Vector3(roof.x, roof.y + 1.55, roof.z),
+  look: new THREE.Vector3(roof.x - 4.2, roof.y + 0.7, roof.z + 0.2),
+  status: 'On the roof.',
+});
 
 function teleportTo(index) {
   const spot = teleportSpots[index];
   if (!spot) return;
   leaveClimb();
   teleportIndex = index;
+  fallVy = 0;
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
     const pose = ref && xrFrame.getViewerPose(ref);
     if (pose) {
       const head = pose.transform.position;
-      shiftPlayer(spot.x - head.x, -xrOffset.y, spot.z - head.z);
+      const floor = spot.floor ?? 0;
+      shiftPlayer(spot.x - head.x, floor - xrOffset.y, spot.z - head.z);
     }
   } else {
+    const onRoof = (spot.floor ?? 0) > 1;
+    controls.maxPolarAngle = onRoof ? Math.PI * 0.92 : roomPolar;
+    controls.minPolarAngle = onRoof ? 0.15 : 0;
+    controls.maxDistance = onRoof ? 8 : 4.2;
     camera.position.copy(spot.eye);
     controls.target.copy(spot.look);
     controls.update();
   }
-  setStatus(`${spot.status} Press A for the other spot.`);
+  setStatus(`${spot.status} Press A for the next spot.`);
 }
 
 function teleportNext() {
-  teleportTo(teleportIndex === 1 ? 0 : 1);
+  const order = [1, 0, 2];
+  const at = order.indexOf(teleportIndex);
+  teleportTo(order[(at + 1) % order.length]);
 }
 
 let climb = null;
+let fallVy = 0;
 let xrBaseSpace = null;
 const xrOffset = new THREE.Vector3();
 const roomPolar = Math.PI * 0.62;
@@ -469,7 +486,56 @@ function leaveClimb() {
   controls.maxPolarAngle = roomPolar;
   controls.minPolarAngle = 0;
   controls.maxDistance = 4.2;
-  controls.enabled = true;
+  controls.enabled = !renderer.xr.isPresenting;
+}
+
+function groundUnder(x, z, feetY) {
+  const overRoof = x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1;
+  if (overRoof && feetY >= roof.y - 0.25) return roof.y;
+  const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
+  if (overFloor) return 0;
+  return WATER_Y;
+}
+
+function updatePlayerFall(dt) {
+  if (watching || !renderer.xr.isPresenting || !xrFrame) return;
+  if (climb?.hand) {
+    fallVy = 0;
+    return;
+  }
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const head = pose.transform.position;
+  const feetY = xrOffset.y;
+  const ground = groundUnder(head.x, head.z, feetY);
+  const gap = feetY - ground;
+  if (gap <= 0.12) {
+    if (gap < -0.01) shiftPlayer(0, ground - feetY, 0);
+    if (fallVy < -1.2 && ground <= WATER_Y + 0.05) {
+      world.splash(head.x, head.z);
+      fallVy = 0;
+      teleportTo(1);
+      return;
+    }
+    fallVy = 0;
+    return;
+  }
+  if (climb) leaveClimb();
+  fallVy = Math.max(-16, fallVy - 9.2 * dt);
+  const next = feetY + fallVy * dt;
+  if (next <= ground) {
+    shiftPlayer(0, ground - feetY, 0);
+    if (ground <= WATER_Y + 0.05) {
+      world.splash(head.x, head.z);
+      fallVy = 0;
+      teleportTo(1);
+      return;
+    }
+    fallVy = 0;
+    return;
+  }
+  shiftPlayer(0, fallVy * dt, 0);
 }
 
 const raycaster = new THREE.Raycaster();
@@ -2400,6 +2466,7 @@ function frame(time, frame) {
     if (renderer.xr.isPresenting && climb.hand) pullXrClimb();
     if (!renderer.xr.isPresenting) applyClimbView();
   }
+  updatePlayerFall(dt);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
     for (const controller of controllers) {
       pollTeleport(controller);
