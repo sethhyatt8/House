@@ -811,6 +811,12 @@ function createSharks(scene, splash) {
     side: THREE.DoubleSide,
     clippingPlanes: [aboveWater],
   });
+  const mouthMat = new THREE.MeshStandardMaterial({
+    color: 0x2a1618,
+    roughness: 0.86,
+    side: THREE.DoubleSide,
+    clippingPlanes: [aboveWater],
+  });
   const whiteSkin = sharkSkinTexture('#7c7f83', true);
   const whiteBump = whiteSkin.clone();
   whiteBump.colorSpace = THREE.LinearSRGBColorSpace;
@@ -835,6 +841,14 @@ function createSharks(scene, splash) {
     [-0.32, -0.1],
     [-0.12, -0.08],
   ], 0.01);
+  const swordMouth = finGeometry([
+    [0.84, -0.05],
+    [0.96, -0.09],
+    [1.12, -0.07],
+    [1.1, -0.038],
+    [0.94, -0.032],
+    [0.84, -0.04],
+  ], 0.016);
   const swordPelvic = finGeometry([
     [0.04, -0.01],
     [-0.02, -0.08],
@@ -937,13 +951,27 @@ function createSharks(scene, splash) {
     tail.position.set(-1.05, 0, 0);
     tail.add(new THREE.Mesh(swordTail, swordFinMat));
     fish.add(tail);
-    const eyeGeo = new THREE.SphereGeometry(0.026, 8, 6);
+    const head = swordfishProfile(0.73);
+    const eyeY = head.y * 0.18;
+    const eyeZ = head.z * Math.sqrt(Math.max(0.15, 1 - (eyeY / head.y) ** 2));
+    const eyeGeo = new THREE.SphereGeometry(0.034, 16, 12);
+    const glintGeo = new THREE.SphereGeometry(0.009, 8, 6);
+    const glintMat = darkMat.clone();
+    glintMat.color.set(0xf2f5f7);
     const eye = new THREE.Mesh(eyeGeo, darkMat);
-    eye.position.set(0.82, 0.04, 0.062);
+    eye.position.set(head.x, eyeY, eyeZ);
     fish.add(eye);
+    const glint = new THREE.Mesh(glintGeo, glintMat);
+    glint.position.set(head.x + 0.012, eyeY + 0.012, eyeZ + 0.02);
+    fish.add(glint);
     const eyeL = new THREE.Mesh(eyeGeo, darkMat);
-    eyeL.position.set(0.82, 0.04, -0.062);
+    eyeL.position.set(head.x, eyeY, -eyeZ);
     fish.add(eyeL);
+    const glintL = new THREE.Mesh(glintGeo, glintMat);
+    glintL.position.set(head.x + 0.012, eyeY + 0.012, -eyeZ - 0.02);
+    fish.add(glintL);
+    const mouth = new THREE.Mesh(swordMouth, mouthMat);
+    fish.add(mouth);
     return fish;
   };
   const addSharkMouth = (fish) => {
