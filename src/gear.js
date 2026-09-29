@@ -58,7 +58,7 @@ function carryable(object) {
   return gear === 'hatchet' || gear === 'tile';
 }
 
-export function createGear(scene, camera, targets) {
+export function createGear(scene, camera, targets, roof) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d4c32, roughness: 0.78 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb7b8b4, roughness: 0.42, metalness: 0.55 });
   const leather = new THREE.MeshStandardMaterial({ color: 0x5a3824, roughness: 0.86 });
@@ -83,6 +83,11 @@ export function createGear(scene, camera, targets) {
   let owned = false;
   let menuOpen = false;
   let bladeReady = false;
+  let onPickup = null;
+  let onChop = null;
+  const deck = roof?.y ?? 0;
+  const puzzleX = roof ? (roof.x0 + roof.x1) * 0.5 - 0.15 : -0.55;
+  const puzzleZ = roof ? 1.35 : 2.18;
 
   function enlist(object) {
     if (!targets.includes(object)) targets.push(object);
@@ -233,13 +238,13 @@ export function createGear(scene, camera, targets) {
   choppables.push(crab);
 
   const plinth = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.28, 0.28), stone);
-  plinth.position.set(-0.55, 0.14, 2.18);
+  plinth.position.set(puzzleX, deck + 0.14, puzzleZ);
   plinth.castShadow = true;
   plinth.receiveShadow = true;
   scene.add(plinth);
   for (let i = 0; i < 9; i += 1) {
     const slot = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.012, 0.11), stone);
-    slot.position.set(-0.98 + i * 0.105, 0.29, 2.18);
+    slot.position.set(puzzleX - 0.42 + i * 0.105, deck + 0.29, puzzleZ);
     slot.userData = { type: 'gear', gear: 'slot', index: i, filled: 0 };
     scene.add(slot);
     enlist(slot);
@@ -247,7 +252,7 @@ export function createGear(scene, camera, targets) {
   }
 
   const chest = new THREE.Group();
-  chest.position.set(0.22, 0, 2.18);
+  chest.position.set(puzzleX + 0.84, deck, puzzleZ);
   const chestBody = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.2, 0.24), wood);
   chestBody.position.y = 0.1;
   chestBody.castShadow = true;
@@ -300,6 +305,7 @@ export function createGear(scene, camera, targets) {
   function stow(item) {
     const index = firstEmpty();
     if (index < 0 || !carryable(item)) return false;
+    const fresh = !item.userData.carried && !item.userData.inBag;
     clearSeat(item);
     forget(item);
     releasePocket(item);
@@ -313,6 +319,7 @@ export function createGear(scene, camera, targets) {
     scene.attach(item);
     item.position.set(0, -30, 0);
     refreshPockets();
+    if (fresh && onPickup) onPickup();
     return true;
   }
 
@@ -378,6 +385,7 @@ export function createGear(scene, camera, targets) {
     bag.visible = false;
     unlist(bag);
     for (const who of [...vrHands.keys()]) stow(vrHands.get(who));
+    if (onPickup) onPickup();
     return true;
   }
 
@@ -478,26 +486,47 @@ export function createGear(scene, camera, targets) {
     return true;
   }
 
-  function spawnChips(object) {
+  function spawnChips(object, count = 6, scale = 1) {
     object.getWorldPosition(tmp);
-    for (let i = 0; i < 6; i += 1) {
-      const chip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.012, 0.02), wood);
+    for (let i = 0; i < count; i += 1) {
+      const long = scale > 1 && Math.random() > 0.45;
+      const chip = new THREE.Mesh(
+        new THREE.BoxGeometry(0.03 * scale * (long ? 3.2 : 1), 0.012 * scale, 0.02 * scale * (long ? 1.4 : 2.2)),
+        wood,
+      );
       chip.position.copy(tmp);
+      chip.rotation.set(Math.random() * 4, Math.random() * 4, Math.random() * 4);
       scene.add(chip);
       chips.push({
         mesh: chip,
-        v: new THREE.Vector3((Math.random() - 0.5) * 1.4, 0.8 + Math.random(), (Math.random() - 0.5) * 1.4),
-        life: 0.55,
+        v: new THREE.Vector3(
+          (Math.random() - 0.5) * 1.6 * scale,
+          0.8 + Math.random() * scale,
+          (Math.random() - 0.5) * 1.6 * scale,
+        ),
+        spin: new THREE.Vector3((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 14),
+        life: 0.45 + Math.random() * 0.35 * scale,
+        floor: tmp.y > 2 ? deck + 0.02 : 0.02,
       });
     }
   }
 
+  function burstCrate(object) {
+    object.getWorldPosition(tmp);
+    spawnChips(object, 22, 1.8);
+    object.visible = false;
+    scene.remove(object);
+  }
+
   function hurt(object) {
-    if (!object || object.userData.dead) return;
+    if (!object || object.userData.dead || object.userData.role === 'held') return;
     object.userData.hp -= 1;
-    spawnChips(object);
-    if (object.userData.hp > 0) {
-      object.rotation.z += 0.15;
+    const broken = object.userData.hp <= 0;
+    if (broken && object.userData.gear === 'crate') burstCrate(object);
+    else spawnChips(object, object.userData.gear === 'crate' ? 10 : 6, object.userData.gear === 'crate' ? 1.35 : 1);
+    if (onChop) onChop(broken && object.userData.gear === 'crate');
+    if (!broken) {
+      if (object.userData.gear !== 'crate') object.rotation.z += 0.15;
       return;
     }
     object.userData.dead = true;
@@ -524,10 +553,21 @@ export function createGear(scene, camera, targets) {
 
   function swingHit(a, b) {
     const now = performance.now() / 1000;
-    for (const object of [...choppables]) {
+    const list = [];
+    const seen = new Set();
+    for (const object of choppables) {
+      if (object.userData.dead || object.userData.role === 'held') continue;
+      seen.add(object);
+      list.push(object);
+    }
+    for (const object of targets) {
+      if (!object.userData?.choppable || seen.has(object) || object.userData.dead || object.userData.role === 'held') continue;
+      list.push(object);
+    }
+    for (const object of list) {
       if (object.userData.chopAt && now - object.userData.chopAt < 0.4) continue;
       hitBox.setFromObject(object);
-      hitBox.expandByScalar(0.06);
+      hitBox.expandByScalar(object.userData.gear === 'crate' ? 0.04 : 0.06);
       if (!segmentTouches(hitBox, a, b)) continue;
       object.userData.chopAt = now;
       hurt(object);
@@ -615,7 +655,16 @@ export function createGear(scene, camera, targets) {
       chip.life -= dt;
       chip.v.y -= 9.2 * dt;
       chip.mesh.position.addScaledVector(chip.v, dt);
-      if (chip.mesh.position.y < 0.02) chip.mesh.position.y = 0.02;
+      if (chip.spin) {
+        chip.mesh.rotation.x += chip.spin.x * dt;
+        chip.mesh.rotation.y += chip.spin.y * dt;
+        chip.mesh.rotation.z += chip.spin.z * dt;
+      }
+      const floor = chip.floor ?? 0.02;
+      if (chip.mesh.position.y < floor) {
+        chip.mesh.position.y = floor;
+        chip.v.y *= -0.25;
+      }
       if (chip.life <= 0) {
         scene.remove(chip.mesh);
         chips.splice(i, 1);
@@ -643,6 +692,10 @@ export function createGear(scene, camera, targets) {
     },
     pointer() {
       return false;
+    },
+    setSounds(sounds) {
+      onPickup = sounds?.pickup || null;
+      onChop = sounds?.chop || null;
     },
     hatchet,
     bag,

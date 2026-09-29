@@ -25,6 +25,7 @@ const roomCode = watching ? watchCodeFromUrl() : hostRoomCode();
 
 const world = createWorld();
 const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
+world.gear.setSounds({ pickup: playPickup, chop: playChop });
 const grid = createGrid();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -122,6 +123,13 @@ addTeleportSpot({
   look: new THREE.Vector3(roof.x - 4.2, roof.y + 0.7, roof.z + 0.2),
   status: 'On the roof.',
 });
+addTeleportSpot({
+  x: -3.4,
+  z: 0.35,
+  eye: new THREE.Vector3(-2.35, 2.15, 2.7),
+  look: new THREE.Vector3(-6.6, 0.55, 0.15),
+  status: 'On the cliff.',
+});
 
 function teleportTo(index) {
   if (biteHold) return;
@@ -151,7 +159,7 @@ function teleportTo(index) {
 }
 
 function teleportNext() {
-  const order = [1, 0, 2];
+  const order = [1, 3, 0, 2];
   const at = order.indexOf(teleportIndex);
   teleportTo(order[(at + 1) % order.length]);
 }
@@ -580,15 +588,32 @@ function leaveClimb() {
   controls.enabled = !renderer.xr.isPresenting;
 }
 
+function standHeight(x, z, feetY, floor) {
+  let best = floor;
+  for (const crate of world.crates) {
+    if (crate.userData.dead || crate.userData.role === 'held') continue;
+    if (Math.abs(x - crate.position.x) > crate.userData.hx) continue;
+    if (Math.abs(z - crate.position.z) > crate.userData.hz) continue;
+    const top = crate.position.y + crate.userData.hy;
+    if (top > feetY + 0.4) continue;
+    if (top > best) best = top;
+  }
+  return best;
+}
+
 function groundUnder(x, z, feetY) {
   const overRoof = x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1;
-  if (overRoof && feetY >= roof.y - 0.25) return roof.y;
+  if (overRoof && feetY >= roof.y - 0.25) return standHeight(x, z, feetY, roof.y);
   const cave = world.cave;
   if (cave && feetY < -1 && x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return cave.floor;
   const shaft = world.shaft;
   if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.85 && Math.abs(z - shaft.z) < 0.7) return shaft.floor;
   const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
-  if (overFloor) return 0;
+  if (overFloor) return standHeight(x, z, feetY, 0);
+  const yard = world.yard;
+  if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
+    return standHeight(x, z, feetY, yard.y);
+  }
   return WATER_Y;
 }
 
@@ -838,6 +863,51 @@ function envGain(ctx, start, peak, attack, release) {
   gain.gain.exponentialRampToValueAtTime(0.0001, start + attack + release);
   gain.connect(ctx.destination);
   return gain;
+}
+
+function playChop(broken) {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * (broken ? 0.34 : 0.12)), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) {
+    const fade = 1 - i / data.length;
+    data[i] = (Math.random() * 2 - 1) * fade * fade;
+  }
+  const burst = ctx.createBufferSource();
+  burst.buffer = noise;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(broken ? 1800 : 2400, t);
+  filter.frequency.exponentialRampToValueAtTime(broken ? 280 : 700, t + (broken ? 0.22 : 0.08));
+  filter.Q.value = 0.7;
+  const noiseGain = envGain(ctx, t, broken ? 0.28 : 0.12, 0.004, broken ? 0.32 : 0.1);
+  burst.connect(filter);
+  filter.connect(noiseGain);
+  burst.start(t);
+  burst.stop(t + (broken ? 0.34 : 0.12));
+  if (!broken) return;
+  const crack = ctx.createOscillator();
+  crack.type = 'triangle';
+  crack.frequency.setValueAtTime(520, t);
+  crack.frequency.exponentialRampToValueAtTime(90, t + 0.16);
+  crack.connect(envGain(ctx, t, 0.08, 0.005, 0.16));
+  crack.start(t);
+  crack.stop(t + 0.18);
+}
+
+function playPickup() {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  [523.25, 659.25, 783.99, 1046.5].forEach((freq, index) => {
+    const osc = ctx.createOscillator();
+    osc.type = index === 3 ? 'triangle' : 'sine';
+    osc.frequency.value = freq;
+    const start = t + index * 0.05;
+    osc.connect(envGain(ctx, start, 0.055, 0.012, 0.28));
+    osc.start(start);
+    osc.stop(start + 0.32);
+  });
 }
 
 function playBite() {
@@ -2381,6 +2451,10 @@ const presentQuat = new THREE.Quaternion();
 
 function supportY(prop) {
   let best = prop.userData.floorY ?? 0.03;
+  const overRoof = prop.position.x >= roof.x0 && prop.position.x <= roof.x1
+    && prop.position.z >= roof.z0 && prop.position.z <= roof.z1
+    && prop.position.y > roof.y - 0.2;
+  if (overRoof) best = Math.max(best, roof.y + (prop.userData.floorY ?? 0));
   const span = prop.userData.stackSpan ?? 0.35;
   for (const other of targets) {
     if (other === prop || other.userData.role === 'held') continue;
@@ -2405,7 +2479,7 @@ function supportY(prop) {
 }
 
 function presentHeld(prop) {
-  if (!prop) return;
+  if (!prop || prop.userData.hold === 'grip') return;
   if (prop.userData.hold === 'level') {
     towardEye.subVectors(camera.position, prop.position);
     if (towardEye.lengthSq() < 1e-6) return;
@@ -2442,8 +2516,13 @@ function grabProp(prop, holder) {
   propSamples.length = 0;
   if (holder) {
     holder.attach(prop);
-    prop.position.set(0, -0.05, -0.24);
-    presentHeld(prop);
+    if (prop.userData.hold === 'grip') {
+      prop.position.set(0, -0.16, -0.34);
+      prop.rotation.set(-0.2, 0.4, 0);
+    } else {
+      prop.position.set(0, -0.05, -0.24);
+      presentHeld(prop);
+    }
   } else {
     scene.attach(prop);
     presentHeld(prop);
@@ -2483,6 +2562,7 @@ function releaseProp() {
     prop.position.y = supportY(prop);
     prop.rotation.x = 0;
     prop.rotation.z = 0;
+    if (prop.userData.hold === 'grip') prop.rotation.y = 0;
     prop.userData.role = 'loose';
     setBrickRaycast(prop, true);
     if (!targets.includes(prop)) targets.push(prop);
@@ -2512,8 +2592,12 @@ function throwProp(prop, velocity) {
       prop.position.z += vz * dt;
       prop.rotation.x += dt * 2.4;
       prop.rotation.z += dt * 1.7;
-      const overCliff = prop.position.x < CLIFF_X;
-      if (!overCliff) {
+      const yard = world.yard;
+      const onYard = yard
+        && prop.position.x >= yard.x0 && prop.position.x <= yard.x1
+        && prop.position.z >= yard.z0 && prop.position.z <= yard.z1;
+      const inRoom = prop.position.x >= CLIFF_X;
+      if (inRoom) {
         if (prop.position.x > 2.35) {
           prop.position.x = 2.35;
           vx = -Math.abs(vx) * 0.45;
@@ -2527,14 +2611,14 @@ function throwProp(prop, velocity) {
           vz = -Math.abs(vz) * 0.45;
         }
       }
-      if (overCliff && prop.position.y <= WATER_Y) {
+      if (!inRoom && !onYard && prop.position.y <= WATER_Y) {
         world.splash(prop.position.x, prop.position.z);
         prop.parent?.remove(prop);
         job.t = job.d;
         return;
       }
       const rest = prop.userData.stackH != null ? supportY(prop) : floorY;
-      if (!overCliff && prop.position.y <= rest && vy <= 0) {
+      if ((inRoom || onYard) && prop.position.y <= rest && vy <= 0) {
         prop.position.y = rest;
         if (vy < -1.3) {
           vy = -vy * 0.32;
@@ -2542,6 +2626,7 @@ function throwProp(prop, velocity) {
           vz *= 0.55;
           return;
         }
+        if (prop.userData.hold === 'grip') prop.rotation.set(0, 0, 0);
         prop.userData.role = 'loose';
         setBrickRaycast(prop, true);
         if (!targets.includes(prop)) targets.push(prop);

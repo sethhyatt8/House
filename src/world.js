@@ -2392,6 +2392,103 @@ function createLadder(scene, targets, x, z, roofY) {
   targets.push(group);
 }
 
+function createCrateYard(scene, targets, rockMap) {
+  const map = rockMap.clone();
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2.8, 2.2);
+  const rock = new THREE.MeshStandardMaterial({ map, color: 0xa09890, roughness: 1 });
+  const yard = { y: 0, x0: -9.5, x1: CLIFF_X + 0.08, z0: -4.7, z1: 4.7 };
+  const span = CLIFF_X - 0.02 - yard.x0;
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(span, 1.4, yard.z1 - yard.z0),
+    rock,
+  );
+  slab.position.set(yard.x0 + span / 2, -0.7, (yard.z0 + yard.z1) / 2);
+  slab.receiveShadow = true;
+  scene.add(slab);
+  const rim = new THREE.MeshStandardMaterial({ color: 0x7c756c, roughness: 1 });
+  [[yard.x0 + 0.7, yard.z0 + 0.55, 0.55], [yard.x0 + 0.85, yard.z1 - 0.6, 0.42], [yard.x1 - 0.35, yard.z1 - 0.4, 0.34]].forEach(([x, z, radius]) => {
+    const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 1), rim);
+    boulder.position.set(x, radius * 0.42, z);
+    boulder.castShadow = true;
+    boulder.receiveShadow = true;
+    scene.add(boulder);
+  });
+
+  const crateTex = canvasTexture(256, 256, (ctx, w, h) => {
+    ctx.fillStyle = '#6a4630';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#7c5840';
+    for (let i = 0; i < 4; i += 1) ctx.fillRect(10, 16 + i * 58, w - 20, 36);
+    ctx.strokeStyle = '#3a2618';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(8, 8, w - 16, h - 16);
+    ctx.fillStyle = '#4e3422';
+    ctx.fillRect(w * 0.46, 0, 16, h);
+  }).texture;
+  const woods = [0x8a6244, 0x6e4c32, 0x7a5838].map((color) => new THREE.MeshStandardMaterial({
+    map: crateTex,
+    color,
+    roughness: 0.84,
+  }));
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x3e2918, roughness: 0.9 });
+  const crates = [];
+
+  function addCrate(x, z, w, h, d, layer) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woods[crates.length % woods.length]);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    const band = new THREE.Mesh(new THREE.BoxGeometry(w * 0.1, h * 1.02, d * 1.02), bandMat);
+    band.position.x = w * 0.18;
+    mesh.add(band);
+    const band2 = band.clone();
+    band2.position.x = -w * 0.22;
+    mesh.add(band2);
+    mesh.position.set(x, h / 2 + layer * h, z);
+    mesh.userData = {
+      type: 'prop',
+      label: 'crate',
+      role: 'loose',
+      hold: 'grip',
+      floorY: h / 2,
+      stackH: h,
+      stackSpan: Math.min(w, d) * 0.78,
+      hx: w / 2,
+      hz: d / 2,
+      hy: h / 2,
+      choppable: true,
+      gear: 'crate',
+      hp: 2,
+      dead: false,
+    };
+    scene.add(mesh);
+    targets.push(mesh);
+    crates.push(mesh);
+  }
+
+  function pile(x, z, cols, rows, layers, w, h, d) {
+    for (let layer = 0; layer < layers; layer += 1) {
+      for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
+          if (layer > 0 && (col + row + layer) % 4 === 0) continue;
+          addCrate(x + col * (w + 0.04), z + row * (d + 0.04), w, h, d, layer);
+        }
+      }
+    }
+  }
+
+  pile(-5.1, -1.8, 3, 2, 2, 0.52, 0.46, 0.48);
+  pile(-7.5, 0.7, 4, 2, 2, 0.48, 0.42, 0.46);
+  pile(-6.3, -3.5, 3, 1, 2, 0.55, 0.4, 0.44);
+  pile(-3.9, 2.35, 2, 2, 1, 0.58, 0.5, 0.5);
+  pile(-8.55, -0.7, 2, 2, 2, 0.46, 0.44, 0.5);
+  [[-3.15, 0.15, 0.5, 0.42, 0.48], [-2.85, -1.35, 0.62, 0.4, 0.46], [-4.15, 1.15, 0.44, 0.5, 0.44], [-2.55, 1.7, 0.5, 0.38, 0.52]].forEach(([x, z, w, h, d]) => {
+    addCrate(x, z, w, h, d, 0);
+  });
+  return { yard, crates };
+}
+
 export function createWorld() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
@@ -2576,7 +2673,8 @@ export function createWorld() {
   const sharks = createSharks(scene, cliff.splash);
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
-  const gear = createGear(scene, camera, targets);
+  const gear = createGear(scene, camera, targets, roof);
+  const { yard, crates } = createCrateYard(scene, targets, rockMap);
 
   return {
     scene,
@@ -2600,6 +2698,8 @@ export function createWorld() {
       gear.update(dt);
     },
     gear,
+    yard,
+    crates,
     canoe,
     cave: cliff.cave,
     shaft: cliff.shaft,
