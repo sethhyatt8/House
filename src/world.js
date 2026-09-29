@@ -537,9 +537,7 @@ function createFinds(scene, targets, rockMap) {
   }
 }
 
-function tubeGeometry(profile, power) {
-  const rings = 28;
-  const segs = 20;
+function tubeGeometry(profile, power, rings = 28, segs = 20) {
   const exp = 2 / power;
   const positions = [];
   const uvs = [];
@@ -630,47 +628,50 @@ function sharkSlice(u) {
 }
 
 function sharkSkinTexture(base = '#3c5566', grey = false) {
-  const { texture } = canvasTexture(256, 256, (ctx, w, h) => {
+  const size = grey ? 1024 : 256;
+  const { texture } = canvasTexture(size, size, (ctx, w, h) => {
     if (grey) {
-      const wash = ctx.createLinearGradient(0, 0, 0, h);
-      wash.addColorStop(0, '#7c7f83');
-      wash.addColorStop(0.22, '#6a6d71');
-      wash.addColorStop(0.5, '#e4e1dc');
-      wash.addColorStop(0.78, '#6a6d71');
-      wash.addColorStop(1, '#7c7f83');
-      ctx.fillStyle = wash;
+      const image = ctx.createImageData(w, h);
+      const data = image.data;
+      for (let y = 0; y < h; y += 1) {
+        const v = y / h;
+        for (let x = 0; x < w; x += 1) {
+          const u = x / w;
+          const wave = Math.sin(u * Math.PI * 14) * 0.012 + Math.sin(u * Math.PI * 40) * 0.005;
+          const dist = Math.abs(v - 0.5);
+          const blend = THREE.MathUtils.smoothstep(dist, 0.15 + wave, 0.23 + wave);
+          const ridge = THREE.MathUtils.smoothstep(dist, 0.3, 0.5);
+          const grain = Math.sin(x * 0.37 + y * 1.7) * Math.sin(x * 1.9 - y * 0.8);
+          let r = 214 + (62 - 214) * blend - ridge * 22 + grain * 5;
+          let g = 210 + (68 - 210) * blend - ridge * 20 + grain * 5;
+          let b = 198 + (74 - 198) * blend - ridge * 16 + grain * 4;
+          const i = (y * w + x) * 4;
+          data[i] = Math.max(0, Math.min(255, r));
+          data[i + 1] = Math.max(0, Math.min(255, g));
+          data[i + 2] = Math.max(0, Math.min(255, b));
+          data[i + 3] = 255;
+        }
+      }
+      ctx.putImageData(image, 0, 0);
     } else {
       ctx.fillStyle = base;
+      ctx.fillRect(0, 0, w, h);
     }
-    ctx.fillRect(0, 0, w, h);
-    for (let i = 0; i < 70; i += 1) {
-      const shade = 48 + Math.random() * 70;
-      ctx.fillStyle = grey
-        ? `rgba(${shade}, ${shade}, ${shade * 0.96}, 0.38)`
-        : `rgba(${shade * 0.62}, ${shade * 0.78}, ${shade}, 0.45)`;
-      ctx.beginPath();
-      ctx.ellipse(
-        Math.random() * w,
-        Math.random() * h,
-        8 + Math.random() * 28,
-        4 + Math.random() * 14,
-        Math.random() * Math.PI,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-    }
-    for (let i = 0; i < 900; i += 1) {
-      const shade = 40 + Math.random() * 50;
-      ctx.fillStyle = grey
-        ? `rgba(${shade}, ${shade * 0.98}, ${shade * 0.94}, 0.55)`
-        : `rgba(${shade * 0.55}, ${shade * 0.72}, ${shade * 0.9}, 0.7)`;
-      ctx.fillRect(Math.random() * w, Math.random() * h, 2, 3);
+    const specks = grey ? 2400 : 900;
+    for (let i = 0; i < specks; i += 1) {
+      const shade = 36 + Math.random() * 48;
+      const y = Math.random() * h;
+      const onBelly = grey && y > h * 0.34 && y < h * 0.66;
+      ctx.fillStyle = onBelly
+        ? `rgba(${180 + shade * 0.3}, ${176 + shade * 0.25}, ${168 + shade * 0.2}, 0.35)`
+        : `rgba(${shade * 0.7}, ${shade * 0.74}, ${shade * 0.78}, 0.55)`;
+      ctx.fillRect(Math.random() * w, y, grey ? 2 : 2, grey ? 4 : 3);
     }
   });
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, grey ? 1 : 1.4);
+  texture.anisotropy = 8;
   return texture;
 }
 
@@ -782,24 +783,6 @@ function createSharks(scene, splash) {
     roughness: 0.35,
     clippingPlanes: [aboveWater],
   });
-  const shadowMat = new THREE.MeshBasicMaterial({
-    color: 0x000000,
-    side: THREE.DoubleSide,
-    clippingPlanes: [belowWater],
-  });
-  const toothBelow = new THREE.MeshStandardMaterial({
-    color: 0xf4f1ea,
-    roughness: 0.45,
-    metalness: 0.04,
-    side: THREE.DoubleSide,
-    clippingPlanes: [belowWater],
-  });
-  const mouthBelow = new THREE.MeshStandardMaterial({
-    color: 0x2a1214,
-    roughness: 0.92,
-    side: THREE.DoubleSide,
-    clippingPlanes: [belowWater],
-  });
   const scaleSkin = silverScaleTexture();
   const scaleBump = scaleSkin.clone();
   scaleBump.colorSpace = THREE.LinearSRGBColorSpace;
@@ -842,7 +825,7 @@ function createSharks(scene, splash) {
   const whiteFin = whiteMat.clone();
   whiteFin.side = THREE.DoubleSide;
   const swordBody = tubeGeometry(swordfishProfile, 2);
-  const whiteBody = tubeGeometry(greatWhiteProfile, 2);
+  const whiteBody = tubeGeometry(greatWhiteProfile, 2, 64, 48);
   const swordAnal = finGeometry([
     [0.04, -0.12],
     [-0.1, -0.24],
@@ -924,9 +907,9 @@ function createSharks(scene, splash) {
     shadow.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = false;
-      if (child.name === 'tooth') child.material = toothBelow;
-      else if (child.name === 'mouth') child.material = mouthBelow;
-      else child.material = shadowMat;
+      const material = child.material.clone();
+      material.clippingPlanes = [belowWater];
+      child.material = material;
     });
     fish.userData.tail = fish.getObjectByName('tail');
     shadow.userData.tail = shadow.getObjectByName('tail');
@@ -985,59 +968,123 @@ function createSharks(scene, splash) {
     fish.add(mouth);
     return fish;
   };
+  const toothShape = new THREE.Shape();
+  toothShape.moveTo(-0.0065, 0);
+  toothShape.lineTo(0.0065, 0);
+  toothShape.lineTo(0, 0.02);
+  const toothGeo = new THREE.ExtrudeGeometry(toothShape, {
+    depth: 0.0032,
+    bevelEnabled: false,
+  });
+  toothGeo.translate(0, 0, -0.0016);
   const addSharkMouth = (fish) => {
-    const gum = new THREE.MeshStandardMaterial({
-      color: 0x3a1818,
-      roughness: 0.92,
+    const gumMat = new THREE.MeshStandardMaterial({
+      color: 0xc43238,
+      emissive: 0x6e1418,
+      emissiveIntensity: 0.7,
+      roughness: 0.58,
       side: THREE.DoubleSide,
       clippingPlanes: [aboveWater],
     });
-    const ivory = new THREE.MeshStandardMaterial({
-      color: 0xf4f0e6,
-      roughness: 0.38,
+    const cavityMat = new THREE.MeshStandardMaterial({
+      color: 0x5c1016,
+      emissive: 0x3a080c,
+      emissiveIntensity: 0.45,
+      roughness: 0.86,
+      side: THREE.DoubleSide,
       clippingPlanes: [aboveWater],
     });
-    const toothGeo = new THREE.ConeGeometry(0.008, 0.018, 3);
-    const slice = sharkSlice(0.9);
-    const width = slice.half * 0.86;
-    const yTop = slice.belly - 0.004;
-    const yBot = slice.belly - 0.072;
-    const segments = 16;
-    const positions = [slice.x + 0.008, (yTop + yBot) * 0.5, 0];
-    const indices = [];
-    for (let i = 0; i <= segments; i += 1) {
-      const ang = Math.PI * (i / segments);
-      const z = Math.cos(ang) * width;
-      const y = yTop - Math.sin(ang) * (yTop - yBot);
-      positions.push(slice.x + 0.012, y, z);
-      if (i === 0) continue;
-      indices.push(0, i, i + 1);
-      if (i % 2 !== 0 || ang < 0.35 || ang > Math.PI - 0.35) continue;
-      const upper = new THREE.Mesh(toothGeo, ivory);
-      upper.name = 'tooth';
-      upper.position.set(slice.x + 0.012, y + 0.008, z);
-      upper.rotation.z = Math.PI;
-      fish.add(upper);
-      const lower = new THREE.Mesh(toothGeo, ivory);
-      lower.name = 'tooth';
-      lower.position.set(slice.x + 0.012, y - 0.006, z);
-      fish.add(lower);
-    }
-    const mouth = new THREE.Mesh(new THREE.BufferGeometry(), gum);
-    mouth.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    mouth.geometry.setIndex(indices);
-    mouth.geometry.computeVertexNormals();
-    mouth.name = 'mouth';
-    fish.add(mouth);
-    const slit = new THREE.BoxGeometry(0.008, 0.06, 0.006);
+    const toothMat = new THREE.MeshStandardMaterial({
+      color: 0xe6e1d6,
+      emissive: 0x4a4740,
+      emissiveIntensity: 0.55,
+      roughness: 0.4,
+      metalness: 0.05,
+      clippingPlanes: [aboveWater],
+    });
+    const toothGrey = toothMat.clone();
+    toothGrey.color.set(0xb7b2a8);
+    toothGrey.emissive.set(0x3a3834);
+    const jawAt = (t) => {
+      const ang = t * Math.PI;
+      const front = Math.sin(ang);
+      const gape = front ** 0.85;
+      const across = Math.cos(ang);
+      const u = 0.83 + gape * 0.07;
+      const slice = sharkSlice(u);
+      const ry = (slice.top - slice.belly) / 2;
+      const a = Math.PI - across * 0.58;
+      const ny = Math.cos(a);
+      const nz = Math.sin(a);
+      const x = slice.x;
+      const surfY = slice.mid + ny * ry;
+      const surfZ = nz * slice.half;
+      const out = (dist) => [x - dist * 0.15, surfY + ny * dist, surfZ + nz * dist * 0.35];
+      return {
+        seam: out(0.003),
+        upper: out(0.011 + gape * 0.004),
+        lower: out(0.013 + gape * 0.026),
+        chin: out(0.02 + gape * 0.034),
+        pit: out(0.008 + gape * 0.014),
+        front: gape,
+        across,
+      };
+    };
+    const ribbon = (keyA, keyB, name, material) => {
+      const steps = 28;
+      const positions = [];
+      const indices = [];
+      for (let i = 0; i <= steps; i += 1) {
+        const spot = jawAt(i / steps);
+        positions.push(...spot[keyA], ...spot[keyB]);
+      }
+      for (let i = 0; i < steps; i += 1) {
+        const a = i * 2;
+        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
+      mesh.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      mesh.geometry.setIndex(indices);
+      mesh.geometry.computeVertexNormals();
+      mesh.name = name;
+      fish.add(mesh);
+    };
+    ribbon('seam', 'upper', 'gum', gumMat);
+    ribbon('chin', 'lower', 'gum', gumMat);
+    ribbon('upper', 'pit', 'mouth', cavityMat);
+    ribbon('pit', 'lower', 'cavity', cavityMat);
+    const plant = (upper, back, count, material) => {
+      for (let i = 0; i < count; i += 1) {
+        const spot = jawAt((i + 0.5) / count);
+        if (spot.front < 0.42) continue;
+        const tooth = new THREE.Mesh(toothGeo, material);
+        tooth.name = 'tooth';
+        const edge = upper ? spot.upper : spot.lower;
+        tooth.position.set(
+          edge[0] - (back ? 0.01 : 0),
+          edge[1] + (upper ? (back ? 0.003 : 0) : (back ? 0.002 : 0.008)),
+          edge[2] * (back ? 0.72 : 0.98),
+        );
+        tooth.rotation.y = spot.across * 0.25;
+        tooth.rotation.z = upper ? Math.PI : 0;
+        const size = (0.62 + spot.front * 0.38) * (back ? 0.66 : 1);
+        tooth.scale.set(size * (upper ? 1.35 : 0.8), size * 0.7, size);
+        fish.add(tooth);
+      }
+    };
+    plant(true, false, 12, toothMat);
+    plant(true, true, 10, toothGrey);
+    plant(false, false, 11, toothMat);
+    plant(false, true, 9, toothGrey);
+    const slit = new THREE.BoxGeometry(0.005, 0.048, 0.003);
     for (let i = 0; i < 5; i += 1) {
       const slice = sharkSlice(0.7 - i * 0.018);
       const gill = new THREE.Mesh(slit, darkMat);
-      gill.position.set(slice.x, slice.mid - 0.015, slice.half * 0.97);
+      gill.position.set(slice.x, slice.mid - 0.012, slice.half * 0.9);
       gill.rotation.z = -0.35;
       fish.add(gill);
       const gillL = gill.clone();
-      gillL.position.z = -slice.half * 0.97;
+      gillL.position.z = -slice.half * 0.9;
       fish.add(gillL);
     }
   };
