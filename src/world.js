@@ -1760,8 +1760,10 @@ function createWreck(scene) {
   wreck.add(keel);
 
   const waist = hullSection(0.48);
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 2.4, 6), wood);
-  mast.position.set(waist.x, 1.35, 0);
+  const nestY = 3.72;
+  const mastLen = 4.6;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, mastLen, 6), wood);
+  mast.position.set(waist.x, nestY - mastLen / 2, 0);
   wreck.add(mast);
   const mizzen = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 1.1, 6), shadow);
   mizzen.position.set(stern.x + 0.85, 2.15, 0);
@@ -1780,10 +1782,10 @@ function createWreck(scene) {
     post.position.set(Math.cos(a) * 0.7, 0.16, Math.sin(a) * 0.7);
     nest.add(post);
   }
-  nest.position.set(waist.x, 2.55, 0);
+  nest.position.set(waist.x, nestY, 0);
   wreck.add(nest);
 
-  wreck.position.set(-45.5, WATER_Y - 1.15, 12.5);
+  wreck.position.set(-45.5, WATER_Y - 3.55, 12.5);
   wreck.rotation.y = 1.15;
   wreck.rotation.z = 0.05;
   scene.add(wreck);
