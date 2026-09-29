@@ -717,6 +717,7 @@ if (watching) {
   watchNote.textContent = roomCode.length === 4 ? 'Connecting...' : 'Enter the 4-letter room code.';
   setStatus(roomCode.length === 4 ? `Waiting for headset room ${roomCode}...` : 'Enter the 4-letter room code.');
 } else {
+  hudEl.style.display = 'none';
   machine.refreshSelection(selection);
   paintSelection();
   startChallenge(true);
@@ -744,7 +745,7 @@ renderer.xr.addEventListener('sessionend', () => {
   xrBaseSpace = null;
   xrOffset.set(0, 0, 0);
   leaveClimb();
-  hudEl.style.display = '';
+  hudEl.style.display = watching ? '' : 'none';
   if (!watching && scalePanel) scalePanel.style.display = '';
   controls.enabled = true;
 });
@@ -818,6 +819,7 @@ function setupController(index) {
 }
 
 function setStatus(text) {
+  if (!watching) return;
   statusEl.textContent = text;
 }
 
