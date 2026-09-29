@@ -1881,50 +1881,96 @@ function createSeaRocks(scene) {
   ].forEach(([x, z, scale, seed]) => addSeaOutcrop(scene, material, x, z, scale, seed));
 }
 
+function canoeHullGeometry() {
+  const length = 3.7;
+  const rings = 22;
+  const seg = 12;
+  const positions = [];
+  const indices = [];
+  const section = (t) => {
+    const pinch = Math.sin(Math.PI * t);
+    const beam = 0.18 + 0.92 * Math.pow(pinch, 0.38);
+    const sheer = 0.16 + 0.3 * Math.pow(1 - pinch, 1.25);
+    const keel = -0.02 - 0.07 * pinch;
+    const z = (t - 0.5) * length;
+    const outer = [];
+    for (let i = 0; i <= seg; i += 1) {
+      const a = (i / seg) * Math.PI;
+      const x = Math.cos(a) * (beam / 2);
+      const y = keel + (sheer - keel) * Math.pow(Math.abs(Math.cos(a)), 0.65);
+      outer.push([x, y, z]);
+    }
+    const inner = outer.map(([x, y, zed], index) => {
+      if (index === 0 || index === seg) return [x * 0.9, y - 0.025, zed];
+      return [x * 0.84, Math.max(keel + 0.05, y * 0.9), zed];
+    });
+    return { outer, inner };
+  };
+  const outerStart = [];
+  const innerStart = [];
+  for (let r = 0; r <= rings; r += 1) {
+    const slice = section(r / rings);
+    outerStart.push(positions.length / 3);
+    slice.outer.forEach((p) => positions.push(...p));
+    innerStart.push(positions.length / 3);
+    slice.inner.forEach((p) => positions.push(...p));
+  }
+  const link = (a, b, flip) => {
+    for (let i = 0; i < seg; i += 1) {
+      const a0 = a + i;
+      const a1 = a + i + 1;
+      const b0 = b + i;
+      const b1 = b + i + 1;
+      if (flip) indices.push(a0, b0, a1, a1, b0, b1);
+      else indices.push(a0, a1, b0, a1, b1, b0);
+    }
+  };
+  for (let r = 0; r < rings; r += 1) {
+    link(outerStart[r], outerStart[r + 1], false);
+    link(innerStart[r], innerStart[r + 1], true);
+    const o0 = outerStart[r];
+    const o1 = outerStart[r + 1];
+    const i0 = innerStart[r];
+    const i1 = innerStart[r + 1];
+    indices.push(o0, i0, o1, o1, i0, i1);
+    indices.push(o0 + seg, o1 + seg, i0 + seg, o1 + seg, i1 + seg, i0 + seg);
+  }
+  link(outerStart[0], innerStart[0], true);
+  link(outerStart[rings], innerStart[rings], false);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function createCanoe(scene, targets, cave) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a30, roughness: 0.74, side: THREE.DoubleSide });
   const trim = new THREE.MeshStandardMaterial({ color: 0x4e3422, roughness: 0.82 });
   const oarMat = new THREE.MeshStandardMaterial({ color: 0x9a7048, roughness: 0.68 });
   const group = new THREE.Group();
-  const shape = new THREE.Shape();
-  shape.moveTo(-0.22, 0.16);
-  shape.bezierCurveTo(-0.2, 0.02, -0.08, -0.01, 0, -0.015);
-  shape.bezierCurveTo(0.08, -0.01, 0.2, 0.02, 0.22, 0.16);
-  const hole = new THREE.Path();
-  hole.moveTo(-0.16, 0.145);
-  hole.bezierCurveTo(-0.14, 0.05, -0.05, 0.03, 0, 0.028);
-  hole.bezierCurveTo(0.05, 0.03, 0.14, 0.05, 0.16, 0.145);
-  shape.holes.push(hole);
-  const hull = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(shape, { depth: 0.78, bevelEnabled: false, curveSegments: 8 }),
-    wood,
-  );
-  hull.geometry.translate(0, 0, -0.39);
+  const hull = new THREE.Mesh(canoeHullGeometry(), wood);
   hull.userData = { type: 'boatHull' };
   group.add(hull);
-  [-0.2, 0.2].forEach((side) => {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.02, 0.72), trim);
-    rail.position.set(side, 0.155, 0);
-    group.add(rail);
-  });
-  const ends = [];
-  [-1, 1].forEach((dir) => {
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.28, 10), wood);
-    cap.rotation.x = dir === -1 ? Math.PI / 2 : -Math.PI / 2;
-    cap.scale.set(1.05, 1, 0.55);
-    cap.position.set(0, 0.07, dir * 0.5);
-    cap.userData = { type: 'boatEnd', end: dir === -1 ? 'bow' : 'stern' };
-    group.add(cap);
-    ends.push(cap);
-  });
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.03, 0.14), trim);
-  seat.position.set(0, 0.09, 0.02);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.035, 0.16), trim);
+  seat.position.set(0, 0.1, 0.02);
   seat.userData = { type: 'boatSeat' };
   group.add(seat);
+  const thwart = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.1), trim);
+  thwart.position.set(0, 0.11, -0.7);
+  group.add(thwart);
+  const ends = [];
+  [-1, 1].forEach((dir) => {
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.22, 0.16), trim);
+    stem.position.set(0, 0.32, dir * 1.78);
+    stem.userData = { type: 'boatEnd', end: dir === -1 ? 'bow' : 'stern' };
+    group.add(stem);
+    ends.push(stem);
+  });
   const oars = [];
   [-1, 1].forEach((side) => {
     const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.045, 6), trim);
-    pin.position.set(side * 0.2, 0.17, 0);
+    pin.position.set(side * 0.48, 0.22, 0.05);
     group.add(pin);
     const oar = new THREE.Group();
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.72, 6), oarMat);
@@ -1933,7 +1979,7 @@ function createCanoe(scene, targets, cave) {
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.012, 0.2), oarMat);
     blade.position.set(side * 0.4, 0, 0);
     oar.add(blade);
-    oar.position.set(side * 0.2, 0.2, 0);
+    oar.position.set(side * 0.48, 0.26, 0.05);
     oar.rotation.y = side * 0.65;
     oar.rotation.z = side * -0.18;
     oar.userData = { type: 'oar', side, restY: side * 0.65, restZ: side * -0.18 };
@@ -1981,7 +2027,7 @@ function createCanoe(scene, targets, cave) {
     state.vx *= Math.exp(-1.65 * dt);
     state.vz *= Math.exp(-1.65 * dt);
     group.position.x = THREE.MathUtils.clamp(group.position.x, -8, cave.boatX);
-    group.position.z = THREE.MathUtils.clamp(group.position.z, cave.z - 1.4, cave.z + 1.4);
+    group.position.z = THREE.MathUtils.clamp(group.position.z, cave.z - cave.lane, cave.z + cave.lane);
     if (group.position.x < cave.wetX) {
       state.mode = 'float';
       const bob = Math.sin(performance.now() * 0.0016) * 0.012;
@@ -2025,7 +2071,6 @@ function createCliff(scene, targets) {
   // The house sits on this mass. Its chasm face is the floor edge, so the drop
   // beside the room is open air down to the water.
   const drop = -WATER_Y + 1.6;
-  const underW = 2.2;
   const faceX = CLIFF_X;
   const skin = 0.78;
   const innerX = faceX + skin;
@@ -2033,12 +2078,13 @@ function createCliff(scene, targets) {
   const yBot = -drop;
   const shaftZ0 = -2.45;
   const shaftZ1 = -1.4;
+  const shaftMid = (shaftZ0 + shaftZ1) / 2;
   const shaftTop = -0.42;
-  const shaftBot = -5.9;
-  const caveZ0 = -3.15;
-  const caveZ1 = -0.7;
-  const caveTop = -5.9;
-  const caveBot = WATER_Y - 0.2;
+  const caveZ0 = -6.5;
+  const caveZ1 = 2.65;
+  const caveTop = -3.2;
+  const caveBot = WATER_Y - 0.35;
+  const caveBack = 4.4;
   const caveDark = new THREE.MeshBasicMaterial({ color: 0x101418 });
   const slab = (z0, z1, y0, y1, mat = rock) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(skin, y1 - y0, z1 - z0), mat);
@@ -2046,11 +2092,19 @@ function createCliff(scene, targets) {
     mesh.receiveShadow = true;
     scene.add(mesh);
   };
-  const backW = underW - skin;
-  const back = new THREE.Mesh(new THREE.BoxGeometry(backW, drop, 24), rock);
-  back.position.set(innerX + backW / 2, -drop / 2, 0);
-  back.receiveShadow = true;
-  scene.add(back);
+  const mass = (x0, x1, y0, y1, z0, z1) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), rock);
+    mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  };
+  mass(innerX, caveBack + 0.7, yBot, yTop, -12, caveZ0);
+  mass(innerX, caveBack + 0.7, yBot, yTop, caveZ1, 12);
+  mass(innerX, caveBack, caveTop, yTop, caveZ0, shaftZ0);
+  mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
+  mass(innerX, caveBack, shaftTop, yTop, shaftZ0, shaftZ1);
+  mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, caveZ1);
+  mass(-3.6, caveBack, yBot, WATER_Y + 0.02, caveZ0, caveZ1);
   slab(-12, caveZ0, yBot, yTop);
   slab(caveZ1, 12, yBot, yTop);
   slab(caveZ0, caveZ1, yBot, caveBot);
@@ -2059,33 +2113,30 @@ function createCliff(scene, targets) {
   slab(shaftZ0, shaftZ1, shaftTop, yTop);
 
   const shaftVoid = new THREE.Mesh(
-    new THREE.BoxGeometry(0.42, shaftTop - shaftBot, shaftZ1 - shaftZ0 - 0.08),
+    new THREE.BoxGeometry(0.42, shaftTop - caveTop, shaftZ1 - shaftZ0 - 0.08),
     caveDark,
   );
-  shaftVoid.position.set(faceX + 0.52, (shaftTop + shaftBot) / 2, (shaftZ0 + shaftZ1) / 2);
+  shaftVoid.position.set(faceX + 0.52, (shaftTop + caveTop) / 2, shaftMid);
   scene.add(shaftVoid);
-  const caveVoid = new THREE.Mesh(
-    new THREE.BoxGeometry(0.62, caveTop - caveBot - 0.05, caveZ1 - caveZ0 - 0.2),
-    caveDark,
-  );
-  caveVoid.position.set(-0.78, (caveTop + caveBot) / 2, (caveZ0 + caveZ1) / 2);
-  scene.add(caveVoid);
 
-  const caveMid = (caveZ0 + caveZ1) / 2;
+  const caveMid = shaftMid;
   const beachTop = WATER_Y + 0.08;
   const beach = new THREE.Mesh(
-    new THREE.BoxGeometry(0.78, 0.24, caveZ1 - caveZ0 - 0.28),
+    new THREE.BoxGeometry(7.6, 0.28, caveZ1 - caveZ0 - 0.5),
     rock,
   );
-  beach.position.set(-1.4, beachTop - 0.12, caveMid);
+  beach.position.set(0.15, beachTop - 0.14, caveMid);
   beach.receiveShadow = true;
   scene.add(beach);
   const shoal = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 0.16, 2.5),
+    new THREE.BoxGeometry(3.4, 0.16, caveZ1 - caveZ0),
     new THREE.MeshStandardMaterial({ color: 0x8a8176, roughness: 1 }),
   );
-  shoal.position.set(-2.7, WATER_Y - 0.24, caveMid);
+  shoal.position.set(-4.2, WATER_Y - 0.24, caveMid);
   scene.add(shoal);
+  const caveLamp = new THREE.PointLight(0xc9d6e2, 0.85, 16, 1.4);
+  caveLamp.position.set(-2.4, -5.4, caveMid);
+  scene.add(caveLamp);
 
   const rungW = shaftZ1 - shaftZ0 - 0.22;
   const rungX = faceX + 0.22;
@@ -2119,26 +2170,27 @@ function createCliff(scene, targets) {
     roofY: 0.4,
     shaft: { top: 0, base: beachTop },
     topSpot: { x: -1.42, y: 0, z: caveMid },
-    baseSpot: { x: -1.38, y: beachTop, z: -1.05 },
+    baseSpot: { x: -1.15, y: beachTop, z: caveMid },
   };
   scene.add(ladder);
   targets.push(ladder);
   const cave = {
     floor: beachTop,
-    x0: -1.85,
-    x1: -0.95,
-    z0: caveZ0 + 0.12,
-    z1: caveZ1 - 0.08,
+    x0: -3.45,
+    x1: 4.05,
+    z0: caveZ0 + 0.3,
+    z1: caveZ1 - 0.3,
     z: caveMid,
-    standX: -1.38,
-    standZ: -1.05,
-    boatX: -1.46,
-    wetX: -2.2,
+    standX: -1.15,
+    standZ: caveMid,
+    boatX: -1.7,
+    wetX: -3.15,
+    lane: 2.8,
   };
   const shaft = { x: rungX - 0.42, z: caveMid, floor: beachTop };
   const jamb = (z) => {
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.1, shaftTop - shaftBot, 0.08), rock);
-    edge.position.set(faceX + 0.05, (shaftTop + shaftBot) / 2, z);
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.1, shaftTop - caveTop, 0.08), rock);
+    edge.position.set(faceX + 0.05, (shaftTop + caveTop) / 2, z);
     scene.add(edge);
   };
   jamb(shaftZ0);
