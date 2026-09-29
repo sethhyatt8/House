@@ -130,6 +130,13 @@ addTeleportSpot({
   look: new THREE.Vector3(-6.6, 0.55, 0.15),
   status: 'On the cliff.',
 });
+addTeleportSpot({
+  x: -1.22,
+  z: world.cave.z,
+  eye: new THREE.Vector3(-1.05, 1.55, world.cave.z + 0.45),
+  look: new THREE.Vector3(-2.6, -1.4, world.cave.z),
+  status: 'By the cave ladder.',
+});
 
 function teleportTo(index) {
   if (biteHold) return;
@@ -159,7 +166,7 @@ function teleportTo(index) {
 }
 
 function teleportNext() {
-  const order = [1, 3, 0, 2];
+  const order = [1, 4, 3, 0, 2];
   const at = order.indexOf(teleportIndex);
   teleportTo(order[(at + 1) % order.length]);
 }
@@ -171,7 +178,13 @@ let aboard = false;
 let fallVy = 0;
 let biteHold = false;
 let xrBaseSpace = null;
+let xrYaw = 0;
+let gazeLock = null;
 const xrOffset = new THREE.Vector3();
+const spaceQuat = new THREE.Quaternion();
+const spaceEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const spaceUp = new THREE.Vector3(0, 1, 0);
+const spacePivot = new THREE.Vector3();
 const roomPolar = Math.PI * 0.62;
 const pullPixels = 78;
 const rungAxis = new THREE.Vector3();
@@ -250,23 +263,52 @@ function beginClimb(ladder, hitY, rungIndex) {
     : 'Holding a rung. Drag up to pull yourself up.');
 }
 
-function shiftPlayer(dx, dy, dz) {
-  if (!renderer.xr.isPresenting || !xrFrame) return false;
+function applyXrSpace() {
   if (!xrBaseSpace) xrBaseSpace = renderer.xr.getReferenceSpace();
   if (!xrBaseSpace) return false;
+  spaceQuat.setFromAxisAngle(spaceUp, -xrYaw);
+  spacePivot.set(-xrOffset.x, -xrOffset.y, -xrOffset.z).applyQuaternion(spaceQuat);
+  try {
+    renderer.xr.setReferenceSpace(xrBaseSpace.getOffsetReferenceSpace(new XRRigidTransform(
+      { x: spacePivot.x, y: spacePivot.y, z: spacePivot.z },
+      { x: spaceQuat.x, y: spaceQuat.y, z: spaceQuat.z, w: spaceQuat.w },
+    )));
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+function shiftPlayer(dx, dy, dz) {
+  if (!renderer.xr.isPresenting || !xrFrame) return false;
+  const prevX = xrOffset.x;
+  const prevY = xrOffset.y;
+  const prevZ = xrOffset.z;
   xrOffset.x += dx;
   xrOffset.y += dy;
   xrOffset.z += dz;
-  try {
-    renderer.xr.setReferenceSpace(xrBaseSpace.getOffsetReferenceSpace(new XRRigidTransform({
-      x: -xrOffset.x,
-      y: -xrOffset.y,
-      z: -xrOffset.z,
-    })));
-  } catch {
-    xrOffset.x -= dx;
-    xrOffset.y -= dy;
-    xrOffset.z -= dz;
+  if (!applyXrSpace()) {
+    xrOffset.set(prevX, prevY, prevZ);
+    return false;
+  }
+  return true;
+}
+
+function yawAround(delta, pivotX, pivotZ) {
+  const prevYaw = xrYaw;
+  const prevX = xrOffset.x;
+  const prevZ = xrOffset.z;
+  const cos = Math.cos(delta);
+  const sin = Math.sin(delta);
+  const dx = pivotX - xrOffset.x;
+  const dz = pivotZ - xrOffset.z;
+  xrOffset.x = pivotX - (cos * dx + sin * dz);
+  xrOffset.z = pivotZ - (-sin * dx + cos * dz);
+  xrYaw += delta;
+  if (!applyXrSpace()) {
+    xrYaw = prevYaw;
+    xrOffset.x = prevX;
+    xrOffset.z = prevZ;
     return false;
   }
   return true;
@@ -762,6 +804,8 @@ watchForm.addEventListener('submit', (event) => {
 renderer.xr.addEventListener('sessionstart', () => {
   xrBaseSpace = renderer.xr.getReferenceSpace();
   xrOffset.set(0, 0, 0);
+  xrYaw = 0;
+  gazeLock = null;
   hudEl.style.display = 'none';
   if (scalePanel) scalePanel.style.display = 'none';
   controls.enabled = false;
@@ -769,6 +813,8 @@ renderer.xr.addEventListener('sessionstart', () => {
 renderer.xr.addEventListener('sessionend', () => {
   xrBaseSpace = null;
   xrOffset.set(0, 0, 0);
+  xrYaw = 0;
+  gazeLock = null;
   leaveClimb();
   hudEl.style.display = watching ? '' : 'none';
   if (!watching && scalePanel) scalePanel.style.display = '';
@@ -2406,6 +2452,38 @@ function onXrRelease(controller) {
   releaseHeld();
 }
 
+function pollGazeLock() {
+  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip) {
+    gazeLock = null;
+    return;
+  }
+  let turning = false;
+  for (const controller of controllers) {
+    if (controller.userData.inputSource?.gamepad?.buttons?.[3]?.pressed) turning = true;
+  }
+  if (!turning) {
+    gazeLock = null;
+    return;
+  }
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const orient = pose.transform.orientation;
+  spaceQuat.set(orient.x, orient.y, orient.z, orient.w);
+  spaceEuler.setFromQuaternion(spaceQuat, 'YXZ');
+  const yaw = spaceEuler.y;
+  if (!gazeLock) {
+    gazeLock = { yaw };
+    return;
+  }
+  let delta = gazeLock.yaw - yaw;
+  if (delta > Math.PI) delta -= Math.PI * 2;
+  else if (delta < -Math.PI) delta += Math.PI * 2;
+  if (Math.abs(delta) < 0.001) return;
+  const head = pose.transform.position;
+  yawAround(delta, head.x, head.z);
+}
+
 function pollTeleport(controller) {
   const pressed = !!controller.userData.inputSource?.gamepad?.buttons?.[4]?.pressed;
   if (pressed && !controller.userData.teleportLatch) {
@@ -2977,6 +3055,7 @@ function frame(time, frame) {
   }
   updatePlayerFall(dt);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
+    pollGazeLock();
     for (const controller of controllers) {
       pollTeleport(controller);
       pollRotate(controller);
