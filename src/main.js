@@ -124,18 +124,11 @@ addTeleportSpot({
   status: 'On the roof.',
 });
 addTeleportSpot({
-  x: -3.4,
-  z: 0.35,
-  eye: new THREE.Vector3(-2.35, 2.15, 2.7),
-  look: new THREE.Vector3(-6.6, 0.55, 0.15),
-  status: 'On the cliff.',
-});
-addTeleportSpot({
-  x: -1.22,
-  z: world.cave.z,
-  eye: new THREE.Vector3(-1.05, 1.55, world.cave.z + 0.45),
-  look: new THREE.Vector3(-2.6, -1.4, world.cave.z),
-  status: 'By the cave ladder.',
+  x: 0.35,
+  z: 8.85,
+  eye: new THREE.Vector3(0.35, 1.7, 8.45),
+  look: new THREE.Vector3(0.4, 0.4, 4.2),
+  status: 'Out among the crates.',
 });
 
 function teleportTo(index) {
@@ -166,7 +159,7 @@ function teleportTo(index) {
 }
 
 function teleportNext() {
-  const order = [1, 4, 3, 0, 2];
+  const order = [1, 3, 0, 2];
   const at = order.indexOf(teleportIndex);
   teleportTo(order[(at + 1) % order.length]);
 }

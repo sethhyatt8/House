@@ -2015,7 +2015,11 @@ function createCliff(scene, targets) {
   moon.position.set(-22, 9, 1);
   scene.add(moon);
 
-  const rock = new THREE.MeshStandardMaterial({ color: 0x6e675f, roughness: 1 });
+  const stoneMap = rockTexture();
+  stoneMap.wrapS = THREE.RepeatWrapping;
+  stoneMap.wrapT = THREE.RepeatWrapping;
+  stoneMap.repeat.set(1.6, 2.4);
+  const rock = new THREE.MeshStandardMaterial({ map: stoneMap, color: 0xc4b8aa, roughness: 1 });
   const farRock = new THREE.MeshStandardMaterial({ color: 0x7a746c, roughness: 1 });
 
   // The house sits on this mass. Its chasm face is the floor edge, so the drop
@@ -2083,17 +2087,29 @@ function createCliff(scene, targets) {
   shoal.position.set(-2.7, WATER_Y - 0.24, caveMid);
   scene.add(shoal);
 
-  const rungW = shaftZ1 - shaftZ0 - 0.18;
+  const rungW = shaftZ1 - shaftZ0 - 0.22;
   const rungX = faceX + 0.22;
   const ladder = new THREE.Group();
   ladder.position.set(rungX, 0, caveMid);
+  const cutMat = new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 1 });
+  const pierTop = shaftTop - 0.08;
+  const pierBot = WATER_Y + 0.9;
+  const recess = new THREE.Mesh(new THREE.BoxGeometry(0.12, pierTop - pierBot, rungW * 0.72), cutMat);
+  recess.position.set(0.05, (pierTop + pierBot) / 2, 0);
+  ladder.add(recess);
   const rungs = [];
   const rungYs = [];
-  for (let y = shaftTop - 0.38; y >= WATER_Y + 1.05; y -= 0.46) rungYs.push(y);
-  rungYs.reverse().forEach((y) => {
-    const rung = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, rungW), rock);
-    rung.position.set(0, y, 0);
+  for (let y = shaftTop - 0.42; y >= WATER_Y + 1.05; y -= 0.46) rungYs.push(y);
+  rungYs.forEach((y) => {
+    const course = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.24, rungW + 0.14), rock);
+    course.position.set(-0.04, y + 0.3, 0);
+    course.castShadow = true;
+    course.receiveShadow = true;
+    ladder.add(course);
+    const rung = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.07, rungW * 0.78), rock);
+    rung.position.set(-0.2, y, 0);
     rung.castShadow = true;
+    rung.receiveShadow = true;
     rung.userData = { type: 'rung', ladder, index: rungs.length };
     ladder.add(rung);
     rungs.push(y);
@@ -2445,17 +2461,18 @@ function createCrateYard(scene, targets, rockMap) {
   map.wrapT = THREE.RepeatWrapping;
   map.repeat.set(2.8, 2.2);
   const rock = new THREE.MeshStandardMaterial({ map, color: 0xa09890, roughness: 1 });
-  const yard = { y: 0, x0: -9.5, x1: CLIFF_X + 0.08, z0: -4.7, z1: 4.7 };
-  const span = CLIFF_X - 0.02 - yard.x0;
+  const yard = { y: 0, x0: CLIFF_X + 0.04, x1: 3.35, z0: 2.58, z1: 10.2 };
+  const span = yard.x1 - yard.x0;
+  const depth = yard.z1 - 2.72;
   const slab = new THREE.Mesh(
-    new THREE.BoxGeometry(span, 1.4, yard.z1 - yard.z0),
+    new THREE.BoxGeometry(span, 1.4, depth),
     rock,
   );
-  slab.position.set(yard.x0 + span / 2, -0.7, (yard.z0 + yard.z1) / 2);
+  slab.position.set(yard.x0 + span / 2, -0.7, 2.72 + depth / 2);
   slab.receiveShadow = true;
   scene.add(slab);
   const rim = new THREE.MeshStandardMaterial({ color: 0x7c756c, roughness: 1 });
-  [[yard.x0 + 0.7, yard.z0 + 0.55, 0.55], [yard.x0 + 0.85, yard.z1 - 0.6, 0.42], [yard.x1 - 0.35, yard.z1 - 0.4, 0.34]].forEach(([x, z, radius]) => {
+  [[yard.x0 + 0.55, yard.z1 - 0.7, 0.48], [yard.x1 - 0.6, yard.z1 - 0.85, 0.4], [yard.x1 - 0.5, 3.35, 0.32]].forEach(([x, z, radius]) => {
     const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 1), rim);
     boulder.position.set(x, radius * 0.42, z);
     boulder.castShadow = true;
@@ -2525,12 +2542,12 @@ function createCrateYard(scene, targets, rockMap) {
     }
   }
 
-  pile(-5.1, -1.8, 3, 2, 2, 0.52, 0.46, 0.48);
-  pile(-7.5, 0.7, 4, 2, 2, 0.48, 0.42, 0.46);
-  pile(-6.3, -3.5, 3, 1, 2, 0.55, 0.4, 0.44);
-  pile(-3.9, 2.35, 2, 2, 1, 0.58, 0.5, 0.5);
-  pile(-8.55, -0.7, 2, 2, 2, 0.46, 0.44, 0.5);
-  [[-3.15, 0.15, 0.5, 0.42, 0.48], [-2.85, -1.35, 0.62, 0.4, 0.46], [-4.15, 1.15, 0.44, 0.5, 0.44], [-2.55, 1.7, 0.5, 0.38, 0.52]].forEach(([x, z, w, h, d]) => {
+  pile(-0.85, 3.55, 3, 2, 2, 0.52, 0.46, 0.48);
+  pile(1.35, 4.7, 3, 2, 2, 0.48, 0.42, 0.46);
+  pile(-0.7, 6.15, 2, 3, 2, 0.5, 0.44, 0.46);
+  pile(1.15, 7.55, 3, 2, 2, 0.46, 0.42, 0.5);
+  pile(-0.4, 8.85, 2, 2, 1, 0.55, 0.4, 0.48);
+  [[0.55, 3.15, 0.5, 0.42, 0.48], [1.85, 3.4, 0.62, 0.4, 0.46], [-1.15, 4.85, 0.44, 0.5, 0.44], [2.35, 6.4, 0.5, 0.38, 0.52]].forEach(([x, z, w, h, d]) => {
     addCrate(x, z, w, h, d, 0);
   });
   return { yard, crates };
@@ -2565,7 +2582,6 @@ export function createWorld() {
     scene.add(mesh);
   };
   addRock(roomSpan + 0.8, 2.7, 0.7, roomMidX, 1.35, -roomZ - 0.2);
-  addRock(roomSpan + 0.5, 1.7, 0.55, roomMidX, 0.85, roomZ + 0.16);
   addRock(0.7, 3.1, roomZ * 2 + 0.6, roomRight + 0.28, 1.55, 0);
   addRock(1.1, 1.15, 0.8, 1.15, 0.58, -2.15);
   addRock(0.7, 0.85, 1.3, 2.15, 0.42, 1.55);

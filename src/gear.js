@@ -124,8 +124,25 @@ export function createGear(scene, camera, targets, roof) {
       child.receiveShadow = true;
     }
   });
-  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade };
-  holdPose(hatchet, [0.02, -0.06, -0.22], [-Math.PI / 2, 0, 0.15]);
+  const grip = new THREE.Group();
+  grip.position.set(0, 0.055, 0);
+  grip.visible = false;
+  const skin = new THREE.MeshStandardMaterial({ color: 0xc9956b, roughness: 0.66 });
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.042, 0.046), skin);
+  grip.add(palm);
+  for (let i = 0; i < 4; i += 1) {
+    const finger = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.038, 0.016), skin);
+    finger.position.set(0.012, 0.01, -0.02 + i * 0.014);
+    finger.rotation.z = -1.15;
+    grip.add(finger);
+  }
+  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.034, 0.016), skin);
+  thumb.position.set(-0.02, 0.006, 0.02);
+  thumb.rotation.z = 0.9;
+  grip.add(thumb);
+  hatchet.add(grip);
+  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade, grip };
+  holdPose(hatchet, [0, -0.012, 0.06], [-Math.PI / 2, 0.08, -0.45]);
   scene.add(hatchet);
   enlist(hatchet);
 
@@ -153,7 +170,7 @@ export function createGear(scene, camera, targets, roof) {
   strap.rotation.y = Math.PI / 2;
   strap.position.set(0, 0.12, 0);
   bag.add(strap);
-  bag.position.set(0.42, 0.11, 1.22);
+  bag.position.set(1.02, 0.12, 0.28);
   bag.rotation.y = 0.5;
   bag.userData = { type: 'gear', gear: 'bag', floorY: 0.11 };
   scene.add(bag);
@@ -337,6 +354,7 @@ export function createGear(scene, camera, targets, roof) {
     if (item.userData.gear === 'tile' && faceYaw != null) item.rotation.set(0, faceYaw, 0);
     else item.rotation.copy(item.userData.restRot);
     item.userData.carried = false;
+    if (item.userData.grip) item.userData.grip.visible = false;
     item.userData.inBag = false;
     bladeReady = false;
     enlist(item);
@@ -371,6 +389,7 @@ export function createGear(scene, camera, targets, roof) {
     item.position.copy(item.userData.holdPos);
     item.rotation.copy(item.userData.holdRot);
     item.userData.carried = true;
+    if (item.userData.grip) item.userData.grip.visible = true;
     item.userData.inBag = false;
     unlist(item);
     vrHands.set(who, item);
