@@ -1833,7 +1833,128 @@ function createSeaRocks(scene) {
   ].forEach(([x, z, scale, seed]) => addSeaOutcrop(scene, material, x, z, scale, seed));
 }
 
-function createCliff(scene) {
+function createCanoe(scene, targets, cave) {
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a30, roughness: 0.74, side: THREE.DoubleSide });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x4e3422, roughness: 0.82 });
+  const oarMat = new THREE.MeshStandardMaterial({ color: 0x9a7048, roughness: 0.68 });
+  const group = new THREE.Group();
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.22, 0.16);
+  shape.bezierCurveTo(-0.2, 0.02, -0.08, -0.01, 0, -0.015);
+  shape.bezierCurveTo(0.08, -0.01, 0.2, 0.02, 0.22, 0.16);
+  const hole = new THREE.Path();
+  hole.moveTo(-0.16, 0.145);
+  hole.bezierCurveTo(-0.14, 0.05, -0.05, 0.03, 0, 0.028);
+  hole.bezierCurveTo(0.05, 0.03, 0.14, 0.05, 0.16, 0.145);
+  shape.holes.push(hole);
+  const hull = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(shape, { depth: 0.78, bevelEnabled: false, curveSegments: 8 }),
+    wood,
+  );
+  hull.geometry.translate(0, 0, -0.39);
+  hull.userData = { type: 'boatHull' };
+  group.add(hull);
+  [-0.2, 0.2].forEach((side) => {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.02, 0.72), trim);
+    rail.position.set(side, 0.155, 0);
+    group.add(rail);
+  });
+  const ends = [];
+  [-1, 1].forEach((dir) => {
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.28, 10), wood);
+    cap.rotation.x = dir === -1 ? Math.PI / 2 : -Math.PI / 2;
+    cap.scale.set(1.05, 1, 0.55);
+    cap.position.set(0, 0.07, dir * 0.5);
+    cap.userData = { type: 'boatEnd', end: dir === -1 ? 'bow' : 'stern' };
+    group.add(cap);
+    ends.push(cap);
+  });
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.03, 0.14), trim);
+  seat.position.set(0, 0.09, 0.02);
+  seat.userData = { type: 'boatSeat' };
+  group.add(seat);
+  const oars = [];
+  [-1, 1].forEach((side) => {
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.045, 6), trim);
+    pin.position.set(side * 0.2, 0.17, 0);
+    group.add(pin);
+    const oar = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.72, 6), oarMat);
+    shaft.rotation.z = Math.PI / 2;
+    oar.add(shaft);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.012, 0.2), oarMat);
+    blade.position.set(side * 0.4, 0, 0);
+    oar.add(blade);
+    oar.position.set(side * 0.2, 0.2, 0);
+    oar.rotation.y = side * 0.65;
+    oar.rotation.z = side * -0.18;
+    oar.userData = { type: 'oar', side, restY: side * 0.65, restZ: side * -0.18 };
+    group.add(oar);
+    oars.push(oar);
+  });
+  group.position.set(cave.boatX, cave.floor + 0.02, cave.z);
+  scene.add(group);
+  targets.push(group);
+
+  const state = { vx: 0, vz: 0, mode: 'beach', yaw: 0, stroke: 0 };
+  const center = new THREE.Vector3();
+  const seatPoint = new THREE.Vector3();
+  const forward = new THREE.Vector3();
+
+  function floating() {
+    return state.mode === 'float';
+  }
+
+  function shove() {
+    if (state.vx < -0.45) return null;
+    const reaches = group.position.x - 1.05 < cave.wetX || state.mode === 'float';
+    state.vx = -1.9;
+    if (state.mode !== 'float') state.mode = 'glide';
+    return reaches ? 'water' : 'again';
+  }
+
+  function stroke() {
+    if (!floating()) return false;
+    forward.set(0, 0, -1).applyQuaternion(group.quaternion);
+    state.vx += forward.x * 1.3;
+    state.vz += forward.z * 1.3;
+    const speed = Math.hypot(state.vx, state.vz);
+    if (speed > 1.7) {
+      state.vx *= 1.7 / speed;
+      state.vz *= 1.7 / speed;
+    }
+    state.stroke = 1;
+    return true;
+  }
+
+  function update(dt) {
+    group.position.x += state.vx * dt;
+    group.position.z += state.vz * dt;
+    state.vx *= Math.exp(-1.65 * dt);
+    state.vz *= Math.exp(-1.65 * dt);
+    group.position.x = THREE.MathUtils.clamp(group.position.x, -8, cave.boatX);
+    group.position.z = THREE.MathUtils.clamp(group.position.z, cave.z - 1.4, cave.z + 1.4);
+    if (group.position.x < cave.wetX) {
+      state.mode = 'float';
+      const bob = Math.sin(performance.now() * 0.0016) * 0.012;
+      group.position.y = THREE.MathUtils.damp(group.position.y, WATER_Y - 0.01 + bob, 3.2, dt);
+      group.rotation.y = THREE.MathUtils.damp(group.rotation.y, Math.PI / 2, 2.2, dt);
+    }
+    state.stroke = Math.max(0, state.stroke - dt * 1.5);
+    const swing = Math.sin(state.stroke * Math.PI) * 0.45;
+    oars.forEach((oar) => {
+      oar.rotation.y = oar.userData.restY;
+      oar.rotation.z = oar.userData.restZ;
+      oar.rotation.x = swing;
+    });
+    center.copy(group.position);
+    seat.getWorldPosition(seatPoint);
+  }
+
+  return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center };
+}
+
+function createCliff(scene, targets) {
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(120, 20, 16),
     new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, depthWrite: false, fog: false }),
@@ -1892,18 +2013,65 @@ function createCliff(scene) {
   shaftVoid.position.set(faceX + 0.52, (shaftTop + shaftBot) / 2, (shaftZ0 + shaftZ1) / 2);
   scene.add(shaftVoid);
   const caveVoid = new THREE.Mesh(
-    new THREE.BoxGeometry(1.35, caveTop - caveBot - 0.05, caveZ1 - caveZ0 - 0.1),
+    new THREE.BoxGeometry(0.62, caveTop - caveBot - 0.05, caveZ1 - caveZ0 - 0.2),
     caveDark,
   );
-  caveVoid.position.set(faceX + 0.62, (caveTop + caveBot) / 2, (caveZ0 + caveZ1) / 2);
+  caveVoid.position.set(-0.78, (caveTop + caveBot) / 2, (caveZ0 + caveZ1) / 2);
   scene.add(caveVoid);
 
+  const caveMid = (caveZ0 + caveZ1) / 2;
+  const beachTop = WATER_Y + 0.08;
+  const beach = new THREE.Mesh(
+    new THREE.BoxGeometry(0.78, 0.24, caveZ1 - caveZ0 - 0.28),
+    rock,
+  );
+  beach.position.set(-1.4, beachTop - 0.12, caveMid);
+  beach.receiveShadow = true;
+  scene.add(beach);
+  const shoal = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 0.16, 2.5),
+    new THREE.MeshStandardMaterial({ color: 0x8a8176, roughness: 1 }),
+  );
+  shoal.position.set(-2.7, WATER_Y - 0.24, caveMid);
+  scene.add(shoal);
+
   const rungW = shaftZ1 - shaftZ0 - 0.18;
-  for (let y = shaftTop - 0.38; y > caveTop + 0.2; y -= 0.46) {
+  const rungX = faceX + 0.22;
+  const ladder = new THREE.Group();
+  ladder.position.set(rungX, 0, caveMid);
+  const rungs = [];
+  const rungYs = [];
+  for (let y = shaftTop - 0.38; y >= WATER_Y + 1.05; y -= 0.46) rungYs.push(y);
+  rungYs.reverse().forEach((y) => {
     const rung = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, rungW), rock);
-    rung.position.set(faceX + 0.22, y, (shaftZ0 + shaftZ1) / 2);
-    scene.add(rung);
-  }
+    rung.position.set(0, y, 0);
+    rung.castShadow = true;
+    rung.userData = { type: 'rung', ladder, index: rungs.length };
+    ladder.add(rung);
+    rungs.push(y);
+  });
+  ladder.userData = {
+    rungs,
+    roofY: 0.4,
+    shaft: { top: 0, base: beachTop },
+    topSpot: { x: -1.42, y: 0, z: caveMid },
+    baseSpot: { x: -1.38, y: beachTop, z: -1.05 },
+  };
+  scene.add(ladder);
+  targets.push(ladder);
+  const cave = {
+    floor: beachTop,
+    x0: -1.85,
+    x1: -0.95,
+    z0: caveZ0 + 0.12,
+    z1: caveZ1 - 0.08,
+    z: caveMid,
+    standX: -1.38,
+    standZ: -1.05,
+    boatX: -1.46,
+    wetX: -2.2,
+  };
+  const shaft = { x: rungX - 0.42, z: caveMid, floor: beachTop };
   const jamb = (z) => {
     const edge = new THREE.Mesh(new THREE.BoxGeometry(0.1, shaftTop - shaftBot, 0.08), rock);
     edge.position.set(faceX + 0.05, (shaftTop + shaftBot) / 2, z);
@@ -1911,7 +2079,6 @@ function createCliff(scene) {
   };
   jamb(shaftZ0);
   jamb(shaftZ1);
-  const caveMid = (caveZ0 + caveZ1) / 2;
   const caveHalf = (caveZ1 - caveZ0) / 2;
   const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, caveZ1 - caveZ0 + 0.35), rock);
   brow.position.set(faceX + 0.06, caveTop + 0.1, caveMid);
@@ -2116,7 +2283,7 @@ function createCliff(scene) {
     }
   }
 
-  return { update, splash };
+  return { update, splash, cave, shaft };
 }
 
 function plateTexture() {
@@ -2302,7 +2469,8 @@ export function createWorld() {
     targets.push(boulder);
   });
   const puddles = createPuddles(scene, floor, floorMap);
-  const cliff = createCliff(scene);
+  const cliff = createCliff(scene, targets);
+  const canoe = createCanoe(scene, targets, cliff.cave);
 
   const hemi = new THREE.HemisphereLight(0x8ea4cc, 0x2a2622, 0.26);
   scene.add(hemi);
@@ -2426,7 +2594,11 @@ export function createWorld() {
       bite.update(dt);
       cliff.update(dt);
       puddles.update(dt);
+      canoe.update(dt);
     },
+    canoe,
+    cave: cliff.cave,
+    shaft: cliff.shaft,
     splash: cliff.splash,
     startBite: bite.start,
     clearBite: bite.clear,

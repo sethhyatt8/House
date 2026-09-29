@@ -157,6 +157,9 @@ function teleportNext() {
 }
 
 let climb = null;
+let boatGrip = null;
+let oarGrip = null;
+let aboard = false;
 let fallVy = 0;
 let biteHold = false;
 let xrBaseSpace = null;
@@ -322,17 +325,28 @@ function pulseController(controller) {
 
 function attachClimb(controller, hit) {
   const ladder = hit.owner.userData.ladder;
-  if (!ladder) return;
-  const lifted = climb && climb.ladder === ladder ? climb.lifted : 0;
+  if (!ladder || aboard) return;
+  const same = climb && climb.ladder === ladder;
+  const lifted = same ? climb.lifted : 0;
+  const feet = same && climb.feet != null ? climb.feet : xrOffset.y;
+  const low = same && climb.lowest != null ? climb.lowest : feet;
+  const high = same && climb.highest != null ? climb.highest : feet;
   const index = hit.owner.userData.type === 'rung' ? hit.owner.userData.index : nearestRung(ladder, hit.point.y);
   beginClimb(ladder, hit.point.y, index);
   climb.hand = controller;
   climb.lifted = lifted;
+  if (ladder.userData.shaft) {
+    climb.feet = feet;
+    climb.lowest = Math.min(low, feet);
+    climb.highest = Math.max(high, feet);
+  }
   standAtLadder(ladder);
   controller.getWorldPosition(handPoint);
   climb.handY = handPoint.y;
   pulseController(controller);
-  setStatus('Holding a rung. Pull your hand down to climb.');
+  setStatus(ladder.userData.shaft
+    ? 'Holding a rung. Pull down to climb, push up to go down.'
+    : 'Holding a rung. Pull your hand down to climb.');
 }
 
 function arriveOnRoof() {
@@ -359,6 +373,10 @@ function pullXrClimb() {
   if (!climb?.hand) return;
   climb.hand.getWorldPosition(handPoint);
   const dy = handPoint.y - climb.handY;
+  if (climb.ladder.userData.shaft) {
+    pullShaft(dy);
+    return;
+  }
   if (dy < -0.004) {
     const lift = Math.min(0.35, -dy);
     if (!shiftPlayer(0, lift, 0)) return;
@@ -379,11 +397,82 @@ function pullXrClimb() {
   if (dy > 0.004) climb.handY = handPoint.y;
 }
 
+function pullShaft(dy) {
+  const shaft = climb.ladder.userData.shaft;
+  if (dy < -0.004) {
+    const lift = Math.min(0.35, -dy, Math.max(0, shaft.top - climb.feet));
+    if (lift > 0.004 && shiftPlayer(0, lift, 0)) {
+      climb.handY = handPoint.y + lift;
+      climb.feet += lift;
+      climb.highest = Math.max(climb.highest, climb.feet);
+    }
+    if (climb.feet >= shaft.top - 0.25 && climb.lowest < shaft.top - 0.8) {
+      snapShaft(climb.ladder.userData.topSpot, 'On the cliff.');
+    }
+    return;
+  }
+  if (dy > 0.12) {
+    const drop = Math.min(0.35, dy, Math.max(0, climb.feet - shaft.base));
+    if (drop > 0.004 && shiftPlayer(0, -drop, 0)) {
+      climb.handY = handPoint.y - drop;
+      climb.feet -= drop;
+      climb.lowest = Math.min(climb.lowest, climb.feet);
+    }
+    if (climb.feet <= shaft.base + 0.45 && climb.highest > shaft.base + 1.2) {
+      snapShaft(climb.ladder.userData.baseSpot, 'In the cave. Grab either end of the canoe.');
+    }
+    return;
+  }
+  if (dy > 0.004) climb.handY = handPoint.y;
+}
+
+function snapShaft(spot, status) {
+  if (renderer.xr.isPresenting && xrFrame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (pose) {
+      const head = pose.transform.position;
+      const eye = Math.max(1.25, head.y - xrOffset.y);
+      shiftPlayer(spot.x - head.x, spot.y + eye - head.y, spot.z - head.z);
+    }
+  }
+  leaveClimb();
+  setStatus(status);
+}
+
+function placeAtSpot(spot, look, status) {
+  leaveClimb();
+  controls.maxPolarAngle = Math.PI * 0.92;
+  controls.minPolarAngle = 0.12;
+  controls.maxDistance = 7;
+  controls.enabled = true;
+  controls.target.copy(look);
+  camera.position.set(spot.x, spot.y + 1.42, spot.z);
+  controls.update();
+  setStatus(status);
+}
+
 function moveClimb(dir) {
   if (!climb) return;
   climb.pull = 0;
   climb.pulling = false;
   const rungs = climb.ladder.userData.rungs;
+  if (climb.ladder.userData.shaft) {
+    const next = climb.rung + dir;
+    if (next < 0) {
+      const spot = climb.ladder.userData.baseSpot;
+      placeAtSpot(spot, world.canoe.center, 'In the cave. Grab either end of the canoe, then press F.');
+      return;
+    }
+    if (next >= rungs.length) {
+      const spot = climb.ladder.userData.topSpot;
+      placeAtSpot(spot, new THREE.Vector3(spot.x - 3, 0.7, spot.z), 'On the cliff.');
+      return;
+    }
+    climb.rung = next;
+    applyClimbView();
+    return;
+  }
   if (climb.onRoof) {
     if (dir > 0) return;
     climb.onRoof = false;
@@ -494,6 +583,10 @@ function leaveClimb() {
 function groundUnder(x, z, feetY) {
   const overRoof = x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1;
   if (overRoof && feetY >= roof.y - 0.25) return roof.y;
+  const cave = world.cave;
+  if (cave && feetY < -1 && x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return cave.floor;
+  const shaft = world.shaft;
+  if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.85 && Math.abs(z - shaft.z) < 0.7) return shaft.floor;
   const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
   if (overFloor) return 0;
   return WATER_Y;
@@ -531,9 +624,15 @@ function finishWaterBite() {
   teleportTo(1);
 }
 
+function landShift(ground, feetY, head) {
+  const cave = world.cave;
+  const fromShaft = ground === world.shaft?.floor && head.x < cave.x0 + 0.15;
+  shiftPlayer(fromShaft ? cave.standX - head.x : 0, ground - feetY, fromShaft ? cave.standZ - head.z : 0);
+}
+
 function updatePlayerFall(dt) {
-  if (watching || biteHold || !renderer.xr.isPresenting || !xrFrame) return;
-  if (climb?.hand) {
+  if (watching || biteHold || aboard || !renderer.xr.isPresenting || !xrFrame) return;
+  if (climb?.hand || boatGrip) {
     fallVy = 0;
     return;
   }
@@ -545,7 +644,7 @@ function updatePlayerFall(dt) {
   const ground = groundUnder(head.x, head.z, feetY);
   const gap = feetY - ground;
   if (gap <= 0.12) {
-    if (gap < -0.01) shiftPlayer(0, ground - feetY, 0);
+    if (gap < -0.01) landShift(ground, feetY, head);
     if (fallVy < -1.2 && ground <= WATER_Y + 0.05) {
       fallVy = 0;
       startWaterBite(head.x, head.z);
@@ -558,7 +657,7 @@ function updatePlayerFall(dt) {
   fallVy = Math.max(-16, fallVy - 9.2 * dt);
   const next = feetY + fallVy * dt;
   if (next <= ground) {
-    shiftPlayer(0, ground - feetY, 0);
+    landShift(ground, feetY, head);
     if (ground <= WATER_Y + 0.05) {
       fallVy = 0;
       startWaterBite(head.x, head.z);
@@ -1870,6 +1969,120 @@ function onPointerMove(event) {
   }
 }
 
+function closestBoat(list, points, reach) {
+  let best = null;
+  let bestDist = reach;
+  for (const mesh of list) {
+    mesh.getWorldPosition(worldPoint);
+    for (const point of points) {
+      const dist = worldPoint.distanceTo(point);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = mesh;
+      }
+    }
+  }
+  if (!best) return null;
+  return { owner: best, point: best.getWorldPosition(rungClosest) };
+}
+
+function gripBoatEnd(controller) {
+  const near = closestBoat(world.canoe.ends, handPoints(controller), 0.36);
+  if (!near) return false;
+  boatGrip = { controller };
+  oarGrip = null;
+  pulseController(controller);
+  setStatus('Holding the canoe. Press the trigger to shove it.');
+  return true;
+}
+
+function gripOar(controller) {
+  if (!aboard) return false;
+  const near = closestBoat(world.canoe.oars, handPoints(controller), 0.42);
+  if (!near) return false;
+  controller.getWorldPosition(handPoint);
+  oarGrip = { controller, x: handPoint.x, z: handPoint.z, stroked: false };
+  pulseController(controller);
+  setStatus('Pull the oar back to row.');
+  return true;
+}
+
+function shoveBoat() {
+  const result = world.canoe.shove();
+  if (!result) return;
+  pulseController(boatGrip?.controller);
+  setStatus(result === 'water'
+    ? 'The canoe is floating into the shallows. Grab the seat to get in.'
+    : 'Shoved. Press the trigger again.');
+}
+
+function boardCanoe() {
+  if (!world.canoe.floating() || aboard) return;
+  const seat = world.canoe.seatPoint;
+  if (renderer.xr.isPresenting && xrFrame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (pose) {
+      const head = pose.transform.position;
+      shiftPlayer(seat.x - head.x, seat.y + 0.72 - head.y, seat.z - head.z);
+    }
+  } else {
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(world.canoe.group.quaternion);
+    controls.maxPolarAngle = Math.PI * 0.85;
+    controls.minPolarAngle = 0.12;
+    controls.maxDistance = 5;
+    controls.enabled = true;
+    controls.target.set(seat.x + fwd.x * 2.2, seat.y + 0.35, seat.z + fwd.z * 2.2);
+    camera.position.set(seat.x, seat.y + 0.78, seat.z);
+    controls.update();
+  }
+  lastSeat.copy(seat);
+  aboard = true;
+  boatGrip = null;
+  if (climb) leaveClimb();
+  setStatus('In the canoe. Grip an oar and pull back to row.');
+}
+
+const lastSeat = new THREE.Vector3();
+
+function syncAboard() {
+  if (!aboard) return;
+  const seat = world.canoe.seatPoint;
+  const dx = seat.x - lastSeat.x;
+  const dy = seat.y - lastSeat.y;
+  const dz = seat.z - lastSeat.z;
+  if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 0.0001) return;
+  if (renderer.xr.isPresenting) shiftPlayer(dx, dy, dz);
+  else {
+    camera.position.x += dx;
+    camera.position.y += dy;
+    camera.position.z += dz;
+    controls.target.x += dx;
+    controls.target.y += dy;
+    controls.target.z += dz;
+  }
+  lastSeat.copy(seat);
+}
+
+function pullOar() {
+  if (!oarGrip) return;
+  oarGrip.controller.getWorldPosition(handPoint);
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(world.canoe.group.quaternion);
+  const along = (oarGrip.x - handPoint.x) * fwd.x + (oarGrip.z - handPoint.z) * fwd.z;
+  if (along > 0.1 && !oarGrip.stroked) {
+    if (world.canoe.stroke()) pulseController(oarGrip.controller);
+    oarGrip.stroked = true;
+    oarGrip.x = handPoint.x;
+    oarGrip.z = handPoint.z;
+  } else if (along < 0.03) {
+    oarGrip.stroked = false;
+    oarGrip.x = handPoint.x;
+    oarGrip.z = handPoint.z;
+  }
+}
+
+let boatHeld = false;
+
 function onPointerDown(event) {
   if (watching) return;
   if (event.button !== 0 || renderer.xr.isPresenting) return;
@@ -1885,6 +2098,21 @@ function onPointerDown(event) {
   const owner = hit?.owner ?? null;
   if (owner?.userData.type === 'teleport') {
     teleportTo(owner.userData.spot);
+    return;
+  }
+  if (owner?.userData.type === 'boatEnd') {
+    boatHeld = true;
+    setStatus('Holding the canoe. Press F to shove it.');
+    return;
+  }
+  if (owner?.userData.type === 'boatSeat' || owner?.userData.type === 'boatHull') {
+    if (world.canoe.floating()) boardCanoe();
+    else setStatus('Grip an end and press F to shove the canoe into the water.');
+    return;
+  }
+  if (owner?.userData.type === 'oar' && aboard) {
+    world.canoe.stroke();
+    setStatus('Rowing.');
     return;
   }
   if (!held && owner?.userData.type === 'rung') {
@@ -1968,6 +2196,21 @@ function onKeyDown(event) {
     return;
   }
   if (event.repeat) return;
+  if (event.key === 'f' || event.key === 'F') {
+    if (aboard) {
+      if (world.canoe.stroke()) setStatus('Rowing.');
+      return;
+    }
+    if (boatHeld) {
+      const result = world.canoe.shove();
+      if (result) {
+        setStatus(result === 'water'
+          ? 'The canoe is floating into the shallows. Click it to get in.'
+          : 'Shoved. Press F again.');
+      }
+    }
+    return;
+  }
   if (event.key === 'a' || event.key === 'A') teleportNext();
   if (event.key === 'r' || event.key === 'R') rotateHeld();
   if (event.key === 'Enter') orderSelection();
@@ -1976,6 +2219,17 @@ function onKeyDown(event) {
 
 function onXrTrigger(controller) {
   if (watching || held) return;
+  if (boatGrip) {
+    shoveBoat();
+    return;
+  }
+  if (aboard) {
+    if (world.canoe.stroke()) {
+      pulseController(controller);
+      setStatus('Rowing.');
+    }
+    return;
+  }
   const near = rungFromController(controller);
   if (near) {
     attachClimb(controller, near);
@@ -1995,11 +2249,21 @@ function onXrTrigger(controller) {
     attachClimb(controller, hit);
     return;
   }
+  if (hit?.owner?.userData.type === 'boatSeat' || hit?.owner?.userData.type === 'boatHull') {
+    if (world.canoe.floating()) boardCanoe();
+    else setStatus('Shove the canoe into the water, then get in.');
+    return;
+  }
   if (hit?.owner?.userData.type === 'ui') activateUi(hit.owner);
 }
 
 function onXrSqueeze(controller) {
   if (watching || held) return;
+  if (aboard) {
+    gripOar(controller);
+    return;
+  }
+  if (gripBoatEnd(controller)) return;
   const near = rungFromController(controller);
   if (near) {
     attachClimb(controller, near);
@@ -2032,6 +2296,8 @@ function piecePoint() {
 }
 
 function onXrRelease(controller) {
+  if (boatGrip?.controller === controller) boatGrip = null;
+  if (oarGrip?.controller === controller) oarGrip = null;
   if (climb?.hand === controller && !controller.userData.triggerDown) {
     climb.hand = null;
     climb.pull = 0;
@@ -2518,6 +2784,8 @@ function frame(time, frame) {
   machine.update(dt);
   world.challenge.update(dt);
   world.update(dt);
+  syncAboard();
+  pullOar();
   for (const controller of controllers) updateLaser(controller);
   if (!renderer.xr.isPresenting) controls.update();
   if (biteHold) {
@@ -2539,9 +2807,14 @@ function frame(time, frame) {
     for (const controller of controllers) {
       pollTeleport(controller);
       pollRotate(controller);
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && !held && !climb?.hand) {
-        const near = rungFromController(controller);
-        if (near) attachClimb(controller, near);
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && !held && !oarGrip && aboard) {
+        gripOar(controller);
+      }
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && !held && !climb?.hand && !boatGrip && !aboard) {
+        if (!gripBoatEnd(controller)) {
+          const near = rungFromController(controller);
+          if (near) attachClimb(controller, near);
+        }
       }
       if (controller.userData.pegDrag) {
         const hit = hitFromController(controller);
