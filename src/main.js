@@ -2117,6 +2117,7 @@ function onPointerDown(event) {
     setStatus('Rowing.');
     return;
   }
+  if (world.gear.pointer(owner)) return;
   if (!held && owner?.userData.type === 'rung') {
     beginClimb(owner.userData.ladder, hit.point.y, owner.userData.index);
     grabRung(event.clientY);
@@ -2198,7 +2199,9 @@ function onKeyDown(event) {
     return;
   }
   if (event.repeat) return;
+  if ((event.key === 'q' || event.key === 'Q') && world.gear.dropDesktop()) return;
   if (event.key === 'f' || event.key === 'F') {
+    if (world.gear.useDesktop()) return;
     if (aboard) {
       if (world.canoe.stroke()) setStatus('Rowing.');
       return;
@@ -2220,7 +2223,12 @@ function onKeyDown(event) {
 }
 
 function onXrTrigger(controller) {
-  if (watching || held) return;
+  if (watching) return;
+  if (held && heldFrom === controller) return;
+  if (world.gear.isHolding(controller)) {
+    world.gear.use(controller);
+    return;
+  }
   if (boatGrip) {
     shoveBoat();
     return;
@@ -2260,7 +2268,15 @@ function onXrTrigger(controller) {
 }
 
 function onXrSqueeze(controller) {
-  if (watching || held) return;
+  if (watching) return;
+  if (held && heldFrom === controller) return;
+  if (world.gear.isHolding(controller)) {
+    world.gear.drop(controller);
+    return;
+  }
+  const aimed = hitFromController(controller);
+  if (world.gear.tryGrip(controller, handPoints(controller), aimed?.owner)) return;
+  if (held) return;
   if (aboard) {
     gripOar(controller);
     return;
@@ -2809,10 +2825,10 @@ function frame(time, frame) {
     for (const controller of controllers) {
       pollTeleport(controller);
       pollRotate(controller);
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && !held && !oarGrip && aboard) {
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !oarGrip && aboard) {
         gripOar(controller);
       }
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && !held && !climb?.hand && !boatGrip && !aboard) {
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !world.gear.isHolding(controller)) {
         if (!gripBoatEnd(controller)) {
           const near = rungFromController(controller);
           if (near) attachClimb(controller, near);

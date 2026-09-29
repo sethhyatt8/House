@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createBrick, setBrickRaycast } from './bricks.js';
+import { createGear } from './gear.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
 
 const TABLE_TOP = 0.76;
@@ -2575,6 +2576,7 @@ export function createWorld() {
   const sharks = createSharks(scene, cliff.splash);
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
+  const gear = createGear(scene, camera, targets);
 
   return {
     scene,
@@ -2595,7 +2597,9 @@ export function createWorld() {
       cliff.update(dt);
       puddles.update(dt);
       canoe.update(dt);
+      gear.update(dt);
     },
+    gear,
     canoe,
     cave: cliff.cave,
     shaft: cliff.shaft,
