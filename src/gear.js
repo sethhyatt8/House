@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+const CAPACITY = 100;
 
 function paintTile(rank) {
   const canvas = document.createElement('canvas');
@@ -26,9 +27,35 @@ function paintTile(rank) {
   return texture;
 }
 
+function paintAxe() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#3a2a1c';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#8a5a32';
+  ctx.lineWidth = 12;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(36, 104);
+  ctx.lineTo(84, 28);
+  ctx.stroke();
+  ctx.fillStyle = '#c5c6c2';
+  ctx.beginPath();
+  ctx.moveTo(72, 14);
+  ctx.lineTo(114, 34);
+  ctx.lineTo(92, 58);
+  ctx.lineTo(58, 36);
+  ctx.fill();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function carryable(object) {
   const gear = object?.userData?.gear;
-  return gear === 'hatchet' || gear === 'bag' || gear === 'tile';
+  return gear === 'hatchet' || gear === 'tile';
 }
 
 export function createGear(scene, camera, targets) {
@@ -38,16 +65,24 @@ export function createGear(scene, camera, targets) {
   const leatherDark = new THREE.MeshStandardMaterial({ color: 0x3e2618, roughness: 0.9 });
   const shellMat = new THREE.MeshStandardMaterial({ color: 0x8d3a2a, roughness: 0.62 });
   const stone = new THREE.MeshStandardMaterial({ color: 0x7d756c, roughness: 0.95 });
-  const raycaster = new THREE.Raycaster();
+  const pocketMat = new THREE.MeshStandardMaterial({ color: 0x2c241c, roughness: 0.9, emissive: 0x120e0a, emissiveIntensity: 0.4 });
+  const axeMat = new THREE.MeshStandardMaterial({ map: paintAxe(), roughness: 0.6 });
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
   const tmp3 = new THREE.Vector3();
-  const desktop = { item: null };
+  const bladePrev = new THREE.Vector3();
+  const bladeNow = new THREE.Vector3();
+  const hitBox = new THREE.Box3();
   const vrHands = new Map();
   const choppables = [];
   const slots = [];
   const chips = [];
   const falls = [];
+  const pockets = new Array(CAPACITY).fill(null);
+  const pocketMeshes = [];
+  let owned = false;
+  let menuOpen = false;
+  let bladeReady = false;
 
   function enlist(object) {
     if (!targets.includes(object)) targets.push(object);
@@ -84,12 +119,11 @@ export function createGear(scene, camera, targets) {
       child.receiveShadow = true;
     }
   });
-  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade, swing: 0, struck: false };
+  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade };
   holdPose(hatchet, [0.02, -0.06, -0.22], [-Math.PI / 2, 0, 0.15]);
   scene.add(hatchet);
   enlist(hatchet);
 
-  const boards = [];
   for (let i = 0; i < 5; i += 1) {
     const plank = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.56), wood);
     plank.position.set(2.28, 0.66 + i * 0.12, 0.12);
@@ -99,65 +133,80 @@ export function createGear(scene, camera, targets) {
     scene.add(plank);
     enlist(plank);
     choppables.push(plank);
-    boards.push(plank);
   }
 
   const bag = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.12), leather);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.16), leather);
   body.castShadow = true;
   bag.add(body);
-  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.018), leatherDark);
-  flap.geometry.translate(0, -0.07, 0);
-  flap.position.set(0, 0.09, 0.05);
+  const flap = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.02), leatherDark);
+  flap.geometry.translate(0, -0.08, 0);
+  flap.position.set(0, 0.11, 0.07);
   flap.castShadow = true;
   bag.add(flap);
-  const strap = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.011, 6, 12, Math.PI), leatherDark);
+  const strap = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.012, 6, 14, Math.PI), leatherDark);
   strap.rotation.y = Math.PI / 2;
-  strap.position.set(0, 0.02, 0.01);
+  strap.position.set(0, 0.12, 0);
   bag.add(strap);
-  const spread = new THREE.Group();
-  bag.add(spread);
-  bag.position.set(2.46, 0.95, 0.12);
-  bag.userData = {
-    type: 'gear',
-    gear: 'bag',
-    floorY: 0.1,
-    flap,
-    spread,
-    contents: [],
-    open: false,
-  };
-  holdPose(bag, [0.16, -0.2, -0.48], [0.4, -0.5, 0.2]);
+  bag.position.set(0.42, 0.11, 1.22);
+  bag.rotation.y = 0.5;
+  bag.userData = { type: 'gear', gear: 'bag', floorY: 0.11 };
   scene.add(bag);
   enlist(bag);
+
+  const menu = new THREE.Group();
+  menu.userData = { type: 'gear', gear: 'menu' };
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 0.012), leatherDark);
+  menu.add(panel);
+  const cell = 0.046;
+  const origin = -cell * 4.5;
+  const iconGeo = new THREE.PlaneGeometry(0.034, 0.04);
+  for (let i = 0; i < CAPACITY; i += 1) {
+    const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.012), pocketMat.clone());
+    const col = i % 10;
+    const row = Math.floor(i / 10);
+    pocket.position.set(origin + col * cell, origin + (9 - row) * cell, 0.01);
+    pocket.userData = { type: 'gear', gear: 'pocket', index: i };
+    const tileIcon = new THREE.Mesh(iconGeo, pocketMat);
+    tileIcon.position.z = 0.01;
+    tileIcon.visible = false;
+    pocket.add(tileIcon);
+    const axeIcon = new THREE.Mesh(iconGeo, axeMat);
+    axeIcon.position.z = 0.01;
+    axeIcon.visible = false;
+    pocket.add(axeIcon);
+    pocket.userData.tileIcon = tileIcon;
+    pocket.userData.axeIcon = axeIcon;
+    menu.add(pocket);
+    pocketMeshes.push(pocket);
+  }
+  menu.visible = false;
+  menu.position.set(0, -40, 0);
+  scene.add(menu);
 
   const tileMat = new THREE.MeshStandardMaterial({ color: 0xf3efe6, roughness: 0.55 });
   for (let rank = 1; rank <= 9; rank += 1) {
     const tile = new THREE.Group();
+    const faceMat = new THREE.MeshStandardMaterial({ map: paintTile(rank), roughness: 0.5 });
     const face = new THREE.Mesh(
       new THREE.BoxGeometry(0.072, 0.104, 0.016),
-      [
-        tileMat, tileMat, tileMat, tileMat,
-        new THREE.MeshStandardMaterial({ map: paintTile(rank), roughness: 0.5 }),
-        tileMat,
-      ],
+      [tileMat, tileMat, tileMat, tileMat, faceMat, tileMat],
     );
     tile.add(face);
     tile.userData = {
       type: 'gear',
       gear: 'tile',
       rank,
-      floorY: 0.02,
-      inBag: true,
-      bag,
+      floorY: 0.052,
+      faceMat,
+      inBag: false,
+      pocket: null,
       slot: null,
     };
-    holdPose(tile, [0, -0.03, -0.14], [0, 0, 0]);
-    spread.add(tile);
-    bag.userData.contents.push(tile);
+    holdPose(tile, [0, -0.03, -0.1], [-1.05, 0, 0]);
+    scene.add(tile);
+    stow(tile);
   }
-  layoutBag();
-  spread.visible = false;
 
   const crab = new THREE.Group();
   const carapace = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), shellMat);
@@ -210,103 +259,143 @@ export function createGear(scene, camera, targets) {
   chest.add(lid);
   chest.userData = { open: 0 };
   scene.add(chest);
+  refreshPockets();
 
-  function layoutBag() {
-    bag.userData.contents.forEach((tile, index) => {
-      const col = index % 3;
-      const row = Math.floor(index / 3);
-      tile.position.set(-0.14 - row * 0.11, 0.08, (col - 1) * 0.09);
-      tile.rotation.set(0.15, -Math.PI / 2, 0);
+  function refreshPockets() {
+    pocketMeshes.forEach((pocket, index) => {
+      const item = pockets[index];
+      pocket.material.color.set(item ? 0x8d7358 : 0x2c241c);
+      pocket.userData.tileIcon.visible = item?.userData.gear === 'tile';
+      pocket.userData.axeIcon.visible = item?.userData.gear === 'hatchet';
+      if (item?.userData.gear === 'tile') pocket.userData.tileIcon.material = item.userData.faceMat;
     });
   }
 
-  function showBag(open) {
-    bag.userData.open = open;
-    bag.userData.spread.visible = open;
-    const flapAngle = open ? -2.15 : 0;
-    bag.userData.flap.rotation.x = flapAngle;
-    bag.userData.contents.forEach((tile) => {
-      if (open) enlist(tile);
-      else unlist(tile);
-    });
-  }
-
-  function holderOf(item) {
-    if (desktop.item === item) return 'desktop';
-    for (const [hand, carried] of vrHands) {
-      if (carried === item) return hand;
-    }
-    return null;
+  function firstEmpty() {
+    return pockets.indexOf(null);
   }
 
   function forget(item) {
-    const who = holderOf(item);
-    if (who === 'desktop') desktop.item = null;
-    else if (who) vrHands.delete(who);
+    for (const [hand, carried] of vrHands) {
+      if (carried === item) vrHands.delete(hand);
+    }
     item.userData.carried = false;
   }
 
-  function unstow(item) {
-    if (item.userData.slot) {
-      item.userData.slot.userData.filled = 0;
-      item.userData.slot = null;
-      checkLock();
-    }
-    if (item.userData.inBag) {
-      item.userData.inBag = false;
-      const list = item.userData.bag.userData.contents;
-      const index = list.indexOf(item);
-      if (index >= 0) list.splice(index, 1);
-      layoutBag();
-    }
+  function clearSeat(item) {
+    if (!item.userData.slot) return;
+    item.userData.slot.userData.filled = 0;
+    item.userData.slot = null;
+    checkLock();
+  }
+
+  function releasePocket(item) {
+    const index = item.userData.pocket;
+    if (index == null || pockets[index] !== item) return;
+    pockets[index] = null;
+    item.userData.pocket = null;
+    item.userData.inBag = false;
+  }
+
+  function stow(item) {
+    const index = firstEmpty();
+    if (index < 0 || !carryable(item)) return false;
+    clearSeat(item);
+    forget(item);
+    releasePocket(item);
+    item.userData.inBag = true;
+    item.userData.pocket = index;
+    item.userData.carried = false;
+    pockets[index] = item;
+    unlist(item);
+    item.visible = false;
+    bladeReady = false;
+    scene.attach(item);
+    item.position.set(0, -30, 0);
+    refreshPockets();
+    return true;
+  }
+
+  function layDown(item, point, faceYaw) {
+    clearSeat(item);
+    forget(item);
+    releasePocket(item);
+    item.visible = true;
+    scene.attach(item);
+    item.position.set(
+      point.x + (Math.random() - 0.5) * 0.08,
+      item.userData.floorY ?? 0.03,
+      point.z + (Math.random() - 0.5) * 0.08,
+    );
+    if (item.userData.gear === 'tile' && faceYaw != null) item.rotation.set(0, faceYaw, 0);
+    else item.rotation.copy(item.userData.restRot);
+    item.userData.carried = false;
+    item.userData.inBag = false;
+    bladeReady = false;
+    enlist(item);
+    refreshPockets();
+  }
+
+  function dropInFront(controller) {
+    controller.getWorldPosition(tmp);
+    tmp2.set(0, 0, -1).applyQuaternion(controller.quaternion);
+    tmp2.y = 0;
+    if (tmp2.lengthSq() < 1e-4) tmp2.set(0, 0, -1);
+    tmp2.normalize();
+    const yaw = Math.atan2(-tmp2.x, -tmp2.z);
+    tmp.addScaledVector(tmp2, 0.35);
+    return { point: tmp.clone(), yaw };
   }
 
   function take(who, item) {
-    if (!carryable(item) || item.userData.dead) return false;
-    const previous = who === 'desktop' ? desktop.item : vrHands.get(who);
-    if (previous && previous !== item) drop(who);
+    if (!carryable(item)) return false;
+    const previous = vrHands.get(who);
+    if (previous && previous !== item) {
+      if (!stow(previous)) {
+        const spot = dropInFront(who);
+        layDown(previous, spot.point, spot.yaw);
+      }
+    }
+    clearSeat(item);
     forget(item);
-    unstow(item);
-    const parent = who === 'desktop' ? camera : who;
-    parent.attach(item);
+    releasePocket(item);
+    who.attach(item);
+    item.visible = true;
     item.position.copy(item.userData.holdPos);
     item.rotation.copy(item.userData.holdRot);
     item.userData.carried = true;
+    item.userData.inBag = false;
     unlist(item);
-    if (who === 'desktop') desktop.item = item;
-    else vrHands.set(who, item);
+    vrHands.set(who, item);
+    bladeReady = false;
+    refreshPockets();
     return true;
   }
 
-  function drop(who) {
-    const item = who === 'desktop' ? desktop.item : vrHands.get(who);
-    if (!item) return false;
-    item.getWorldPosition(tmp);
-    scene.attach(item);
-    const inRoom = tmp.x > -1.7 && tmp.x < 2.6 && tmp.z > -2.55 && tmp.z < 2.55 && tmp.y < 2.4;
-    if (inRoom) tmp.y = item.userData.floorY ?? 0.03;
-    item.position.copy(tmp);
-    item.rotation.copy(item.userData.restRot);
-    item.userData.carried = false;
-    item.userData.swing = 0;
-    enlist(item);
-    if (who === 'desktop') desktop.item = null;
-    else vrHands.delete(who);
+  function acquireBag() {
+    if (owned) return false;
+    owned = true;
+    bag.visible = false;
+    unlist(bag);
+    for (const who of [...vrHands.keys()]) stow(vrHands.get(who));
     return true;
   }
 
-  function isHolding(who) {
-    return who === 'desktop' ? !!desktop.item : vrHands.has(who);
-  }
-
-  function closestCarry(points, reach) {
+  function pickTarget(owner, controller, points) {
+    if (owner && !owner.userData.carried && !owner.userData.inBag && (owner.userData.gear === 'bag' ? !owned : carryable(owner))) {
+      owner.getWorldPosition(tmp);
+      controller.getWorldPosition(tmp2);
+      if (tmp.distanceTo(tmp2) < 1.5) return owner;
+    }
     let best = null;
-    let bestDist = reach;
-    const pool = [hatchet, bag, ...bag.userData.contents.filter((tile) => bag.userData.open), ...targets];
+    let bestDist = 0.26;
+    const pool = [hatchet, bag];
+    for (const item of targets) pool.push(item);
     const seen = new Set();
     for (const item of pool) {
-      if (!carryable(item) || seen.has(item) || item.userData.carried) continue;
-      if (item.userData.gear === 'tile' && item.userData.inBag && !bag.userData.open) continue;
+      if (seen.has(item) || item.userData?.carried || item.userData?.inBag) continue;
+      const isBag = item.userData?.gear === 'bag' && !owned;
+      if (!isBag && !carryable(item)) continue;
       seen.add(item);
       item.getWorldPosition(tmp);
       for (const point of points) {
@@ -321,16 +410,72 @@ export function createGear(scene, camera, targets) {
   }
 
   function tryGrip(controller, points, owner) {
-    if (owner && carryable(owner) && !owner.userData.carried) {
-      if (!(owner.userData.inBag && !bag.userData.open)) {
-        owner.getWorldPosition(tmp);
-        controller.getWorldPosition(tmp2);
-        if (tmp.distanceTo(tmp2) < 1.5) return take(controller, owner);
-      }
+    const target = pickTarget(owner, controller, points);
+    if (!target) return false;
+    if (target.userData.gear === 'bag') return acquireBag();
+    if (owned && stow(target)) return true;
+    return take(controller, target);
+  }
+
+  function stowHand(who) {
+    const item = vrHands.get(who);
+    if (!item) return false;
+    if (owned && stow(item)) return true;
+    const spot = dropInFront(who);
+    layDown(item, spot.point, spot.yaw);
+    return true;
+  }
+
+  function menuOwner(owner) {
+    if (!menuOpen || !owner) return null;
+    const gear = owner.userData?.gear;
+    if (gear === 'pocket' || gear === 'menu') return owner;
+    return null;
+  }
+
+  function equipPocket(owner, controller) {
+    const hit = menuOwner(owner);
+    if (!hit) return false;
+    if (hit.userData.gear === 'pocket') {
+      const item = pockets[hit.userData.index];
+      if (item) take(controller, item);
     }
-    const near = closestCarry(points, 0.26);
-    if (!near) return false;
-    return take(controller, near);
+    return true;
+  }
+
+  function dropPocket(owner, controller) {
+    const hit = menuOwner(owner);
+    if (!hit || hit.userData.gear !== 'pocket') return false;
+    const item = pockets[hit.userData.index];
+    if (!item) return false;
+    const spot = dropInFront(controller);
+    layDown(item, spot.point, spot.yaw);
+    return true;
+  }
+
+  function placeMenu() {
+    camera.getWorldPosition(tmp);
+    camera.getWorldDirection(tmp2);
+    const flat = tmp2.clone();
+    flat.y = 0;
+    if (flat.lengthSq() < 1e-4) flat.set(0, 0, -1);
+    flat.normalize();
+    menu.position.set(tmp.x + flat.x * 0.72, tmp.y - 0.08, tmp.z + flat.z * 0.72);
+    menu.rotation.set(0, Math.atan2(-flat.x, -flat.z), 0);
+  }
+
+  function toggleMenu() {
+    if (!owned) return false;
+    menuOpen = !menuOpen;
+    menu.visible = menuOpen;
+    if (menuOpen) {
+      placeMenu();
+      enlist(menu);
+    } else {
+      unlist(menu);
+      menu.position.set(0, -40, 0);
+    }
+    return true;
   }
 
   function spawnChips(object) {
@@ -369,82 +514,36 @@ export function createGear(scene, camera, targets) {
     }
   }
 
-  function asChoppable(object) {
-    let current = object;
-    while (current) {
-      if (choppables.includes(current)) return current;
-      current = current.parent;
+  function segmentTouches(box, a, b) {
+    for (let i = 0; i <= 6; i += 1) {
+      tmp3.lerpVectors(a, b, i / 6);
+      if (box.containsPoint(tmp3)) return true;
     }
-    return null;
+    return false;
   }
 
-  function strike(fromCamera, controller) {
-    if (fromCamera) {
-      camera.getWorldPosition(tmp);
-      camera.getWorldDirection(tmp2);
-      let best = null;
-      let bestDist = 0.24;
-      for (const object of choppables) {
-        object.getWorldPosition(tmp3);
-        const along = tmp3.clone().sub(tmp).dot(tmp2);
-        if (along < 0.25 || along > 8) continue;
-        const dist = tmp.clone().addScaledVector(tmp2, along).distanceTo(tmp3);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = object;
-        }
-      }
-      if (best) hurt(best);
-      return;
+  function swingHit(a, b) {
+    const now = performance.now() / 1000;
+    for (const object of [...choppables]) {
+      if (object.userData.chopAt && now - object.userData.chopAt < 0.4) continue;
+      hitBox.setFromObject(object);
+      hitBox.expandByScalar(0.06);
+      if (!segmentTouches(hitBox, a, b)) continue;
+      object.userData.chopAt = now;
+      hurt(object);
     }
-    blade.getWorldPosition(tmp);
-    let best = null;
-    let bestDist = 0.32;
-    for (const object of choppables) {
-      object.getWorldPosition(tmp2);
-      const dist = tmp.distanceTo(tmp2);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = object;
-      }
-    }
-    if (!best && controller) {
-      controller.getWorldPosition(tmp);
-      tmp2.set(0, 0, -1).applyQuaternion(controller.quaternion);
-      raycaster.set(tmp, tmp2);
-      const hits = raycaster.intersectObjects(choppables, true);
-      const target = hits[0] && hits[0].distance < 0.9 ? asChoppable(hits[0].object) : null;
-      if (target) best = target;
-    }
-    if (best) hurt(best);
   }
 
-  function nearestSlot(item, reach) {
-    item.getWorldPosition(tmp);
+  function pointedSlot(controller) {
+    controller.getWorldPosition(tmp);
+    tmp2.set(0, 0, -1).applyQuaternion(controller.quaternion);
     let best = null;
-    let bestDist = reach;
-    for (const slot of slots) {
-      if (slot.userData.filled) continue;
-      slot.getWorldPosition(tmp2);
-      const dist = tmp.distanceTo(tmp2);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = slot;
-      }
-    }
-    return best;
-  }
-
-  function aimedSlot() {
-    camera.getWorldPosition(tmp);
-    camera.getWorldDirection(tmp2);
-    let best = null;
-    let bestDist = 0.4;
+    let bestDist = 0.14;
     for (const slot of slots) {
       if (slot.userData.filled) continue;
       slot.getWorldPosition(tmp3);
       const along = tmp3.clone().sub(tmp).dot(tmp2);
-      if (along < 0.15 || along > 4.5) continue;
+      if (along < 0.05 || along > 1.6) continue;
       const dist = tmp.clone().addScaledVector(tmp2, along).distanceTo(tmp3);
       if (dist < bestDist) {
         bestDist = dist;
@@ -456,15 +555,19 @@ export function createGear(scene, camera, targets) {
 
   function seat(tile, slot) {
     forget(tile);
-    unstow(tile);
+    releasePocket(tile);
+    clearSeat(tile);
+    tile.visible = true;
     scene.attach(tile);
     slot.attach(tile);
     tile.position.set(0, 0.02, 0);
     tile.rotation.set(-Math.PI / 2, 0, 0);
     tile.userData.slot = slot;
     tile.userData.carried = false;
+    tile.userData.inBag = false;
     slot.userData.filled = tile.userData.rank;
     enlist(tile);
+    refreshPockets();
     checkLock();
   }
 
@@ -473,55 +576,27 @@ export function createGear(scene, camera, targets) {
     chest.userData.want = solved ? 1 : 0;
   }
 
-  function useItem(item, fromCamera, controller) {
-    if (!item) return false;
-    if (item.userData.gear === 'hatchet') {
-      if (item.userData.swing > 0) return true;
-      item.userData.swing = 1;
-      item.userData.struck = false;
-      item.userData.swingFromCamera = fromCamera;
-      item.userData.swingController = controller || null;
-      return true;
-    }
-    if (item.userData.gear === 'bag') {
-      showBag(!bag.userData.open);
-      return true;
-    }
-    if (item.userData.gear === 'tile') {
-      const slot = fromCamera ? aimedSlot() : nearestSlot(item, 0.42);
-      if (!slot) return false;
-      seat(item, slot);
-      return true;
-    }
-    return false;
-  }
-
-  function pointer(owner) {
-    if (owner?.userData?.type === 'gear' && owner.userData.gear === 'slot' && desktop.item?.userData.gear === 'tile') {
-      if (!owner.userData.filled) seat(desktop.item, owner);
-      return true;
-    }
-    if (!owner || !carryable(owner) || owner.userData.carried) return false;
-    if (owner.userData.inBag && !bag.userData.open) return false;
-    if (desktop.item?.userData.gear === 'bag' && owner.userData.gear === 'tile' && owner.userData.inBag) {
-      drop('desktop');
-      take('desktop', owner);
-      return true;
-    }
-    take('desktop', owner);
+  function use(controller) {
+    const item = vrHands.get(controller);
+    if (!item || item.userData.gear !== 'tile') return false;
+    const slot = pointedSlot(controller);
+    if (!slot) return false;
+    seat(item, slot);
     return true;
   }
 
   function update(dt) {
-    if (hatchet.userData.swing > 0 && hatchet.userData.carried) {
-      const prev = hatchet.userData.swing;
-      hatchet.userData.swing = Math.max(0, prev - dt / 0.26);
-      const ang = Math.sin((1 - hatchet.userData.swing) * Math.PI) * 1.2;
-      hatchet.rotation.x = hatchet.userData.holdRot.x + ang;
-      if (prev > 0.42 && hatchet.userData.swing <= 0.42) {
-        strike(hatchet.userData.swingFromCamera, hatchet.userData.swingController);
+    const carried = hatchet.userData.carried;
+    if (!carried) bladeReady = false;
+    else {
+      hatchet.updateWorldMatrix(true, true);
+      blade.getWorldPosition(bladeNow);
+      if (bladeReady && dt > 0) {
+        const speed = bladeNow.distanceTo(bladePrev) / dt;
+        if (speed > 2.1) swingHit(bladePrev, bladeNow);
       }
-      if (hatchet.userData.swing === 0) hatchet.rotation.copy(hatchet.userData.holdRot);
+      bladePrev.copy(bladeNow);
+      bladeReady = true;
     }
     const want = chest.userData.want || 0;
     chest.userData.open = THREE.MathUtils.damp(chest.userData.open, want, 4, dt);
@@ -550,19 +625,25 @@ export function createGear(scene, camera, targets) {
 
   return {
     update,
-    isHolding,
-    tryGrip,
-    drop,
-    dropDesktop() {
-      return drop('desktop');
+    ownsBag: () => owned,
+    toggleMenu,
+    equipPocket,
+    dropPocket,
+    isHolding(who) {
+      return vrHands.has(who);
     },
-    use(controller) {
-      return useItem(vrHands.get(controller), false, controller);
+    tryGrip,
+    stowHand,
+    use,
+    dropDesktop() {
+      return false;
     },
     useDesktop() {
-      return useItem(desktop.item, true, null);
+      return false;
     },
-    pointer,
+    pointer() {
+      return false;
+    },
     hatchet,
     bag,
     crab,

@@ -2225,10 +2225,9 @@ function onKeyDown(event) {
 function onXrTrigger(controller) {
   if (watching) return;
   if (held && heldFrom === controller) return;
-  if (world.gear.isHolding(controller)) {
-    world.gear.use(controller);
-    return;
-  }
+  const aimed = hitFromController(controller);
+  if (world.gear.equipPocket(aimed?.owner, controller)) return;
+  if (world.gear.use(controller)) return;
   if (boatGrip) {
     shoveBoat();
     return;
@@ -2270,11 +2269,12 @@ function onXrTrigger(controller) {
 function onXrSqueeze(controller) {
   if (watching) return;
   if (held && heldFrom === controller) return;
+  const aimed = hitFromController(controller);
+  if (world.gear.dropPocket(aimed?.owner, controller)) return;
   if (world.gear.isHolding(controller)) {
-    world.gear.drop(controller);
+    world.gear.stowHand(controller);
     return;
   }
-  const aimed = hitFromController(controller);
   if (world.gear.tryGrip(controller, handPoints(controller), aimed?.owner)) return;
   if (held) return;
   if (aboard) {
@@ -2341,11 +2341,21 @@ function pollTeleport(controller) {
   } else if (!pressed) controller.userData.teleportLatch = false;
 }
 
+function pollBag(controller) {
+  if (controller.userData.inputSource?.handedness !== 'right') return;
+  const pressed = !!controller.userData.inputSource?.gamepad?.buttons?.[5]?.pressed;
+  if (pressed && !controller.userData.bagLatch) {
+    controller.userData.bagLatch = true;
+    world.gear.toggleMenu();
+  } else if (!pressed) controller.userData.bagLatch = false;
+}
+
 function pollRotate(controller) {
   const gamepad = controller.userData.inputSource?.gamepad;
   if (!gamepad || !held || heldFrom !== controller) return;
   const stick = gamepad.axes?.[2] ?? 0;
-  const button = gamepad.buttons?.[5]?.pressed;
+  const bagButton = world.gear.ownsBag() && controller.userData.inputSource?.handedness === 'right';
+  const button = !bagButton && gamepad.buttons?.[5]?.pressed;
   const active = button || stick > 0.6;
   if (active && !controller.userData.rotateLatch) {
     controller.userData.rotateLatch = true;
@@ -2825,6 +2835,7 @@ function frame(time, frame) {
     for (const controller of controllers) {
       pollTeleport(controller);
       pollRotate(controller);
+      pollBag(controller);
       if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !oarGrip && aboard) {
         gripOar(controller);
       }
