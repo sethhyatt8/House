@@ -2294,8 +2294,11 @@ function onKeyDown(event) {
 
 function onXrTrigger(controller) {
   if (watching) return;
-  if (held && heldFrom === controller) return;
   const aimed = hitFromController(controller);
+  if (world.gear.pocketItem(aimed?.owner) && held && heldFrom === controller && held.userData.type === 'prop') {
+    dropProp();
+  }
+  if (held && heldFrom === controller) return;
   if (world.gear.equipPocket(aimed?.owner, controller)) return;
   if (world.gear.use(controller)) return;
   if (boatGrip) {
@@ -2537,6 +2540,63 @@ function notePropMotion() {
   propSamples.push({ t: performance.now() / 1000, p: point.clone() });
   const cutoff = propSamples[propSamples.length - 1].t - 0.18;
   while (propSamples.length > 1 && propSamples[0].t < cutoff) propSamples.shift();
+}
+
+function propRestY(prop) {
+  const lift = prop.userData.floorY ?? 0.03;
+  const { x, y, z } = prop.position;
+  if (x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1 && y > roof.y - 0.25) {
+    return standHeight(x, z, y, roof.y) + lift;
+  }
+  const yard = world.yard;
+  if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && y >= yard.y - 0.4) {
+    return standHeight(x, z, y, yard.y) + lift;
+  }
+  return standHeight(x, z, y, 0) + lift;
+}
+
+function dropProp() {
+  const prop = held;
+  if (!prop || prop.userData.type !== 'prop') return;
+  held = null;
+  heldFrom = null;
+  heldHome = null;
+  assembly = null;
+  propSamples.length = 0;
+  scene.attach(prop);
+  let vy = 0;
+  const job = {
+    t: 0,
+    d: 4,
+    last: 0,
+    update() {
+      const dt = Math.min(0.05, Math.max(0, job.t - job.last));
+      job.last = job.t;
+      if (dt === 0) return;
+      vy -= 9.2 * dt;
+      prop.position.y += vy * dt;
+      const yard = world.yard;
+      const onYard = yard
+        && prop.position.x >= yard.x0 && prop.position.x <= yard.x1
+        && prop.position.z >= yard.z0 && prop.position.z <= yard.z1;
+      const inRoom = prop.position.x >= CLIFF_X;
+      if (!inRoom && !onYard && prop.position.y <= WATER_Y) {
+        world.splash(prop.position.x, prop.position.z);
+        prop.parent?.remove(prop);
+        job.t = job.d;
+        return;
+      }
+      const rest = propRestY(prop);
+      if ((inRoom || onYard) && prop.position.y <= rest) {
+        prop.position.y = rest;
+        prop.userData.role = 'loose';
+        setBrickRaycast(prop, true);
+        if (!targets.includes(prop)) targets.push(prop);
+        job.t = job.d;
+      }
+    },
+  };
+  jobs.push(job);
 }
 
 function releaseProp() {

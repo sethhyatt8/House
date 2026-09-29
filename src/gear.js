@@ -441,6 +441,12 @@ export function createGear(scene, camera, targets, roof) {
     return null;
   }
 
+  function pocketItem(owner) {
+    const hit = menuOwner(owner);
+    if (!hit || hit.userData.gear !== 'pocket') return null;
+    return pockets[hit.userData.index] || null;
+  }
+
   function equipPocket(owner, controller) {
     const hit = menuOwner(owner);
     if (!hit) return false;
@@ -677,6 +683,7 @@ export function createGear(scene, camera, targets, roof) {
     ownsBag: () => owned,
     toggleMenu,
     equipPocket,
+    pocketItem,
     dropPocket,
     isHolding(who) {
       return vrHands.has(who);
