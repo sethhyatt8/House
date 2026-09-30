@@ -1160,22 +1160,24 @@ function createSharks(scene, splash) {
     const eyeRise = (eyeSlice.top - eyeSlice.mid) * 0.22;
     const eyeY = eyeSlice.mid + eyeRise;
     const eyeNz = Math.sqrt(Math.max(0.2, 1 - (eyeRise / (eyeSlice.top - eyeSlice.mid)) ** 2));
-    const eyeGeo = new THREE.SphereGeometry(0.034, 12, 10);
-    const rimGeo = new THREE.SphereGeometry(0.05, 10, 8);
+    const eyeGeo = new THREE.SphereGeometry(0.048, 16, 12);
+    const rimGeo = new THREE.SphereGeometry(0.054, 12, 10);
+    const pupilMat = darkMat.clone();
+    pupilMat.color.set(0x050608);
     const rimMat = darkMat.clone();
     rimMat.color.set(0xe6e2db);
     const eyeZ = eyeSlice.half * eyeNz;
-    const eye = new THREE.Mesh(eyeGeo, darkMat);
+    const eye = new THREE.Mesh(eyeGeo, pupilMat);
     eye.position.set(eyeSlice.x, eyeY, eyeZ);
     fish.add(eye);
     const rim = new THREE.Mesh(rimGeo, rimMat);
-    rim.position.set(eyeSlice.x, eyeY, eyeZ * 0.9);
+    rim.position.set(eyeSlice.x, eyeY, eyeZ * 0.97);
     fish.add(rim);
-    const eyeL = new THREE.Mesh(eyeGeo, darkMat);
+    const eyeL = new THREE.Mesh(eyeGeo, pupilMat);
     eyeL.position.set(eyeSlice.x, eyeY, -eyeZ);
     fish.add(eyeL);
     const rimL = new THREE.Mesh(rimGeo, rimMat);
-    rimL.position.set(eyeSlice.x, eyeY, -eyeZ * 0.9);
+    rimL.position.set(eyeSlice.x, eyeY, -eyeZ * 0.97);
     fish.add(rimL);
     return fish;
   };
@@ -1568,8 +1570,9 @@ function skyTexture() {
     const sky = ctx.createLinearGradient(0, 0, 0, h);
     sky.addColorStop(0, '#05070f');
     sky.addColorStop(0.42, '#10182c');
-    sky.addColorStop(0.72, '#1a2742');
-    sky.addColorStop(1, '#24344e');
+    sky.addColorStop(0.62, '#1a2742');
+    sky.addColorStop(0.74, '#142033');
+    sky.addColorStop(1, '#10182c');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 900; i += 1) {
@@ -2121,7 +2124,6 @@ function createCliff(scene, targets) {
   stoneMap.wrapT = THREE.RepeatWrapping;
   stoneMap.repeat.set(1.6, 2.4);
   const rock = new THREE.MeshStandardMaterial({ map: stoneMap, color: 0xc4b8aa, roughness: 1 });
-  const farRock = new THREE.MeshStandardMaterial({ color: 0x7a746c, roughness: 1 });
 
   // The house sits on this mass. Its chasm face is the floor edge, so the drop
   // beside the room is open air down to the water.
@@ -2271,10 +2273,12 @@ function createCliff(scene, targets) {
   scene.add(lip);
 
   const waterNear = CLIFF_X + 0.05;
-  const waterFar = -56;
+  const playFar = -56;
+  const playDepth = 64;
+  const waterFar = -520;
   const waterWidth = waterNear - waterFar;
-  const waterDepth = 64;
-  const waterGeo = new THREE.PlaneGeometry(waterWidth, waterDepth, 200, 148);
+  const waterDepth = 720;
+  const waterGeo = new THREE.PlaneGeometry(waterWidth, waterDepth, 180, 140);
   waterGeo.rotateX(-Math.PI / 2);
   const waterMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -2288,6 +2292,7 @@ function createCliff(scene, targets) {
         uShallow: { value: new THREE.Color(0x1c5966) },
         uGlint: { value: new THREE.Color(0xd7e6ea) },
         uRings: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+        uSpan: { value: new THREE.Vector2(playFar, waterNear) },
       },
     ]),
     vertexShader: `
@@ -2295,12 +2300,10 @@ function createCliff(scene, targets) {
       #include <fog_pars_vertex>
       uniform float uTime;
       uniform vec4 uRings[4];
-      varying vec2 vUv;
       varying vec3 vWorldPos;
       varying float vHeight;
       ${waterWaveGlsl}
       void main() {
-        vUv = uv;
         vec3 p = position;
         vec2 xz = (modelMatrix * vec4(p, 1.0)).xz;
         float h = heightAt(xz);
@@ -2321,7 +2324,7 @@ function createCliff(scene, targets) {
       uniform vec3 uDeep;
       uniform vec3 uShallow;
       uniform vec3 uGlint;
-      varying vec2 vUv;
+      uniform vec2 uSpan;
       varying vec3 vWorldPos;
       varying float vHeight;
       ${waterWaveGlsl}
@@ -2341,17 +2344,18 @@ function createCliff(scene, targets) {
         float into = pow(clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 0.55);
         float fresnel = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 3.0);
         float crest = smoothstep(-0.02, 0.08, vHeight);
-        float far = smoothstep(0.92, 0.08, vUv.x);
+        float along = clamp((vWorldPos.x - uSpan.x) / (uSpan.y - uSpan.x), 0.0, 1.0);
+        float far = smoothstep(0.92, 0.08, along);
         vec3 depthCol = mix(uShallow, uDeep, far * 0.82 + 0.12);
         vec3 surface = mix(uDeep, uShallow, 0.3 + crest * 0.12);
         surface *= mix(0.62, 1.18, lit);
         surface += uGlint * spec * (0.28 + crest * 0.35);
         surface = mix(surface, uGlint, fresnel * 0.1);
         vec3 color = mix(surface, depthCol, into);
-        float shore = smoothstep(0.9, 0.995, vUv.x) * (0.35 + noise(xz * 0.8 + uTime * 0.4) * 0.65);
+        float shore = smoothstep(0.9, 0.995, along) * (0.35 + noise(xz * 0.8 + uTime * 0.4) * 0.65);
         color = mix(color, uGlint, shore * 0.08);
         float alpha = mix(0.9, 0.36, into);
-        alpha = mix(alpha, alpha * 0.72, smoothstep(0.8, 0.99, vUv.x));
+        alpha = mix(alpha, alpha * 0.72, smoothstep(0.8, 0.99, along));
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -2362,10 +2366,6 @@ function createCliff(scene, targets) {
   const water = new THREE.Mesh(waterGeo, waterMat);
   water.position.set((waterNear + waterFar) / 2, WATER_Y, 0);
   scene.add(water);
-
-  const farWall = new THREE.Mesh(new THREE.BoxGeometry(7, 13, 72), farRock);
-  farWall.position.set(waterFar - 3.5, WATER_Y + 2.4, 0);
-  scene.add(farWall);
 
   createSeaRocks(scene);
   createWreck(scene);
@@ -2411,8 +2411,8 @@ function createCliff(scene, targets) {
   let ringCursor = 0;
 
   function splash(x, z, burst = true) {
-    const px = THREE.MathUtils.clamp(x, waterFar + 3.2, waterNear - 3.2);
-    const pz = THREE.MathUtils.clamp(z, -waterDepth / 2 + 3.2, waterDepth / 2 - 3.2);
+    const px = THREE.MathUtils.clamp(x, playFar + 3.2, waterNear - 3.2);
+    const pz = THREE.MathUtils.clamp(z, -playDepth / 2 + 3.2, playDepth / 2 - 3.2);
     ringSlots[ringCursor].set(px, pz, 0, burst ? 1 : 0.55);
     ringCursor = (ringCursor + 1) % ringSlots.length;
     const count = burst ? 12 : 4;
@@ -2663,7 +2663,7 @@ function createCrateYard(scene, targets, rockMap) {
 export function createWorld() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
-  scene.fog = new THREE.Fog(0x10182c, 18, 62);
+  scene.fog = new THREE.Fog(0x10182c, 18, 210);
 
   const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.05, 160);
   camera.position.set(-0.05, 1.58, 1.22);
