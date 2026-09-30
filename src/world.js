@@ -627,6 +627,60 @@ function sharkSlice(u) {
   return { x: p.x, mid: oy, top: oy + p.y, belly: oy - p.y, half: p.z };
 }
 
+function sharkJaw(t, open = 1) {
+  const ang = t * Math.PI;
+  const front = Math.sin(ang);
+  const gape = front ** 0.85 * open;
+  const across = Math.cos(ang);
+  const u = 0.83 + gape * 0.07;
+  const slice = sharkSlice(u);
+  const ry = (slice.top - slice.belly) / 2;
+  const a = Math.PI - across * 0.58;
+  const ny = Math.cos(a);
+  const nz = Math.sin(a);
+  const x = slice.x;
+  const surfY = slice.mid + ny * ry;
+  const surfZ = nz * slice.half;
+  const out = (dist) => [x - dist * 0.15, surfY + ny * dist, surfZ + nz * dist * 0.35];
+  return {
+    seam: out(0.003),
+    upper: out(0.011 + gape * 0.004),
+    lower: out(0.013 + gape * 0.026),
+    chin: out(0.02 + gape * 0.034),
+    pit: out(0.008 + gape * 0.014),
+    front: front ** 0.85,
+    across,
+  };
+}
+
+function poseSharkMouth(fish, open) {
+  fish.traverse((child) => {
+    const ribbon = child.userData?.jawRibbon;
+    if (ribbon) {
+      const attr = child.geometry.attributes.position;
+      const { steps, keyA, keyB } = ribbon;
+      for (let i = 0; i <= steps; i += 1) {
+        const spot = sharkJaw(i / steps, open);
+        const a = spot[keyA];
+        const b = spot[keyB];
+        attr.setXYZ(i * 2, a[0], a[1], a[2]);
+        attr.setXYZ(i * 2 + 1, b[0], b[1], b[2]);
+      }
+      attr.needsUpdate = true;
+      child.geometry.computeVertexNormals();
+    }
+    const tooth = child.userData?.jawTooth;
+    if (!tooth) return;
+    const spot = sharkJaw((tooth.i + 0.5) / tooth.count, open);
+    const edge = tooth.upper ? spot.upper : spot.lower;
+    child.position.set(
+      edge[0] - (tooth.back ? 0.01 : 0),
+      edge[1] + (tooth.upper ? (tooth.back ? 0.003 : 0) : (tooth.back ? 0.002 : 0.008)),
+      edge[2] * (tooth.back ? 0.72 : 0.98),
+    );
+  });
+}
+
 function sharkSkinTexture(base = '#3c5566', grey = false) {
   const size = grey ? 1024 : 256;
   const { texture } = canvasTexture(size, size, (ctx, w, h) => {
@@ -1005,31 +1059,7 @@ function createSharks(scene, splash) {
     const toothGrey = toothMat.clone();
     toothGrey.color.set(0xb7b2a8);
     toothGrey.emissive.set(0x3a3834);
-    const jawAt = (t) => {
-      const ang = t * Math.PI;
-      const front = Math.sin(ang);
-      const gape = front ** 0.85;
-      const across = Math.cos(ang);
-      const u = 0.83 + gape * 0.07;
-      const slice = sharkSlice(u);
-      const ry = (slice.top - slice.belly) / 2;
-      const a = Math.PI - across * 0.58;
-      const ny = Math.cos(a);
-      const nz = Math.sin(a);
-      const x = slice.x;
-      const surfY = slice.mid + ny * ry;
-      const surfZ = nz * slice.half;
-      const out = (dist) => [x - dist * 0.15, surfY + ny * dist, surfZ + nz * dist * 0.35];
-      return {
-        seam: out(0.003),
-        upper: out(0.011 + gape * 0.004),
-        lower: out(0.013 + gape * 0.026),
-        chin: out(0.02 + gape * 0.034),
-        pit: out(0.008 + gape * 0.014),
-        front: gape,
-        across,
-      };
-    };
+    const jawAt = (t) => sharkJaw(t, 1);
     const ribbon = (keyA, keyB, name, material) => {
       const steps = 28;
       const positions = [];
@@ -1047,6 +1077,7 @@ function createSharks(scene, splash) {
       mesh.geometry.setIndex(indices);
       mesh.geometry.computeVertexNormals();
       mesh.name = name;
+      mesh.userData.jawRibbon = { keyA, keyB, steps };
       fish.add(mesh);
     };
     ribbon('seam', 'upper', 'gum', gumMat);
@@ -1059,6 +1090,7 @@ function createSharks(scene, splash) {
         if (spot.front < 0.42) continue;
         const tooth = new THREE.Mesh(toothGeo, material);
         tooth.name = 'tooth';
+        tooth.userData.jawTooth = { upper, back, i, count };
         const edge = upper ? spot.upper : spot.lower;
         tooth.position.set(
           edge[0] - (back ? 0.01 : 0),
@@ -1280,9 +1312,24 @@ function createBite(scene, source) {
   const shark = source.clone(true);
   shark.visible = false;
   shark.scale.setScalar(2.6);
+  shark.traverse((child) => {
+    if (child.userData?.jawRibbon) child.geometry = child.geometry.clone();
+  });
   scene.add(shark);
-  const snoutBox = new THREE.Box3().setFromObject(shark.getObjectByName('mouth') || shark);
-  const snout = snoutBox.max.x - shark.position.x;
+  let reach = 0;
+  let jawX = 0;
+  let jawY = 0;
+  shark.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    child.geometry.computeBoundingBox();
+    reach = Math.max(reach, child.geometry.boundingBox.max.x);
+    if (!child.userData.jawRibbon) return;
+    jawX = Math.max(jawX, child.geometry.boundingBox.max.x);
+    jawY += (child.geometry.boundingBox.min.y + child.geometry.boundingBox.max.y) / 2;
+  });
+  const nose = reach * shark.scale.x;
+  const mouthX = (jawX || reach) * shark.scale.x;
+  const mouthY = (jawY / 4) * shark.scale.x;
   const dropGeo = new THREE.SphereGeometry(0.05, 6, 5);
   const chunkGeo = new THREE.SphereGeometry(0.14, 7, 6);
   const bright = new THREE.MeshBasicMaterial({ color: 0xc41622 });
@@ -1357,29 +1404,37 @@ function createBite(scene, source) {
     shark.visible = true;
     shark.position.set(x - 7.2, WATER_Y - 0.7, z);
     shark.rotation.set(0.2, 0, 0.18);
+    poseSharkMouth(shark, 0.05);
   }
 
   function update(dt) {
     if (!bite || bite.done) return;
     bite.t += dt;
-    const strike = Math.min(1, bite.t / 0.34);
-    const eased = strike * strike;
-    const from = bite.x - 7.2;
-    const to = bite.x - snout - 0.72;
-    shark.position.x = from + (to - from) * eased;
-    shark.position.y = WATER_Y - 0.55 + eased * 0.72;
-    shark.position.z = bite.z + Math.sin(bite.t * 9) * 0.08;
-    shark.rotation.z = 0.2 * (1 - eased);
+    const swim = 0.7;
+    const openAt = 1.4;
+    const from = bite.x - 8;
+    const arrive = bite.x - nose - 1.25;
+    const lunge = bite.x - nose - 0.8;
+    const swimT = Math.min(1, bite.t / swim);
+    const swimEase = swimT * swimT * (3 - 2 * swimT);
+    const creep = bite.t <= swim ? 0 : Math.min(1, (bite.t - swim) / (openAt - swim));
+    const eyeY = WATER_Y + 0.5;
+    const presentY = eyeY - mouthY - 0.1;
+    shark.position.x = (from + (arrive - from) * swimEase) + (lunge - arrive) * creep;
+    shark.position.y = (WATER_Y - 0.35) + (presentY - (WATER_Y - 0.35)) * Math.max(swimEase, creep);
+    shark.position.z = bite.z + Math.sin(bite.t * 3.2) * 0.05;
+    shark.rotation.z = 0.16 * (1 - swimEase);
+    const openT = THREE.MathUtils.smoothstep(bite.t, 0.62, 1.32);
+    poseSharkMouth(shark, 0.06 + 0.94 * openT);
     const tail = shark.getObjectByName('tail');
-    if (tail) tail.rotation.y = Math.sin(bite.t * 16) * 0.5;
-    if (strike >= 1) {
-      const shake = Math.sin(bite.t * 34) * 0.12 * Math.max(0, 1 - (bite.t - 0.34) / 0.55);
+    if (tail) tail.rotation.y = Math.sin(bite.t * (bite.t >= openAt ? 14 : 6)) * 0.42;
+    if (bite.t >= openAt) {
+      const shake = Math.sin(bite.t * 28) * 0.08 * Math.max(0, 1 - (bite.t - openAt) / 0.6);
       shark.rotation.y = shake;
-      shark.position.x = to + Math.sin(bite.t * 26) * 0.05;
       if (!bite.sprayed) {
         bite.sprayed = true;
         bite.struck = true;
-        spray(bite.x - 0.35, WATER_Y + 0.42, bite.z);
+        spray(bite.x - 0.35, eyeY, bite.z);
       }
     }
     for (let i = drops.length - 1; i >= 0; i -= 1) {
@@ -1402,7 +1457,7 @@ function createBite(scene, source) {
         drop.vz *= 0.7;
       }
     }
-    if (bite.t > 1.9) bite.done = true;
+    if (bite.t > 2.9) bite.done = true;
   }
 
   return {
@@ -1419,10 +1474,10 @@ function createBite(scene, source) {
     focus() {
       if (!bite) return null;
       const mouth = shark.position.clone();
-      mouth.x += snout * 0.92;
-      mouth.y += 0.2;
+      mouth.x += mouthX;
+      mouth.y += mouthY;
       return {
-        eye: new THREE.Vector3(bite.x + 0.05, WATER_Y + 0.5, bite.z),
+        eye: new THREE.Vector3(bite.x + 0.15, WATER_Y + 0.5, bite.z),
         look: mouth,
       };
     },
