@@ -21,8 +21,8 @@ export function createGallery(scene, spec) {
   const roomZ0 = roomZc - width / 2;
   const roomZ1 = roomZc + width / 2;
   const ceilY = floorY + height;
-  const dark = new THREE.MeshStandardMaterial({ color: 0x221c18, roughness: 1 });
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x2a241e, roughness: 1 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 1 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1612, roughness: 1 });
   const walls = [];
   const buckets = [];
   let lit = false;
@@ -36,7 +36,6 @@ export function createGallery(scene, spec) {
       material,
     );
     mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-    mesh.layers.set(2);
     mesh.receiveShadow = true;
     scene.add(mesh);
     return mesh;
@@ -76,7 +75,6 @@ export function createGallery(scene, spec) {
     mesh.position.set(x, y, z);
     mesh.rotation.y = rotY;
     mesh.visible = false;
-    mesh.layers.set(2);
     scene.add(mesh);
     const wall = { name, mesh, canvas, ctx, texture, width: wallW, height: wallH, last: null };
     walls.push(wall);
@@ -113,7 +111,6 @@ export function createGallery(scene, spec) {
     log.rotation.z = Math.PI / 2;
     log.rotation.y = yaw;
     log.position.y = 0.07 + index * 0.045;
-    log.layers.set(2);
     fire.add(log);
   });
   const flames = new THREE.Group();
@@ -131,9 +128,8 @@ export function createGallery(scene, spec) {
   heart.position.y = 0.24;
   flames.add(heart);
   fire.add(flames);
-  const fireLight = new THREE.PointLight(0xff8a3a, 0, 11, 2);
+  const fireLight = new THREE.PointLight(0xff8a3a, 0, 6.5, 2);
   fireLight.position.y = 0.45;
-  fireLight.layers.set(2);
   fire.add(fireLight);
   scene.add(fire);
   firePoint.set(midX, floorY + 0.34, midZ);
@@ -142,7 +138,6 @@ export function createGallery(scene, spec) {
   PAINTS.forEach((color, index) => {
     const bucket = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.15, 10), bucketMat);
-    body.layers.set(2);
     bucket.add(body);
     const coat = new THREE.Mesh(
       new THREE.CircleGeometry(0.07, 12),
@@ -151,11 +146,9 @@ export function createGallery(scene, spec) {
     coat.material.toneMapped = false;
     coat.rotation.x = -Math.PI / 2;
     coat.position.y = 0.076;
-    coat.layers.set(2);
     bucket.add(coat);
     const span = PAINTS.length - 1;
     bucket.position.set(roomX0 + 0.7 + (index / span) * (depth - 1.3), floorY + 0.075, roomZ0 + 0.42);
-    bucket.layers.set(2);
     scene.add(bucket);
     buckets.push({
       x: bucket.position.x,

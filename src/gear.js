@@ -176,7 +176,6 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
   torch.add(halo);
   const torchLight = new THREE.PointLight(0xffa24a, 8, 12, 2);
   torchLight.position.y = 0.52;
-  torchLight.layers.enable(2);
   torch.add(torchLight);
   const torchGrip = new THREE.Group();
   torchGrip.position.set(0, 0.16, 0);
@@ -238,9 +237,6 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
       paint: null,
     };
     holdPose(brush, [0.015, -0.02, -0.05], [Math.PI / 2, 0, 0.2]);
-    brush.traverse((child) => {
-      if (!child.isLight) child.layers.set(2);
-    });
     scene.add(brush);
     enlist(brush);
   }
@@ -1064,22 +1060,13 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
       torch.userData.halo.scale.setScalar(0.9 + wobble * 0.25);
     }
     if (gallery) {
-      const wear = (root, inside) => {
-        root.traverse((child) => {
-          if (child.isLight) return;
-          child.layers.set(inside ? 2 : 0);
-        });
-      };
       if (torch.visible) {
-        torch.getWorldPosition(paintTip);
-        wear(torch, gallery.contains(paintTip.x, paintTip.z));
         torch.userData.flame.getWorldPosition(paintTip);
         gallery.nearFire(paintTip);
       }
       if (brush.userData.carried && brush.userData.tip) {
         brush.updateWorldMatrix(true, true);
         brush.userData.tip.getWorldPosition(paintTip);
-        wear(brush, gallery.contains(paintTip.x, paintTip.z));
         const dipped = gallery.dip(paintTip);
         if (dipped) {
           brush.userData.paint = dipped;

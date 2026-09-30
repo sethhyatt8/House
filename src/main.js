@@ -94,9 +94,15 @@ function addTeleportSpot(spec) {
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = 0.03;
   group.add(ring, disc);
-  group.position.set(spec.x, spec.floor ?? 0, spec.z);
+  if (spec.parent) {
+    spec.parent.add(group);
+    group.position.set(spec.x, spec.y ?? 0, spec.z);
+    if (spec.scale) group.scale.setScalar(spec.scale);
+  } else {
+    group.position.set(spec.x, spec.floor ?? 0, spec.z);
+    scene.add(group);
+  }
   group.userData = { type: 'teleport', spot: teleportSpots.length };
-  scene.add(group);
   targets.push(group);
   teleportSpots.push({ ...spec, ringMat });
 }
@@ -130,6 +136,15 @@ addTeleportSpot({
   look: new THREE.Vector3(0.4, 0.4, 4.2),
   status: 'Out among the crates.',
 });
+addTeleportSpot({
+  x: 0,
+  y: 0.18,
+  z: 0.02,
+  parent: world.canoe.group,
+  scale: 0.62,
+  seat: true,
+  status: 'In the canoe.',
+});
 
 function teleportTo(index) {
   if (biteHold) return;
@@ -138,6 +153,13 @@ function teleportTo(index) {
   leaveClimb();
   teleportIndex = index;
   fallVy = 0;
+  if (spot.seat) {
+    boardCanoe();
+    return;
+  }
+  aboard = false;
+  boatGrip = null;
+  oarGrip = null;
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
     const pose = ref && xrFrame.getViewerPose(ref);
@@ -159,7 +181,7 @@ function teleportTo(index) {
 }
 
 function teleportNext() {
-  const order = [1, 3, 0, 2];
+  const order = [1, 3, 0, 2, 4];
   const at = order.indexOf(teleportIndex);
   teleportTo(order[(at + 1) % order.length]);
 }
@@ -2111,9 +2133,25 @@ function closestBoat(list, points, reach) {
   return { owner: best, point: best.getWorldPosition(rungClosest) };
 }
 
+const boatLocal = new THREE.Vector3();
+
+function handNearBoat(points) {
+  const boat = world.canoe.group;
+  for (const point of points) {
+    boatLocal.copy(point);
+    boat.worldToLocal(boatLocal);
+    const dx = Math.max(Math.abs(boatLocal.x) - 0.58, 0);
+    const dy = Math.max(-0.02 - boatLocal.y, boatLocal.y - 0.5, 0);
+    const dz = Math.max(Math.abs(boatLocal.z) - 1.92, 0);
+    if (Math.hypot(dx, dy, dz) < 0.18) return true;
+  }
+  return false;
+}
+
 function gripBoatEnd(controller) {
-  const near = closestBoat(world.canoe.ends, handPoints(controller), 0.36);
-  if (!near) return false;
+  const points = handPoints(controller);
+  const near = closestBoat(world.canoe.ends, points, 0.42);
+  if (!near && !handNearBoat(points)) return false;
   boatGrip = { controller };
   oarGrip = null;
   pulseController(controller);
@@ -2142,7 +2180,7 @@ function shoveBoat() {
 }
 
 function boardCanoe() {
-  if (!world.canoe.floating() || aboard) return;
+  if (aboard) return;
   const seat = world.canoe.seatPoint;
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
@@ -2326,6 +2364,15 @@ function onKeyDown(event) {
   if (event.key === 'f' || event.key === 'F') {
     if (world.gear.useDesktop()) return;
     if (aboard) {
+      if (!world.canoe.floating()) {
+        const result = world.canoe.shove();
+        if (result) {
+          setStatus(result === 'water'
+            ? 'The canoe is floating into the shallows.'
+            : 'Shoved. Press F again.');
+        }
+        return;
+      }
       if (world.canoe.stroke()) setStatus('Rowing.');
       return;
     }
@@ -2359,6 +2406,10 @@ function onXrTrigger(controller) {
     return;
   }
   if (aboard) {
+    if (!world.canoe.floating()) {
+      shoveBoat();
+      return;
+    }
     if (world.canoe.stroke()) {
       pulseController(controller);
       setStatus('Rowing.');
@@ -3117,11 +3168,6 @@ function frame(time, frame) {
       watcherCount = relay.watcherCount();
       relay.send(captureSnapshot());
     }
-  }
-  if (renderer.xr.isPresenting) {
-    const xrCamera = renderer.xr.getCamera();
-    xrCamera.layers.enable(2);
-    xrCamera.cameras?.forEach((eye) => eye.layers.enable(2));
   }
   renderer.render(scene, camera);
 }

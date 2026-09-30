@@ -2449,7 +2449,7 @@ function createCanoe(scene, targets, cave) {
     group.add(oar);
     oars.push(oar);
   });
-  group.position.set(cave.boatX, cave.floor + 0.02, cave.z);
+  group.position.set(cave.boatX, cave.floor + 0.12, cave.z);
   scene.add(group);
   targets.push(group);
 
@@ -3179,7 +3179,6 @@ export function createWorld() {
   scene.fog = new THREE.Fog(0x10182c, 18, 210);
 
   const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.05, 160);
-  camera.layers.enable(2);
   camera.position.set(-0.05, 1.58, 1.22);
 
   const targets = [];
