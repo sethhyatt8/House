@@ -641,6 +641,8 @@ function groundUnder(x, z, feetY) {
   if (overRoof && feetY >= roof.y - 0.25) return standHeight(x, z, feetY, roof.y);
   const cave = world.cave;
   if (cave && feetY < -1 && x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return cave.floor;
+  if (cave?.tunnel && feetY < -1 && x >= cave.tunnel.x0 && x <= cave.tunnel.x1 && z >= cave.tunnel.z0 && z <= cave.tunnel.z1) return cave.floor;
+  if (cave?.room && feetY < -1 && x >= cave.room.x0 && x <= cave.room.x1 && z >= cave.room.z0 && z <= cave.room.z1) return cave.floor;
   const shaft = world.shaft;
   if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.85 && Math.abs(z - shaft.z) < 0.7) return shaft.floor;
   const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
@@ -2537,8 +2539,20 @@ const faceUp = new THREE.Vector3(0, 1, 0);
 const towardEye = new THREE.Vector3();
 const presentQuat = new THREE.Quaternion();
 
+function overCave(x, z) {
+  const cave = world.cave;
+  if (!cave) return false;
+  if (x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return true;
+  const tunnel = cave.tunnel;
+  if (tunnel && x >= tunnel.x0 && x <= tunnel.x1 && z >= tunnel.z0 && z <= tunnel.z1) return true;
+  const room = cave.room;
+  return !!(room && x >= room.x0 && x <= room.x1 && z >= room.z0 && z <= room.z1);
+}
+
 function supportY(prop) {
-  let best = prop.userData.floorY ?? 0.03;
+  const cave = world.cave;
+  const inCave = prop.position.y < -1 && overCave(prop.position.x, prop.position.z);
+  let best = inCave && cave ? cave.floor + (prop.userData.floorY ?? 0) : (prop.userData.floorY ?? 0.03);
   const overRoof = prop.position.x >= roof.x0 && prop.position.x <= roof.x1
     && prop.position.z >= roof.z0 && prop.position.z <= roof.z1
     && prop.position.y > roof.y - 0.2;
@@ -2630,6 +2644,7 @@ function notePropMotion() {
 function propRestY(prop) {
   const lift = prop.userData.floorY ?? 0.03;
   const { x, y, z } = prop.position;
+  if (y < -1 && overCave(x, z)) return (world.cave?.floor ?? 0) + lift;
   if (x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1 && y > roof.y - 0.25) {
     return standHeight(x, z, y, roof.y) + lift;
   }
@@ -2664,15 +2679,16 @@ function dropProp() {
       const onYard = yard
         && prop.position.x >= yard.x0 && prop.position.x <= yard.x1
         && prop.position.z >= yard.z0 && prop.position.z <= yard.z1;
-      const inRoom = prop.position.x >= CLIFF_X;
-      if (!inRoom && !onYard && prop.position.y <= WATER_Y) {
+      const inCave = prop.position.y < -1 && overCave(prop.position.x, prop.position.z);
+      const inHouse = !inCave && prop.position.y > -1 && prop.position.x >= CLIFF_X;
+      if (!inHouse && !onYard && !inCave && prop.position.y <= WATER_Y) {
         world.splash(prop.position.x, prop.position.z);
         prop.parent?.remove(prop);
         job.t = job.d;
         return;
       }
       const rest = propRestY(prop);
-      if ((inRoom || onYard) && prop.position.y <= rest) {
+      if ((inHouse || onYard || inCave) && prop.position.y <= rest) {
         prop.position.y = rest;
         prop.userData.role = 'loose';
         setBrickRaycast(prop, true);
@@ -2741,8 +2757,9 @@ function throwProp(prop, velocity) {
       const onYard = yard
         && prop.position.x >= yard.x0 && prop.position.x <= yard.x1
         && prop.position.z >= yard.z0 && prop.position.z <= yard.z1;
-      const inRoom = prop.position.x >= CLIFF_X;
-      if (inRoom) {
+      const inCave = prop.position.y < -1 && overCave(prop.position.x, prop.position.z);
+      const inHouse = !inCave && prop.position.y > -1 && prop.position.x >= CLIFF_X;
+      if (inHouse) {
         if (prop.position.x > 2.35) {
           prop.position.x = 2.35;
           vx = -Math.abs(vx) * 0.45;
@@ -2756,14 +2773,14 @@ function throwProp(prop, velocity) {
           vz = -Math.abs(vz) * 0.45;
         }
       }
-      if (!inRoom && !onYard && prop.position.y <= WATER_Y) {
+      if (!inHouse && !onYard && !inCave && prop.position.y <= WATER_Y) {
         world.splash(prop.position.x, prop.position.z);
         prop.parent?.remove(prop);
         job.t = job.d;
         return;
       }
       const rest = prop.userData.stackH != null ? supportY(prop) : floorY;
-      if ((inRoom || onYard) && prop.position.y <= rest && vy <= 0) {
+      if ((inHouse || onYard || inCave) && prop.position.y <= rest && vy <= 0) {
         prop.position.y = rest;
         if (vy < -1.3) {
           vy = -vy * 0.32;
@@ -3100,6 +3117,11 @@ function frame(time, frame) {
       watcherCount = relay.watcherCount();
       relay.send(captureSnapshot());
     }
+  }
+  if (renderer.xr.isPresenting) {
+    const xrCamera = renderer.xr.getCamera();
+    xrCamera.layers.enable(2);
+    xrCamera.cameras?.forEach((eye) => eye.layers.enable(2));
   }
   renderer.render(scene, camera);
 }

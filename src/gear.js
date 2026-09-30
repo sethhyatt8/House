@@ -55,10 +55,10 @@ function paintAxe() {
 
 function carryable(object) {
   const gear = object?.userData?.gear;
-  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch';
+  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush';
 }
 
-export function createGear(scene, camera, targets, roof, cave) {
+export function createGear(scene, camera, targets, roof, cave, gallery) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d4c32, roughness: 0.78 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb7b8b4, roughness: 0.42, metalness: 0.55 });
   const leather = new THREE.MeshStandardMaterial({ color: 0x5a3824, roughness: 0.86 });
@@ -176,6 +176,7 @@ export function createGear(scene, camera, targets, roof, cave) {
   torch.add(halo);
   const torchLight = new THREE.PointLight(0xffa24a, 8, 12, 2);
   torchLight.position.y = 0.52;
+  torchLight.layers.enable(2);
   torch.add(torchLight);
   const torchGrip = new THREE.Group();
   torchGrip.position.set(0, 0.16, 0);
@@ -197,10 +198,52 @@ export function createGear(scene, camera, targets, roof, cave) {
   torch.position.set(cave.x1 - 0.85, cave.floor, cave.z + 0.85);
   torch.rotation.y = -0.6;
   torch.rotation.z = 0.08;
-  torch.userData = { type: 'gear', gear: 'torch', floorY: cave.floor, grip: torchGrip, light: torchLight, flame, halo };
+  torch.userData = { type: 'gear', gear: 'torch', floorY: cave.floor, houseY: 0.02, grip: torchGrip, light: torchLight, flame, halo };
   holdPose(torch, [0.02, -0.02, -0.05], [0.5, 0, 0.18]);
   scene.add(torch);
   enlist(torch);
+
+  const paintTip = new THREE.Vector3();
+  const bristleMat = new THREE.MeshStandardMaterial({ color: 0xc2a878, roughness: 0.75 });
+  const brush = new THREE.Group();
+  if (gallery) {
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.28, 6), wood);
+    handle.position.y = 0.14;
+    brush.add(handle);
+    const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.012, 0.035, 6), metal);
+    ferrule.position.y = 0.29;
+    brush.add(ferrule);
+    const bristles = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.008, 0.07, 6), bristleMat);
+    bristles.position.y = 0.34;
+    brush.add(bristles);
+    const tip = new THREE.Object3D();
+    tip.position.y = 0.385;
+    brush.add(tip);
+    const brushGrip = new THREE.Group();
+    brushGrip.position.set(0, 0.12, 0);
+    brushGrip.visible = false;
+    const brushPalm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.036, 0.04), torchSkin);
+    brushGrip.add(brushPalm);
+    brush.add(brushGrip);
+    brush.position.set(gallery.brushAt.x, gallery.brushAt.y, gallery.brushAt.z);
+    brush.rotation.z = Math.PI / 2;
+    brush.rotation.y = 0.4;
+    brush.userData = {
+      type: 'gear',
+      gear: 'brush',
+      floorY: gallery.brushAt.y,
+      houseY: 0.02,
+      grip: brushGrip,
+      tip,
+      paint: null,
+    };
+    holdPose(brush, [0.015, -0.02, -0.05], [Math.PI / 2, 0, 0.2]);
+    brush.traverse((child) => {
+      if (!child.isLight) child.layers.set(2);
+    });
+    scene.add(brush);
+    enlist(brush);
+  }
 
   const bowWood = wood.clone();
   bowWood.color.set(0x4a3018);
@@ -274,15 +317,15 @@ export function createGear(scene, camera, targets, roof, cave) {
   const arrowRay = new THREE.Raycaster();
   const arrowPrev = new THREE.Vector3();
   const arrowAim = new THREE.Vector3();
-  bow.position.set(0.62, 0.58, -1.2);
-  bow.rotation.y = Math.PI / 2;
+  bow.position.set(2.35, cave.floor + 0.56, -3.85);
+  bow.rotation.y = 0.8;
   bow.traverse((child) => {
     if (child.isMesh) {
       child.castShadow = true;
       child.receiveShadow = true;
     }
   });
-  bow.userData = { type: 'gear', gear: 'bow', floorY: 0.58 };
+  bow.userData = { type: 'gear', gear: 'bow', floorY: cave.floor + 0.56, houseY: 0.58 };
   holdPose(bow, [0, -0.03, -0.02], [0.15, 0, 0]);
   scene.add(bow);
   enlist(bow);
@@ -518,9 +561,9 @@ export function createGear(scene, camera, targets, roof, cave) {
   strap.rotation.y = Math.PI / 2;
   strap.position.set(0, 0.12, 0);
   bag.add(strap);
-  bag.position.set(1.02, 0.12, 0.28);
+  bag.position.set(1.85, cave.floor + 0.11, -3.7);
   bag.rotation.y = 0.5;
-  bag.userData = { type: 'gear', gear: 'bag', floorY: 0.11 };
+  bag.userData = { type: 'gear', gear: 'bag', floorY: cave.floor + 0.11, houseY: 0.12 };
   scene.add(bag);
   enlist(bag);
 
@@ -697,7 +740,7 @@ export function createGear(scene, camera, targets, roof, cave) {
     scene.attach(item);
     item.position.set(
       point.x + (Math.random() - 0.5) * 0.08,
-      item.userData.gear === 'torch' && point.y > -1.5 ? 0.02 : (item.userData.floorY ?? 0.03),
+      point.y > -1.5 && item.userData.houseY != null ? item.userData.houseY : (item.userData.floorY ?? 0.03),
       point.z + (Math.random() - 0.5) * 0.08,
     );
     if (item.userData.gear === 'tile' && faceYaw != null) item.rotation.set(0, faceYaw, 0);
@@ -1019,6 +1062,33 @@ export function createGear(scene, camera, targets, roof, cave) {
       const flare = 0.92 + wobble * 0.1;
       torch.userData.flame.scale.set(flare, 0.85 + wobble * 0.2, flare);
       torch.userData.halo.scale.setScalar(0.9 + wobble * 0.25);
+    }
+    if (gallery) {
+      const wear = (root, inside) => {
+        root.traverse((child) => {
+          if (child.isLight) return;
+          child.layers.set(inside ? 2 : 0);
+        });
+      };
+      if (torch.visible) {
+        torch.getWorldPosition(paintTip);
+        wear(torch, gallery.contains(paintTip.x, paintTip.z));
+        torch.userData.flame.getWorldPosition(paintTip);
+        gallery.nearFire(paintTip);
+      }
+      if (brush.userData.carried && brush.userData.tip) {
+        brush.updateWorldMatrix(true, true);
+        brush.userData.tip.getWorldPosition(paintTip);
+        wear(brush, gallery.contains(paintTip.x, paintTip.z));
+        const dipped = gallery.dip(paintTip);
+        if (dipped) {
+          brush.userData.paint = dipped;
+          bristleMat.color.set(dipped);
+          bristleMat.emissive.set(dipped);
+          bristleMat.emissiveIntensity = 0.45;
+        }
+        if (brush.userData.paint) gallery.paint(paintTip, brush.userData.paint);
+      }
     }
     const want = chest.userData.want || 0;
     chest.userData.open = THREE.MathUtils.damp(chest.userData.open, want, 4, dt);

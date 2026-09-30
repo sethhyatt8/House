@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
+import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
 
 const TABLE_TOP = 0.76;
@@ -1885,7 +1886,7 @@ function createBite(scene, source) {
   };
 }
 
-function createAnimalCase(scene, targets, sword, white) {
+function createAnimalCase(scene, targets, sword, white, cave) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x5c4638, roughness: 0.86 });
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0xe7eef0,
@@ -1947,8 +1948,9 @@ function createAnimalCase(scene, targets, sword, white) {
 
   const swordCase = addCase(sword, 'swordfish', 0.4);
   const whiteCase = addCase(white, 'great white', 0.34);
-  swordCase.position.set(-0.55, 0, 0.2);
-  whiteCase.position.set(-0.55, swordCase.userData.stackH, 0.2);
+  const ground = cave?.floor ?? 0;
+  swordCase.position.set(0.85, ground, -4.7);
+  whiteCase.position.set(0.85, ground + swordCase.userData.stackH, -4.7);
 }
 
 function plankTexture() {
@@ -2546,6 +2548,10 @@ function createCliff(scene, targets) {
   const caveTop = -3.2;
   const caveBot = WATER_Y - 0.35;
   const caveBack = 4.4;
+  const doorZ0 = 1.15;
+  const doorZ1 = 2.5;
+  const doorSill = WATER_Y + 0.02;
+  const doorTop = WATER_Y + 0.08 + 2.15;
   const caveDark = new THREE.MeshBasicMaterial({ color: 0x101418 });
   const slab = (z0, z1, y0, y1, mat = rock) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(skin, y1 - y0, z1 - z0), mat);
@@ -2564,7 +2570,10 @@ function createCliff(scene, targets) {
   mass(innerX, caveBack, caveTop, yTop, caveZ0, shaftZ0);
   mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
   mass(innerX, caveBack, shaftTop, yTop, shaftZ0, shaftZ1);
-  mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, caveZ1);
+  mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, doorZ0);
+  mass(caveBack, caveBack + 0.7, yBot, caveTop, doorZ1, caveZ1);
+  mass(caveBack, caveBack + 0.7, doorTop, caveTop, doorZ0, doorZ1);
+  mass(caveBack, caveBack + 0.7, yBot, doorSill, doorZ0, doorZ1);
   mass(-3.6, caveBack, yBot, WATER_Y + 0.02, caveZ0, caveZ1);
   slab(-12, caveZ0, yBot, yTop);
   slab(caveZ1, 12, yBot, yTop);
@@ -2865,7 +2874,17 @@ function createCliff(scene, targets) {
     }
   }
 
-  return { update, splash, cave, shaft };
+  const gallery = createGallery(scene, {
+    floorY: beachTop,
+    mouthX: caveBack,
+    z0: doorZ0,
+    z1: doorZ1,
+    mouthH: 2.15,
+  });
+  cave.tunnel = gallery.tunnel;
+  cave.room = gallery.room;
+
+  return { update, splash, cave, shaft, gallery };
 }
 
 function plateTexture() {
@@ -3160,6 +3179,7 @@ export function createWorld() {
   scene.fog = new THREE.Fog(0x10182c, 18, 210);
 
   const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.05, 160);
+  camera.layers.enable(2);
   camera.position.set(-0.05, 1.58, 1.22);
 
   const targets = [];
@@ -3338,8 +3358,8 @@ export function createWorld() {
   const angels = createAngels(scene);
   const birds = createBirds(scene);
   const bite = createBite(scene, sharks.white);
-  createAnimalCase(scene, targets, sharks.sword, sharks.white);
-  const gear = createGear(scene, camera, targets, roof, cliff.cave);
+  createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave);
+  const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery);
   const { yard, crates } = createCrateYard(scene, targets, rockMap);
   createForest(scene);
 
@@ -3362,6 +3382,7 @@ export function createWorld() {
       birds.update(dt);
       bite.update(dt);
       cliff.update(dt);
+      cliff.gallery.update(dt);
       puddles.update(dt);
       canoe.update(dt);
       gear.update(dt);
@@ -3372,6 +3393,7 @@ export function createWorld() {
     canoe,
     cave: cliff.cave,
     shaft: cliff.shaft,
+    gallery: cliff.gallery,
     splash: cliff.splash,
     startBite: bite.start,
     clearBite: bite.clear,
