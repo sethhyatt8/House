@@ -958,11 +958,22 @@ function createSharks(scene, splash) {
   const addPair = (build) => {
     const fish = build();
     const shadow = fish.clone(true);
+    const murk = new THREE.Color(0x08343c);
     shadow.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = false;
       const material = child.material.clone();
       material.clippingPlanes = [belowWater];
+      if (material.color) {
+        material.color.lerp(murk, 0.78);
+        material.color.multiplyScalar(0.42);
+      }
+      if (material.emissive) {
+        material.emissive.multiplyScalar(0.12);
+        if (material.emissiveIntensity != null) material.emissiveIntensity *= 0.2;
+      }
+      material.roughness = Math.min(1, (material.roughness ?? 0.5) + 0.28);
+      material.metalness = (material.metalness ?? 0) * 0.15;
       child.material = material;
     });
     fish.userData.tail = fish.getObjectByName('tail');
@@ -1359,18 +1370,18 @@ function angelSkinTexture() {
 function createAngels(scene) {
   const bodyMat = new THREE.MeshStandardMaterial({
     map: angelSkinTexture(),
-    color: 0xffffff,
-    roughness: 0.42,
-    emissive: 0x5a1834,
-    emissiveIntensity: 0.28,
+    color: 0x9a5a78,
+    roughness: 0.62,
+    emissive: 0x2a1020,
+    emissiveIntensity: 0.08,
   });
   const finMat = new THREE.MeshStandardMaterial({
-    color: 0xc5e7ff,
-    emissive: 0x163044,
-    emissiveIntensity: 0.35,
-    roughness: 0.22,
+    color: 0x6e95a4,
+    emissive: 0x0c242c,
+    emissiveIntensity: 0.1,
+    roughness: 0.48,
     transparent: true,
-    opacity: 0.62,
+    opacity: 0.38,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
@@ -2755,7 +2766,7 @@ function createCliff(scene, targets) {
         vec3 color = mix(surface, depthCol, into);
         float shore = smoothstep(0.9, 0.995, along) * (0.35 + noise(xz * 0.8 + uTime * 0.4) * 0.65);
         color = mix(color, uGlint, shore * 0.08);
-        float alpha = mix(0.9, 0.36, into);
+        float alpha = mix(0.92, 0.55, into);
         alpha = mix(alpha, alpha * 0.72, smoothstep(0.8, 0.99, along));
         gl_FragColor = vec4(color, alpha);
         #include <tonemapping_fragment>
@@ -3060,6 +3071,89 @@ function createCrateYard(scene, targets, rockMap) {
   return { yard, crates };
 }
 
+function createForest(scene) {
+  const soil = new THREE.MeshStandardMaterial({ color: 0x1a261e, roughness: 1 });
+  const addGround = (x0, x1, z0, z1) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), soil);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set((x0 + x1) / 2, -0.04, (z0 + z1) / 2);
+    mesh.userData.backdrop = true;
+    scene.add(mesh);
+  };
+  const far = 150;
+  addGround(3.7, far, -far, far);
+  addGround(-1.55, 3.7, 11.3, far);
+  addGround(-1.55, 3.7, -far, -4.1);
+
+  const trunkGeo = new THREE.CylinderGeometry(0.09, 0.14, 1, 5);
+  trunkGeo.translate(0, 0.5, 0);
+  const coneGeo = new THREE.ConeGeometry(1, 1, 6);
+  coneGeo.translate(0, 0.5, 0);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d342b, roughness: 0.96 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x24382c, roughness: 0.9 });
+  const shadeMat = new THREE.MeshStandardMaterial({ color: 0x1a2c22, roughness: 0.94 });
+  const spots = [];
+  const blocked = (x, z) => x < 6.4 && z > -5 && z < 12.6;
+  const scatter = (x0, x1, z0, z1, step, chance, height) => {
+    for (let x = x0; x <= x1; x += step) {
+      for (let z = z0; z <= z1; z += step) {
+        const jx = (hash01(x * 12.7 + z * 0.37) - 0.5) * step * 0.85;
+        const jz = (hash01(z * 9.1 + x * 0.53) - 0.5) * step * 0.85;
+        const px = x + jx;
+        const pz = z + jz;
+        if (px < -1.15 || blocked(px, pz)) continue;
+        if (hash01(px * 4.2 + pz * 8.6) > chance) continue;
+        const roll = hash01(px * 1.7 + pz * 3.3);
+        spots.push({
+          x: px,
+          z: pz,
+          h: height * (0.72 + roll * 0.62),
+          r: 0.85 + roll * 0.7,
+          trunk: 0.22 + roll * 0.16,
+          spin: roll * 6.2,
+        });
+      }
+    }
+  };
+  scatter(3.9, 34, -38, 46, 3.5, 0.78, 5.2);
+  scatter(-1.05, 3.9, 12.2, 38, 3.5, 0.74, 4.8);
+  scatter(-1.05, 3.9, -38, -4.6, 3.5, 0.74, 4.8);
+  scatter(34, 78, -78, 78, 7.2, 0.5, 7.4);
+  scatter(-1.05, 34, 38, 78, 7.2, 0.46, 6.8);
+  scatter(-1.05, 34, -78, -38, 7.2, 0.46, 6.8);
+  scatter(78, 145, -145, 145, 15, 0.62, 11);
+  scatter(-1.05, 78, 78, 145, 15, 0.55, 10);
+  scatter(-1.05, 78, -145, -78, 15, 0.55, 10);
+  if (!spots.length) return;
+
+  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
+  const tops = new THREE.InstancedMesh(coneGeo, leafMat, spots.length);
+  const crowns = new THREE.InstancedMesh(coneGeo, shadeMat, spots.length);
+  const dummy = new THREE.Object3D();
+  spots.forEach((spot, index) => {
+    dummy.rotation.set(0, spot.spin, 0);
+    dummy.position.set(spot.x, 0, spot.z);
+    dummy.scale.set(spot.trunk, spot.h * 0.36, spot.trunk);
+    dummy.updateMatrix();
+    trunks.setMatrixAt(index, dummy.matrix);
+    dummy.position.y = spot.h * 0.3;
+    dummy.scale.set(spot.r, spot.h * 0.62, spot.r);
+    dummy.updateMatrix();
+    tops.setMatrixAt(index, dummy.matrix);
+    dummy.position.y = spot.h * 0.58;
+    dummy.scale.set(spot.r * 0.68, spot.h * 0.42, spot.r * 0.68);
+    dummy.updateMatrix();
+    crowns.setMatrixAt(index, dummy.matrix);
+  });
+  [trunks, tops, crowns].forEach((mesh) => {
+    mesh.userData.backdrop = true;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  });
+}
+
 export function createWorld() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
@@ -3247,6 +3341,7 @@ export function createWorld() {
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
   const gear = createGear(scene, camera, targets, roof);
   const { yard, crates } = createCrateYard(scene, targets, rockMap);
+  createForest(scene);
 
   return {
     scene,
