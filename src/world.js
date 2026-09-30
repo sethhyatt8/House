@@ -829,20 +829,6 @@ function clearOfRocks(x, z, reach) {
   return [THREE.MathUtils.clamp(px, -50, -9), THREE.MathUtils.clamp(pz, -22, 18)];
 }
 
-const eyeSocketList = [];
-const eyeSocketNormal = new THREE.Vector3();
-const eyeSocketPoint = new THREE.Vector3();
-
-function syncEyeSockets() {
-  for (const eye of eyeSocketList) {
-    if (!eye.root.parent) continue;
-    eye.root.updateWorldMatrix(true, false);
-    eyeSocketNormal.set(0, 0, eye.outward).transformDirection(eye.root.matrixWorld);
-    eyeSocketPoint.copy(eye.skin).applyMatrix4(eye.root.matrixWorld);
-    eye.plane.setFromNormalAndCoplanarPoint(eyeSocketNormal, eyeSocketPoint);
-  }
-}
-
 function createSharks(scene, splash) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
@@ -976,8 +962,7 @@ function createSharks(scene, splash) {
       if (!child.isMesh) return;
       child.castShadow = false;
       const material = child.material.clone();
-      const kept = (child.material.clippingPlanes || []).filter((plane) => plane !== aboveWater);
-      material.clippingPlanes = [belowWater, ...kept];
+      material.clippingPlanes = [belowWater];
       child.material = material;
     });
     fish.userData.tail = fish.getObjectByName('tail');
@@ -1176,28 +1161,27 @@ function createSharks(scene, splash) {
     const eyeY = eyeSlice.mid + eyeRise;
     const eyeNz = Math.sqrt(Math.max(0.2, 1 - (eyeRise / (eyeSlice.top - eyeSlice.mid)) ** 2));
     const socket = eyeSlice.half * eyeNz;
-    const scleraGeo = new THREE.SphereGeometry(0.05, 20, 16);
-    const pupilGeo = new THREE.SphereGeometry(0.024, 16, 12);
+    const rimGeo = new THREE.CircleGeometry(0.026, 24);
+    const pupilGeo = new THREE.CircleGeometry(0.019, 20);
     const addSocketEye = (outward) => {
-      const skin = new THREE.Vector3(eyeSlice.x, eyeY, outward * socket);
-      const plane = new THREE.Plane(new THREE.Vector3(0, 0, outward), -skin.z);
       const rimMat = darkMat.clone();
       rimMat.color.set(0xf3f0e8);
       rimMat.roughness = 0.45;
-      rimMat.clippingPlanes = [aboveWater, plane];
+      rimMat.side = THREE.FrontSide;
       const pupilMat = darkMat.clone();
       pupilMat.color.set(0x05060a);
-      pupilMat.roughness = 0.2;
-      pupilMat.clippingPlanes = [aboveWater, plane];
-      const rim = new THREE.Mesh(scleraGeo, rimMat);
-      rim.position.set(skin.x, skin.y, skin.z - outward * 0.042);
-      rim.userData.eyeSocket = [skin.x, skin.y, skin.z, 0, 0, outward];
+      pupilMat.roughness = 0.22;
+      pupilMat.polygonOffset = true;
+      pupilMat.polygonOffsetFactor = -1;
+      pupilMat.polygonOffsetUnits = -1;
+      const rim = new THREE.Mesh(rimGeo, rimMat);
+      rim.position.set(eyeSlice.x, eyeY, outward * (socket + 0.012));
+      if (outward < 0) rim.rotation.y = Math.PI;
       fish.add(rim);
       const pupil = new THREE.Mesh(pupilGeo, pupilMat);
-      pupil.position.set(skin.x, skin.y, skin.z - outward * 0.012);
-      pupil.userData.eyeSocket = [skin.x, skin.y, skin.z, 0, 0, outward];
+      pupil.position.set(eyeSlice.x, eyeY, outward * (socket + 0.016));
+      if (outward < 0) pupil.rotation.y = Math.PI;
       fish.add(pupil);
-      eyeSocketList.push({ root: fish, plane, skin, outward });
     };
     addSocketEye(1);
     addSocketEye(-1);
@@ -1319,7 +1303,7 @@ function createSharks(scene, splash) {
     fish.traverse((child) => {
       if (!child.isMesh || !child.material) return;
       const material = child.material.clone();
-      material.clippingPlanes = (material.clippingPlanes || []).filter((plane) => plane !== aboveWater);
+      material.clippingPlanes = [];
       material.transparent = false;
       material.opacity = 1;
       material.depthWrite = true;
@@ -1507,18 +1491,6 @@ function createBite(scene, source) {
   shark.scale.setScalar(2.6);
   shark.traverse((child) => {
     if (child.userData?.jawRibbon) child.geometry = child.geometry.clone();
-    const mark = child.userData?.eyeSocket;
-    if (!mark || !child.isMesh) return;
-    const plane = new THREE.Plane();
-    const material = child.material.clone();
-    material.clippingPlanes = [plane];
-    child.material = material;
-    eyeSocketList.push({
-      root: shark,
-      plane,
-      skin: new THREE.Vector3(mark[0], mark[1], mark[2]),
-      outward: mark[5],
-    });
   });
   scene.add(shark);
   let reach = 0;
@@ -1852,8 +1824,10 @@ const waterWaveGlsl = `
     vec2 dir = normalize(vec2(wind.x * cs - wind.y * sn, wind.x * sn + wind.y * cs));
     float along = dot(xz, dir);
     float crossw = dot(xz, vec2(-dir.y, dir.x));
-    float amp = mix(0.4, 1.1, smoothstep(0.15, 0.85, region));
-    float freq = mix(1.35, 2.3, gust);
+    float reach = clamp((xz.x - uSpan.x) / (uSpan.y - uSpan.x), 0.0, 1.0);
+    float calm = smoothstep(0.0, 0.42, reach);
+    float amp = mix(0.4, 1.1, smoothstep(0.15, 0.85, region)) * mix(0.05, 1.0, calm);
+    float freq = mix(0.22, mix(1.35, 2.3, gust), calm);
     float phase = region * 5.0;
     float primary = sin(along * freq - uTime * 1.75 + phase);
     float ripple = sin(along * freq * 1.7 + crossw * 0.2 - uTime * 2.2 + phase);
@@ -2314,6 +2288,7 @@ function createCliff(scene, targets) {
     new THREE.SphereGeometry(120, 20, 16),
     new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, depthWrite: false, fog: false }),
   );
+  sky.userData.backdrop = true;
   scene.add(sky);
   const moon = new THREE.Mesh(
     new THREE.SphereGeometry(2.4, 28, 20),
@@ -2479,10 +2454,15 @@ function createCliff(scene, targets) {
   const playFar = -56;
   const playDepth = 64;
   const waterFar = -520;
-  const waterWidth = waterNear - waterFar;
   const waterDepth = 720;
-  const waterGeo = new THREE.PlaneGeometry(waterWidth, waterDepth, 180, 140);
-  waterGeo.rotateX(-Math.PI / 2);
+  const addSheet = (x0, x1, segX, segZ) => {
+    const geo = new THREE.PlaneGeometry(x1 - x0, waterDepth, segX, segZ);
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, waterMat);
+    mesh.position.set((x0 + x1) / 2, WATER_Y, 0);
+    mesh.userData.water = true;
+    scene.add(mesh);
+  };
   const waterMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: true,
@@ -2503,6 +2483,7 @@ function createCliff(scene, targets) {
       #include <fog_pars_vertex>
       uniform float uTime;
       uniform vec4 uRings[4];
+      uniform vec2 uSpan;
       varying vec3 vWorldPos;
       varying float vHeight;
       ${waterWaveGlsl}
@@ -2544,6 +2525,8 @@ function createCliff(scene, targets) {
         vec3 halfVec = normalize(moon + viewDir);
         float lit = clamp(dot(normal, moon) * 0.5 + 0.5, 0.0, 1.0);
         float spec = pow(clamp(dot(normal, halfVec), 0.0, 1.0), 70.0);
+        float reach = clamp((vWorldPos.x - uSpan.x) / (uSpan.y - uSpan.x), 0.0, 1.0);
+        spec *= mix(0.04, 1.0, smoothstep(0.0, 0.42, reach));
         float into = pow(clamp(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0, 1.0), 0.55);
         float fresnel = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 3.0);
         float crest = smoothstep(-0.02, 0.08, vHeight);
@@ -2566,9 +2549,8 @@ function createCliff(scene, targets) {
       }
     `,
   });
-  const water = new THREE.Mesh(waterGeo, waterMat);
-  water.position.set((waterNear + waterFar) / 2, WATER_Y, 0);
-  scene.add(water);
+  addSheet(playFar, waterNear, 48, 64);
+  addSheet(waterFar, playFar, 12, 10);
 
   createSeaRocks(scene);
   createWreck(scene);
@@ -3067,7 +3049,6 @@ export function createWorld() {
       sharks.update(dt);
       angels.update(dt);
       bite.update(dt);
-      syncEyeSockets();
       cliff.update(dt);
       puddles.update(dt);
       canoe.update(dt);

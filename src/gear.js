@@ -310,6 +310,20 @@ export function createGear(scene, camera, targets, roof) {
     return hit;
   }
 
+  let arrowMask = null;
+  function arrowSolids() {
+    if (arrowMask) return arrowMask;
+    arrowMask = [];
+    scene.traverse((obj) => {
+      if (!obj.isMesh || !obj.geometry) return;
+      if (obj.userData?.water || obj.userData?.backdrop || obj.userData?.arrow) return;
+      const count = obj.geometry.attributes?.position?.count || 0;
+      if (count > 2500) return;
+      arrowMask.push(obj);
+    });
+    return arrowMask;
+  }
+
   function updateArrows(dt) {
     if (drawHand && bow.userData.carried) {
       handWorld(drawHand, tmp);
@@ -350,7 +364,7 @@ export function createGear(scene, camera, targets, roof) {
       arrow.quaternion.setFromUnitVectors(upAxis, arrowAim);
       arrowRay.set(arrowPrev, arrowAim);
       arrowRay.far = step + 0.08;
-      const hits = arrowRay.intersectObjects(scene.children, true);
+      const hits = arrowRay.intersectObjects(arrowSolids(), true);
       for (const hit of hits) {
         if (hit.distance > arrowRay.far) break;
         const found = arrowHit(hit);
