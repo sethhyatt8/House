@@ -3339,7 +3339,7 @@ export function createWorld() {
   const birds = createBirds(scene);
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
-  const gear = createGear(scene, camera, targets, roof);
+  const gear = createGear(scene, camera, targets, roof, cliff.cave);
   const { yard, crates } = createCrateYard(scene, targets, rockMap);
   createForest(scene);
 

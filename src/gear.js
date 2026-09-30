@@ -55,10 +55,10 @@ function paintAxe() {
 
 function carryable(object) {
   const gear = object?.userData?.gear;
-  return gear === 'hatchet' || gear === 'tile' || gear === 'bow';
+  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch';
 }
 
-export function createGear(scene, camera, targets, roof) {
+export function createGear(scene, camera, targets, roof, cave) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d4c32, roughness: 0.78 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb7b8b4, roughness: 0.42, metalness: 0.55 });
   const leather = new THREE.MeshStandardMaterial({ color: 0x5a3824, roughness: 0.86 });
@@ -147,6 +147,60 @@ export function createGear(scene, camera, targets, roof) {
   holdPose(hatchet, [0, -0.012, 0.06], [-Math.PI / 2, 0.08, -0.45]);
   scene.add(hatchet);
   enlist(hatchet);
+
+  const torch = new THREE.Group();
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, 0.46, 6), wood);
+  stick.position.y = 0.23;
+  torch.add(stick);
+  const pitch = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.022, 0.02, 0.1, 6),
+    new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 0.9 }),
+  );
+  pitch.position.y = 0.4;
+  torch.add(pitch);
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffb15a });
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.11, 6), flameMat);
+  flame.position.y = 0.5;
+  torch.add(flame);
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 6, 5),
+    new THREE.MeshBasicMaterial({ color: 0xfff1c4 }),
+  );
+  core.position.y = 0.46;
+  torch.add(core);
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(0.07, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff7a2a, transparent: true, opacity: 0.28, depthWrite: false }),
+  );
+  halo.position.y = 0.5;
+  torch.add(halo);
+  const torchLight = new THREE.PointLight(0xffa24a, 8, 12, 2);
+  torchLight.position.y = 0.52;
+  torch.add(torchLight);
+  const torchGrip = new THREE.Group();
+  torchGrip.position.set(0, 0.16, 0);
+  torchGrip.visible = false;
+  const torchSkin = new THREE.MeshStandardMaterial({ color: 0xc9956b, roughness: 0.66 });
+  const torchPalm = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.042, 0.046), torchSkin);
+  torchGrip.add(torchPalm);
+  for (let i = 0; i < 4; i += 1) {
+    const finger = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.038, 0.016), torchSkin);
+    finger.position.set(0.012, 0.01, -0.02 + i * 0.014);
+    finger.rotation.z = -1.15;
+    torchGrip.add(finger);
+  }
+  const torchThumb = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.034, 0.016), torchSkin);
+  torchThumb.position.set(-0.02, 0.006, 0.02);
+  torchThumb.rotation.z = 0.9;
+  torchGrip.add(torchThumb);
+  torch.add(torchGrip);
+  torch.position.set(cave.x1 - 0.85, cave.floor, cave.z + 0.85);
+  torch.rotation.y = -0.6;
+  torch.rotation.z = 0.08;
+  torch.userData = { type: 'gear', gear: 'torch', floorY: cave.floor, grip: torchGrip, light: torchLight, flame, halo };
+  holdPose(torch, [0.02, -0.02, -0.05], [0.5, 0, 0.18]);
+  scene.add(torch);
+  enlist(torch);
 
   const bowWood = wood.clone();
   bowWood.color.set(0x4a3018);
@@ -643,7 +697,7 @@ export function createGear(scene, camera, targets, roof) {
     scene.attach(item);
     item.position.set(
       point.x + (Math.random() - 0.5) * 0.08,
-      item.userData.floorY ?? 0.03,
+      item.userData.gear === 'torch' && point.y > -1.5 ? 0.02 : (item.userData.floorY ?? 0.03),
       point.z + (Math.random() - 0.5) * 0.08,
     );
     if (item.userData.gear === 'tile' && faceYaw != null) item.rotation.set(0, faceYaw, 0);
@@ -958,6 +1012,13 @@ export function createGear(scene, camera, targets, roof) {
       }
       bladePrev.copy(bladeNow);
       bladeReady = true;
+    }
+    if (torch.visible && torch.userData.light) {
+      const wobble = 0.82 + Math.sin(performance.now() * 0.017) * 0.1 + Math.sin(performance.now() * 0.043) * 0.06;
+      torch.userData.light.intensity = 8 * wobble;
+      const flare = 0.92 + wobble * 0.1;
+      torch.userData.flame.scale.set(flare, 0.85 + wobble * 0.2, flare);
+      torch.userData.halo.scale.setScalar(0.9 + wobble * 0.25);
     }
     const want = chest.userData.want || 0;
     chest.userData.open = THREE.MathUtils.damp(chest.userData.open, want, 4, dt);
