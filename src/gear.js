@@ -278,7 +278,13 @@ export function createGear(scene, camera, targets, roof) {
   }
 
   function loose(power) {
-    const arrow = quiver.find((item) => !item.visible) || quiver[0];
+    let arrow = quiver.find((item) => !item.visible);
+    if (!arrow) {
+      arrow = makeArrow();
+      scene.add(arrow);
+      quiver.push(arrow);
+    }
+    if (arrow.parent !== scene) scene.attach(arrow);
     bow.updateWorldMatrix(true, true);
     const from = tmp.copy(nock);
     const to = tmp2.copy(shelf);
@@ -292,11 +298,22 @@ export function createGear(scene, camera, targets, roof) {
     arrow.userData.vel = arrowAim.clone().multiplyScalar(speed);
     arrow.userData.life = 4.2;
     arrow.userData.stuck = false;
+    arrow.userData.stuckFish = false;
     arrow.userData.hurt = false;
     poseArrow(arrow, from, to);
     nock.copy(nockRest);
     poseString();
     if (onLoose) onLoose();
+  }
+
+  function fishHost(object) {
+    let node = object;
+    while (node) {
+      if (node.userData?.fishHost) return node.userData.fishHost;
+      if (node.userData?.sea) return node;
+      node = node.parent;
+    }
+    return null;
   }
 
   function arrowHit(hit) {
@@ -314,11 +331,20 @@ export function createGear(scene, camera, targets, roof) {
   function arrowSolids() {
     if (arrowMask) return arrowMask;
     arrowMask = [];
+    const underShadow = (mesh) => {
+      let node = mesh;
+      while (node) {
+        if (node.userData?.fishHost) return true;
+        node = node.parent;
+      }
+      return false;
+    };
     scene.traverse((obj) => {
       if (!obj.isMesh || !obj.geometry) return;
       if (obj.userData?.water || obj.userData?.backdrop || obj.userData?.arrow) return;
+      if (underShadow(obj)) return;
       const count = obj.geometry.attributes?.position?.count || 0;
-      if (count > 2500) return;
+      if (count > 2500 && !obj.userData?.fishBody) return;
       arrowMask.push(obj);
     });
     return arrowMask;
@@ -345,6 +371,7 @@ export function createGear(scene, camera, targets, roof) {
     }
     for (const arrow of quiver) {
       if (!arrow.visible || !arrow.userData.vel) continue;
+      if (arrow.userData.stuckFish) continue;
       arrow.userData.life -= dt;
       if (arrow.userData.life <= 0) {
         arrow.visible = false;
@@ -374,8 +401,16 @@ export function createGear(scene, camera, targets, roof) {
           hurt(found);
         }
         arrow.position.copy(hit.point).addScaledVector(arrowAim, -0.66);
+        const host = fishHost(hit.object);
+        if (host) {
+          host.attach(arrow);
+          arrow.userData.stuckFish = true;
+          host.userData.arrowHits = (host.userData.arrowHits || 0) + 1;
+          if (host.userData.arrowHits >= 3) host.userData.dead = true;
+        } else {
+          arrow.userData.life = Math.min(arrow.userData.life, 2.4);
+        }
         arrow.userData.stuck = true;
-        arrow.userData.life = Math.min(arrow.userData.life, 2.4);
         break;
       }
     }

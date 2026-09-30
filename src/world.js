@@ -975,6 +975,7 @@ function createSharks(scene, splash) {
     const fish = new THREE.Group();
     const body = new THREE.Mesh(swordBody, swordBodyMat);
     body.castShadow = true;
+    body.userData.fishBody = true;
     fish.add(body);
     const dorsal = new THREE.Mesh(swordDorsal, swordDorsalMat);
     dorsal.name = 'dorsal';
@@ -1124,6 +1125,7 @@ function createSharks(scene, splash) {
     const fish = new THREE.Group();
     const body = new THREE.Mesh(whiteBody, whiteMat);
     body.castShadow = true;
+    body.userData.fishBody = true;
     fish.add(body);
     const dorsal = new THREE.Mesh(whiteDorsal, whiteFin);
     dorsal.castShadow = true;
@@ -1199,6 +1201,8 @@ function createSharks(scene, splash) {
     const pair = addPair(route.kind === 'white' ? makeWhite : makeSwordfish);
     pair.shark.scale.setScalar(route.scale);
     pair.shadow.scale.setScalar(route.scale);
+    pair.shark.userData.sea = true;
+    pair.shadow.userData.fishHost = pair.shark;
     scene.add(pair.shark);
     scene.add(pair.shadow);
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
@@ -1255,6 +1259,22 @@ function createSharks(scene, splash) {
       }
       sharks.forEach((pair, index) => {
         const route = routes[index];
+        if (pair.shark.userData.dead) {
+          const ease = 1 - Math.exp(-dt * 1.3);
+          const floatY = WATER_Y + route.scale * 0.02;
+          pair.shark.position.y += (floatY - pair.shark.position.y) * ease;
+          pair.shark.rotation.x += -pair.shark.rotation.x * ease;
+          pair.shark.rotation.z += (1.35 - pair.shark.rotation.z) * ease;
+          const drift = 0.16 * dt;
+          pair.shark.position.x += Math.cos(pair.shark.rotation.y) * drift;
+          pair.shark.position.z -= Math.sin(pair.shark.rotation.y) * drift;
+          if (pair.shark.position.x > -12) pair.shark.position.x -= 0.35 * dt;
+          pair.shark.userData.tail.rotation.y *= Math.max(0, 1 - dt * 3);
+          pair.shadow.position.copy(pair.shark.position);
+          pair.shadow.rotation.copy(pair.shark.rotation);
+          pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;
+          return;
+        }
         const place = places[index];
         const maxStep = 4.2 * dt;
         if (route.px != null) {
