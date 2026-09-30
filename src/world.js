@@ -1160,25 +1160,27 @@ function createSharks(scene, splash) {
     const eyeRise = (eyeSlice.top - eyeSlice.mid) * 0.22;
     const eyeY = eyeSlice.mid + eyeRise;
     const eyeNz = Math.sqrt(Math.max(0.2, 1 - (eyeRise / (eyeSlice.top - eyeSlice.mid)) ** 2));
-    const eyeGeo = new THREE.SphereGeometry(0.048, 16, 12);
-    const rimGeo = new THREE.SphereGeometry(0.054, 12, 10);
+    const scleraGeo = new THREE.SphereGeometry(0.052, 18, 14);
+    const pupilGeo = new THREE.SphereGeometry(0.037, 16, 12);
     const pupilMat = darkMat.clone();
-    pupilMat.color.set(0x050608);
+    pupilMat.color.set(0x07080c);
+    pupilMat.roughness = 0.16;
     const rimMat = darkMat.clone();
-    rimMat.color.set(0xe6e2db);
-    const eyeZ = eyeSlice.half * eyeNz;
-    const eye = new THREE.Mesh(eyeGeo, pupilMat);
-    eye.position.set(eyeSlice.x, eyeY, eyeZ);
-    fish.add(eye);
-    const rim = new THREE.Mesh(rimGeo, rimMat);
-    rim.position.set(eyeSlice.x, eyeY, eyeZ * 0.97);
+    rimMat.color.set(0xf7f4ee);
+    rimMat.roughness = 0.38;
+    const eyeZ = eyeSlice.half * eyeNz + 0.055;
+    const rim = new THREE.Mesh(scleraGeo, rimMat);
+    rim.position.set(eyeSlice.x, eyeY, eyeZ);
     fish.add(rim);
-    const eyeL = new THREE.Mesh(eyeGeo, pupilMat);
-    eyeL.position.set(eyeSlice.x, eyeY, -eyeZ);
-    fish.add(eyeL);
-    const rimL = new THREE.Mesh(rimGeo, rimMat);
-    rimL.position.set(eyeSlice.x, eyeY, -eyeZ * 0.97);
+    const eye = new THREE.Mesh(pupilGeo, pupilMat);
+    eye.position.set(eyeSlice.x, eyeY, eyeZ + 0.022);
+    fish.add(eye);
+    const rimL = rim.clone();
+    rimL.position.z = -eyeZ;
     fish.add(rimL);
+    const eyeL = eye.clone();
+    eyeL.position.z = -(eyeZ + 0.022);
+    fish.add(eyeL);
     return fish;
   };
   const waterline = { sword: 0.16, white: 0.2 };
@@ -1308,6 +1310,175 @@ function createSharks(scene, splash) {
     return fish;
   }
   return { update, sword: stillAnimal('sword'), white: stillAnimal('white') };
+}
+
+function angelSkinTexture() {
+  const { texture } = canvasTexture(256, 256, (ctx, w, h) => {
+    const wash = ctx.createLinearGradient(0, 0, 0, h);
+    wash.addColorStop(0, '#f7a0c8');
+    wash.addColorStop(0.42, '#ee5f9e');
+    wash.addColorStop(0.72, '#e23d86');
+    wash.addColorStop(1, '#f3b0c4');
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 0.28;
+    for (let i = 0; i < 5; i += 1) {
+      ctx.fillStyle = i % 2 ? '#ffe4f0' : '#ffd0e4';
+      ctx.fillRect(36 + i * 38, 0, 14, h);
+    }
+    ctx.globalAlpha = 1;
+  });
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createAngels(scene) {
+  const bodyMat = new THREE.MeshStandardMaterial({
+    map: angelSkinTexture(),
+    color: 0xffffff,
+    roughness: 0.42,
+    emissive: 0x5a1834,
+    emissiveIntensity: 0.28,
+  });
+  const finMat = new THREE.MeshStandardMaterial({
+    color: 0xc5e7ff,
+    emissive: 0x163044,
+    emissiveIntensity: 0.35,
+    roughness: 0.22,
+    transparent: true,
+    opacity: 0.62,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xe7eef3, roughness: 0.35 });
+  const eyeDark = new THREE.MeshStandardMaterial({ color: 0x101216, roughness: 0.2 });
+  const bodyShape = new THREE.Shape();
+  const outline = [
+    [0.3, 0.02], [0.22, 0.16], [0.08, 0.24], [-0.06, 0.22], [-0.16, 0.12],
+    [-0.18, 0], [-0.16, -0.12], [-0.04, -0.22], [0.12, -0.18], [0.24, -0.08],
+  ];
+  const hull = new THREE.SplineCurve(outline.map(([x, y]) => new THREE.Vector2(x, y)));
+  const ring = hull.getPoints(28);
+  bodyShape.moveTo(ring[0].x, ring[0].y);
+  ring.slice(1).forEach((point) => bodyShape.lineTo(point.x, point.y));
+  const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, {
+    depth: 0.05,
+    bevelEnabled: true,
+    bevelThickness: 0.012,
+    bevelSize: 0.014,
+    bevelSegments: 2,
+  });
+  bodyGeo.translate(0, 0, -0.025);
+  const dorsal = finGeometry([
+    [0.06, 0.16],
+    [0.02, 0.42],
+    [-0.1, 0.56],
+    [-0.32, 0.4],
+    [-0.48, 0.16],
+    [-0.14, 0.12],
+  ], 0.008);
+  const anal = finGeometry([
+    [0.04, -0.14],
+    [0.0, -0.4],
+    [-0.16, -0.54],
+    [-0.38, -0.32],
+    [-0.16, -0.12],
+  ], 0.008);
+  const tailGeo = finGeometry([
+    [0.04, 0.1],
+    [-0.18, 0.2],
+    [-0.34, 0.1],
+    [-0.14, 0.0],
+    [-0.36, -0.14],
+    [-0.16, -0.04],
+    [0.04, -0.08],
+  ], 0.008);
+  const makeAngel = () => {
+    const fish = new THREE.Group();
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    fish.add(body);
+    fish.add(new THREE.Mesh(dorsal, finMat));
+    fish.add(new THREE.Mesh(anal, finMat));
+    const tail = new THREE.Group();
+    tail.name = 'tail';
+    tail.position.set(-0.14, 0, 0);
+    tail.add(new THREE.Mesh(tailGeo, finMat));
+    fish.add(tail);
+    const streamer = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.36, 0.004), finMat);
+    streamer.position.set(0.04, -0.3, 0.02);
+    streamer.rotation.z = 0.35;
+    fish.add(streamer);
+    const streamerL = streamer.clone();
+    streamerL.position.z = -0.02;
+    streamerL.rotation.z = 0.55;
+    fish.add(streamerL);
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.032, 12, 10), eyeWhite);
+    white.position.set(0.12, 0.07, 0.04);
+    fish.add(white);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 8), eyeDark);
+    pupil.position.set(0.13, 0.07, 0.058);
+    fish.add(pupil);
+    const whiteL = white.clone();
+    whiteL.position.z = -0.04;
+    fish.add(whiteL);
+    const pupilL = pupil.clone();
+    pupilL.position.z = -0.058;
+    fish.add(pupilL);
+    fish.userData.tail = tail;
+    return fish;
+  };
+  const proto = makeAngel();
+  const schools = [
+    { cx: -22, cz: 5, rx: 6.5, rz: 4.2, y: WATER_Y - 0.85, speed: 0.38, phase: 0.2, count: 14 },
+    { cx: -34, cz: -8, rx: 5.2, rz: 5.4, y: WATER_Y - 1.7, speed: -0.3, phase: 1.6, count: 11 },
+    { cx: -27, cz: 12, rx: 4.4, rz: 3.6, y: WATER_Y - 0.55, speed: 0.46, phase: 2.5, count: 12 },
+  ];
+  const swimmers = [];
+  schools.forEach((school, schoolIndex) => {
+    for (let i = 0; i < school.count; i += 1) {
+      const fish = proto.clone(true);
+      const column = (i % 3) - 1;
+      const rank = Math.floor(i / 3);
+      fish.scale.setScalar(0.42 + ((schoolIndex + i) % 4) * 0.06);
+      fish.userData.tail = fish.getObjectByName('tail');
+      fish.userData.column = column;
+      fish.userData.rank = rank;
+      fish.userData.phase = i * 0.7;
+      scene.add(fish);
+      swimmers.push({ fish, school });
+    }
+  });
+  let time = 0;
+  return {
+    update(dt) {
+      time += dt;
+      const centers = schools.map((school) => {
+        const angle = time * school.speed + school.phase;
+        const rawX = school.cx + Math.cos(angle) * school.rx;
+        const rawZ = school.cz + Math.sin(angle) * school.rz;
+        const [x, z] = clearOfRocks(rawX, rawZ, 1.4);
+        const vx = -Math.sin(angle) * school.rx * Math.sign(school.speed || 1);
+        const vz = Math.cos(angle) * school.rz * Math.sign(school.speed || 1);
+        return { x, z, yaw: Math.atan2(-vz, vx), y: school.y };
+      });
+      swimmers.forEach(({ fish, school }) => {
+        const center = centers[schools.indexOf(school)];
+        const yaw = center.yaw;
+        const sway = Math.sin(time * 1.6 + fish.userData.phase);
+        const lx = -0.22 * fish.userData.rank + sway * 0.04;
+        const lz = fish.userData.column * 0.46 + Math.cos(time * 1.1 + fish.userData.phase) * 0.06;
+        const wx = lx * Math.cos(yaw) + lz * Math.sin(yaw);
+        const wz = -lx * Math.sin(yaw) + lz * Math.cos(yaw);
+        fish.position.set(
+          center.x + wx,
+          center.y + sway * 0.08,
+          center.z + wz,
+        );
+        fish.rotation.set(sway * 0.08, yaw + sway * 0.12, sway * 0.18);
+        if (fish.userData.tail) fish.userData.tail.rotation.y = Math.sin(time * 6 + fish.userData.phase) * 0.35;
+      });
+    },
+  };
 }
 
 function createBite(scene, source) {
@@ -2841,6 +3012,7 @@ export function createWorld() {
   }
   createFinds(scene, targets, rockMap);
   const sharks = createSharks(scene, cliff.splash);
+  const angels = createAngels(scene);
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
   const gear = createGear(scene, camera, targets, roof);
@@ -2861,6 +3033,7 @@ export function createWorld() {
     setRoomCode: roomCard.setRoomCode,
     update(dt) {
       sharks.update(dt);
+      angels.update(dt);
       bite.update(dt);
       cliff.update(dt);
       puddles.update(dt);
