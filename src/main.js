@@ -25,7 +25,7 @@ const roomCode = watching ? watchCodeFromUrl() : hostRoomCode();
 
 const world = createWorld();
 const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
-world.gear.setSounds({ pickup: playPickup, chop: playChop });
+world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose });
 const grid = createGrid();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -933,6 +933,18 @@ function playChop(broken) {
   crack.connect(envGain(ctx, t, 0.08, 0.005, 0.16));
   crack.start(t);
   crack.stop(t + 0.18);
+}
+
+function playLoose() {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(380, t);
+  osc.frequency.exponentialRampToValueAtTime(120, t + 0.1);
+  osc.connect(envGain(ctx, t, 0.07, 0.004, 0.12));
+  osc.start(t);
+  osc.stop(t + 0.14);
 }
 
 function playPickup() {
@@ -2381,6 +2393,7 @@ function onXrTrigger(controller) {
 function onXrSqueeze(controller) {
   if (watching) return;
   if (held && heldFrom === controller) return;
+  if (world.gear.tryDraw(controller)) return;
   const aimed = hitFromController(controller);
   if (world.gear.dropPocket(aimed?.owner, controller)) return;
   if (world.gear.isHolding(controller)) {
@@ -2426,6 +2439,7 @@ function piecePoint() {
 }
 
 function onXrRelease(controller) {
+  if (world.gear.releaseDraw(controller)) return;
   if (boatGrip?.controller === controller) boatGrip = null;
   if (oarGrip?.controller === controller) oarGrip = null;
   if (climb?.hand === controller && !controller.userData.triggerDown) {
@@ -2446,7 +2460,7 @@ function onXrRelease(controller) {
 }
 
 function pollGazeLock() {
-  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip) {
+  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || world.gear.drawing()) {
     gazeLock = null;
     return;
   }

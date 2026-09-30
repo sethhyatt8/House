@@ -55,7 +55,7 @@ function paintAxe() {
 
 function carryable(object) {
   const gear = object?.userData?.gear;
-  return gear === 'hatchet' || gear === 'tile';
+  return gear === 'hatchet' || gear === 'tile' || gear === 'bow';
 }
 
 export function createGear(scene, camera, targets, roof) {
@@ -85,6 +85,8 @@ export function createGear(scene, camera, targets, roof) {
   let bladeReady = false;
   let onPickup = null;
   let onChop = null;
+  let onLoose = null;
+  let drawHand = null;
   const deck = roof?.y ?? 0;
   const puzzleX = roof ? (roof.x0 + roof.x1) * 0.5 - 0.15 : -0.55;
   const puzzleZ = roof ? 1.35 : 2.18;
@@ -145,6 +147,225 @@ export function createGear(scene, camera, targets, roof) {
   holdPose(hatchet, [0, -0.012, 0.06], [-Math.PI / 2, 0.08, -0.45]);
   scene.add(hatchet);
   enlist(hatchet);
+
+  const bowWood = wood.clone();
+  bowWood.color.set(0x4a3018);
+  const stringMat = new THREE.MeshStandardMaterial({ color: 0xd2c4a4, roughness: 0.55 });
+  const fletchMat = new THREE.MeshStandardMaterial({ color: 0x8d2e2a, roughness: 0.7 });
+  const bow = new THREE.Group();
+  const riser = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.038), bowWood);
+  bow.add(riser);
+  const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.11, 8), leatherDark);
+  bow.add(wrap);
+  const tipHigh = new THREE.Vector3(0, 0.66, 0.34);
+  const tipLow = new THREE.Vector3(0, -0.54, 0.3);
+  const nockRest = new THREE.Vector3(0, 0.04, 0.28);
+  const shelf = new THREE.Vector3(0, 0.04, 0.02);
+  const addLimb = (from, to) => {
+    const steps = 4;
+    for (let i = 0; i < steps; i += 1) {
+      const a = new THREE.Vector3().lerpVectors(from, to, i / steps);
+      const b = new THREE.Vector3().lerpVectors(from, to, (i + 1) / steps);
+      const seg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.012 - (i / steps) * 0.005, 0.014 - (i / steps) * 0.005, 1, 6),
+        bowWood,
+      );
+      seg.position.copy(a).add(b).multiplyScalar(0.5);
+      seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+      seg.scale.y = a.distanceTo(b);
+      seg.castShadow = true;
+      bow.add(seg);
+    }
+  };
+  addLimb(new THREE.Vector3(0, 0.1, 0.01), tipHigh);
+  addLimb(new THREE.Vector3(0, -0.1, 0.01), tipLow);
+  const stringHigh = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 1, 5), stringMat);
+  const stringLow = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 1, 5), stringMat);
+  bow.add(stringHigh, stringLow);
+  const upAxis = new THREE.Vector3(0, 1, 0);
+  const nock = new THREE.Vector3().copy(nockRest);
+  const spanTo = (mesh, a, b) => {
+    tmp.copy(b).sub(a);
+    const len = Math.max(0.02, tmp.length());
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(upAxis, tmp.multiplyScalar(1 / len));
+    mesh.scale.set(1, len, 1);
+  };
+  const makeArrow = () => {
+    const arrow = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.62, 6), wood);
+    shaft.position.y = 0.31;
+    arrow.add(shaft);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.07, 6), metal);
+    head.position.y = 0.65;
+    arrow.add(head);
+    for (let i = 0; i < 3; i += 1) {
+      const vane = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.09, 0.028), fletchMat);
+      vane.position.set(0, 0.06, 0);
+      vane.rotation.y = i * (Math.PI * 2 / 3);
+      arrow.add(vane);
+    }
+    arrow.userData.arrow = true;
+    return arrow;
+  };
+  const nocked = makeArrow();
+  bow.add(nocked);
+  const quiver = [];
+  for (let i = 0; i < 6; i += 1) {
+    const arrow = makeArrow();
+    arrow.visible = false;
+    scene.add(arrow);
+    quiver.push(arrow);
+  }
+  const arrowRay = new THREE.Raycaster();
+  const arrowPrev = new THREE.Vector3();
+  const arrowAim = new THREE.Vector3();
+  bow.position.set(0.62, 0.58, -1.2);
+  bow.rotation.y = Math.PI / 2;
+  bow.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+  bow.userData = { type: 'gear', gear: 'bow', floorY: 0.58 };
+  holdPose(bow, [0, -0.03, -0.02], [0.15, 0, 0]);
+  scene.add(bow);
+  enlist(bow);
+
+  function poseArrow(arrow, from, toward) {
+    arrowAim.copy(toward).sub(from);
+    const len = arrowAim.length() || 1;
+    arrowAim.multiplyScalar(1 / len);
+    arrow.position.copy(from);
+    arrow.quaternion.setFromUnitVectors(upAxis, arrowAim);
+  }
+
+  function poseString() {
+    spanTo(stringHigh, tipHigh, nock);
+    spanTo(stringLow, tipLow, nock);
+    poseArrow(nocked, nock, shelf);
+  }
+  poseString();
+
+  function handWorld(controller, target) {
+    const gripPoint = controller.userData?.grip || controller;
+    gripPoint.getWorldPosition(target);
+    return target;
+  }
+
+  function tryDraw(controller) {
+    if (!bow.userData.carried || drawHand || vrHands.get(controller) === bow || vrHands.has(controller)) return false;
+    bow.updateWorldMatrix(true, true);
+    const rest = tmp2.copy(nockRest);
+    bow.localToWorld(rest);
+    handWorld(controller, tmp);
+    if (tmp.distanceTo(rest) > 0.36) return false;
+    drawHand = controller;
+    return true;
+  }
+
+  function releaseDraw(controller) {
+    if (drawHand !== controller) return false;
+    const power = nock.z - nockRest.z;
+    drawHand = null;
+    if (power > 0.16) loose(power);
+    else {
+      nock.copy(nockRest);
+      poseString();
+    }
+    return true;
+  }
+
+  function loose(power) {
+    const arrow = quiver.find((item) => !item.visible) || quiver[0];
+    bow.updateWorldMatrix(true, true);
+    const from = tmp.copy(nock);
+    const to = tmp2.copy(shelf);
+    bow.localToWorld(from);
+    bow.localToWorld(to);
+    arrowAim.copy(to).sub(from);
+    if (arrowAim.lengthSq() < 1e-6) arrowAim.set(0, 0, -1);
+    arrowAim.normalize();
+    const speed = 7 + Math.min(power, 0.58) * 32;
+    arrow.visible = true;
+    arrow.userData.vel = arrowAim.clone().multiplyScalar(speed);
+    arrow.userData.life = 4.2;
+    arrow.userData.stuck = false;
+    arrow.userData.hurt = false;
+    poseArrow(arrow, from, to);
+    nock.copy(nockRest);
+    poseString();
+    if (onLoose) onLoose();
+  }
+
+  function arrowHit(hit) {
+    let node = hit.object;
+    while (node) {
+      if (node === bow || node.userData?.arrow) return null;
+      if (node.userData?.hp != null && !node.userData.dead && node.userData.role !== 'held') return node;
+      node = node.parent;
+    }
+    if (hit.object.userData?.type === 'ui' || hit.object.userData?.gear === 'menu') return 'skip';
+    return hit;
+  }
+
+  function updateArrows(dt) {
+    if (drawHand && bow.userData.carried) {
+      handWorld(drawHand, tmp);
+      bow.worldToLocal(tmp);
+      const pull = Math.min(Math.max(tmp.z - nockRest.z, 0), 0.58);
+      let dx = tmp.x - nockRest.x;
+      let dy = tmp.y - nockRest.y;
+      const side = Math.hypot(dx, dy) || 1;
+      const cap = 0.14;
+      if (side > cap) {
+        dx *= cap / side;
+        dy *= cap / side;
+      }
+      nock.set(nockRest.x + dx, nockRest.y + dy, nockRest.z + pull);
+      poseString();
+    } else if (!drawHand) {
+      nock.copy(nockRest);
+      poseString();
+    }
+    for (const arrow of quiver) {
+      if (!arrow.visible || !arrow.userData.vel) continue;
+      arrow.userData.life -= dt;
+      if (arrow.userData.life <= 0) {
+        arrow.visible = false;
+        arrow.userData.vel = null;
+        continue;
+      }
+      if (arrow.userData.stuck) continue;
+      const vel = arrow.userData.vel;
+      vel.y -= 2.4 * dt;
+      const step = vel.length() * dt;
+      if (step < 1e-5) continue;
+      arrowPrev.copy(arrow.position);
+      tmp.set(0, 1, 0).applyQuaternion(arrow.quaternion);
+      arrowPrev.addScaledVector(tmp, 0.66);
+      arrow.position.addScaledVector(vel, dt);
+      arrowAim.copy(vel).multiplyScalar(1 / (vel.length() || 1));
+      arrow.quaternion.setFromUnitVectors(upAxis, arrowAim);
+      arrowRay.set(arrowPrev, arrowAim);
+      arrowRay.far = step + 0.08;
+      const hits = arrowRay.intersectObjects(scene.children, true);
+      for (const hit of hits) {
+        if (hit.distance > arrowRay.far) break;
+        const found = arrowHit(hit);
+        if (!found || found === 'skip') continue;
+        if (found !== hit && !arrow.userData.hurt) {
+          arrow.userData.hurt = true;
+          hurt(found);
+        }
+        arrow.position.copy(hit.point).addScaledVector(arrowAim, -0.66);
+        arrow.userData.stuck = true;
+        arrow.userData.life = Math.min(arrow.userData.life, 2.4);
+        break;
+      }
+    }
+  }
 
   for (let i = 0; i < 5; i += 1) {
     const plank = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.56), wood);
@@ -301,6 +522,7 @@ export function createGear(scene, camera, targets, roof) {
     for (const [hand, carried] of vrHands) {
       if (carried === item) vrHands.delete(hand);
     }
+    if (item === bow) drawHand = null;
     item.userData.carried = false;
   }
 
@@ -440,6 +662,7 @@ export function createGear(scene, camera, targets, roof) {
     const target = pickTarget(owner, controller, points);
     if (!target) return false;
     if (target.userData.gear === 'bag') return acquireBag();
+    if (target.userData.gear === 'bow') return take(controller, target);
     if (owned && stow(target)) return true;
     return take(controller, target);
   }
@@ -695,6 +918,7 @@ export function createGear(scene, camera, targets, roof) {
         chips.splice(i, 1);
       }
     }
+    updateArrows(dt);
   }
 
   return {
@@ -708,6 +932,9 @@ export function createGear(scene, camera, targets, roof) {
       return vrHands.has(who);
     },
     tryGrip,
+    tryDraw,
+    releaseDraw,
+    drawing: () => !!drawHand,
     stowHand,
     use,
     dropDesktop() {
@@ -722,6 +949,7 @@ export function createGear(scene, camera, targets, roof) {
     setSounds(sounds) {
       onPickup = sounds?.pickup || null;
       onChop = sounds?.chop || null;
+      onLoose = sounds?.loose || null;
     },
     hatchet,
     bag,
