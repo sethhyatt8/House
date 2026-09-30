@@ -1505,6 +1505,199 @@ function createAngels(scene) {
   };
 }
 
+function createBirds(scene) {
+  const white = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
+  const gray = new THREE.MeshStandardMaterial({ color: 0x7e8894, roughness: 0.68 });
+  const tip = new THREE.MeshStandardMaterial({ color: 0x2c323a, roughness: 0.6 });
+  const beakMat = new THREE.MeshStandardMaterial({ color: 0xe0ae3a, roughness: 0.46 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.3 });
+  const perches = SEA_OUTCROPS.map(([x, z, scale], index) => ({
+    x,
+    z,
+    y: WATER_Y + scale * 0.95,
+    yaw: index * 0.9,
+  }));
+  const wingSpan = (sign) => {
+    const geo = new THREE.BoxGeometry(0.16, 0.02, 0.42);
+    geo.translate(0, 0, sign * 0.2);
+    return geo;
+  };
+  const wingTip = (sign) => {
+    const geo = new THREE.BoxGeometry(0.1, 0.016, 0.16);
+    geo.translate(0, 0, sign * 0.46);
+    return geo;
+  };
+  const rightWing = wingSpan(1);
+  const leftWing = wingSpan(-1);
+  const rightTip = wingTip(1);
+  const leftTip = wingTip(-1);
+  const makeBird = () => {
+    const bird = new THREE.Group();
+    bird.userData.bird = true;
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), white);
+    body.scale.set(1.85, 0.72, 0.82);
+    bird.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.062, 8, 6), white);
+    head.position.set(0.16, 0.05, 0);
+    bird.add(head);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.1, 5), beakMat);
+    beak.rotation.z = -Math.PI / 2;
+    beak.position.set(0.26, 0.045, 0);
+    bird.add(beak);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 5), eyeMat);
+    eye.position.set(0.19, 0.07, 0.038);
+    bird.add(eye);
+    const eyeL = eye.clone();
+    eyeL.position.z = -0.038;
+    bird.add(eyeL);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.012, 0.08), gray);
+    tail.position.set(-0.18, 0.02, 0);
+    tail.rotation.z = 0.4;
+    bird.add(tail);
+    const addWing = (featherGeo, tipGeo) => {
+      const wing = new THREE.Group();
+      wing.add(new THREE.Mesh(featherGeo, gray));
+      wing.add(new THREE.Mesh(tipGeo, tip));
+      bird.add(wing);
+      return wing;
+    };
+    bird.userData.wings = [addWing(rightWing, rightTip), addWing(leftWing, leftTip)];
+    return bird;
+  };
+  const birds = [];
+  for (let i = 0; i < 8; i += 1) {
+    const bird = makeBird();
+    const perched = i % 3 === 0;
+    bird.userData.phase = i * 1.37;
+    bird.userData.speed = 0.26 + (i % 4) * 0.05;
+    bird.userData.perch = i % perches.length;
+    bird.userData.mode = perched ? 'perch' : 'fly';
+    bird.userData.timer = perched ? 6 + i : 8 + (i % 5) * 1.6;
+    bird.userData.vy = 0;
+    scene.add(bird);
+    birds.push(bird);
+  }
+  let time = 0;
+  const seatOf = (bird) => {
+    const perch = perches[bird.userData.perch];
+    const side = bird.userData.phase % 2 < 1 ? 0.22 : -0.22;
+    return {
+      x: perch.x + side,
+      y: perch.y,
+      z: perch.z + side * 0.35,
+      yaw: perch.yaw,
+    };
+  };
+  birds.forEach((bird) => {
+    const data = bird.userData;
+    if (data.mode === 'perch') {
+      const seat = seatOf(bird);
+      bird.position.set(seat.x, seat.y, seat.z);
+      bird.rotation.y = seat.yaw;
+      return;
+    }
+    const t = data.phase;
+    const spread = 9 + (data.phase % 3);
+    bird.position.set(
+      -30 + Math.cos(t) * spread,
+      WATER_Y + 7.4,
+      Math.sin(t * 0.82) * 11,
+    );
+    bird.rotation.y = t;
+  });
+  const update = (dt) => {
+    time += dt;
+    birds.forEach((bird) => {
+      const data = bird.userData;
+      const wings = data.wings;
+      if (data.dead) {
+        data.vy -= 7.5 * dt;
+        bird.position.x += (data.vx || 0) * dt;
+        bird.position.y += data.vy * dt;
+        bird.position.z += (data.vz || 0) * dt;
+        bird.rotation.z += (data.spin || 0) * dt;
+        const floatY = WATER_Y + 0.05;
+        if (bird.position.y <= floatY) {
+          bird.position.y = floatY;
+          data.vy = 0;
+          data.vx = (data.vx || 0) * Math.max(0, 1 - dt * 1.4);
+          data.vz = (data.vz || 0) * Math.max(0, 1 - dt * 1.4);
+          data.spin = (data.spin || 0) * Math.max(0, 1 - dt * 1.6);
+        }
+        wings.forEach((wing, index) => {
+          const droop = index === 0 ? 0.35 : -0.35;
+          wing.rotation.x += (droop - wing.rotation.x) * Math.min(1, dt * 4);
+        });
+        return;
+      }
+      data.timer -= dt;
+      if (data.mode === 'fly' && data.timer <= 0) {
+        data.mode = 'land';
+        data.timer = 3;
+        data.perch = (data.perch + 1) % perches.length;
+      } else if (data.mode === 'perch' && data.timer <= 0) {
+        data.mode = 'fly';
+        data.timer = 10 + (data.phase % 4) * 2;
+      }
+      const seat = seatOf(bird);
+      let tx;
+      let ty;
+      let tz;
+      let flap;
+      if (data.mode === 'fly') {
+        const t = time * data.speed + data.phase;
+        const spread = 9 + (data.phase % 3);
+        tx = -30 + Math.cos(t) * spread + Math.sin(t * 0.41) * 3.5;
+        tz = Math.sin(t * 0.82) * 11 + Math.cos(t * 0.23 + data.phase) * 2.5;
+        ty = WATER_Y + 7.4 + Math.sin(t * 1.5) * 1.05;
+        flap = 1;
+      } else {
+        tx = seat.x;
+        ty = seat.y + (data.mode === 'perch' ? Math.sin(time * 2.2 + data.phase) * 0.012 : 0);
+        tz = seat.z;
+        flap = data.mode === 'land' ? 0.55 : 0;
+      }
+      const px = bird.position.x;
+      const pz = bird.position.z;
+      const gain = data.mode === 'perch' ? 3 : data.mode === 'land' ? 1.15 : 0.85;
+      const k = Math.min(1, dt * gain);
+      bird.position.x += (tx - bird.position.x) * k;
+      bird.position.y += (ty - bird.position.y) * k;
+      bird.position.z += (tz - bird.position.z) * k;
+      const vx = bird.position.x - px;
+      const vz = bird.position.z - pz;
+      if (vx * vx + vz * vz > 1e-7) {
+        const yaw = Math.atan2(-vz, vx);
+        let turn = yaw - bird.rotation.y;
+        while (turn > Math.PI) turn -= Math.PI * 2;
+        while (turn < -Math.PI) turn += Math.PI * 2;
+        bird.rotation.y += turn * Math.min(1, dt * 3.2);
+      } else if (data.mode === 'perch') {
+        let turn = seat.yaw - bird.rotation.y;
+        while (turn > Math.PI) turn -= Math.PI * 2;
+        while (turn < -Math.PI) turn += Math.PI * 2;
+        bird.rotation.y += turn * Math.min(1, dt * 2);
+      }
+      const beat = Math.sin(time * 9 + data.phase);
+      wings.forEach((wing, index) => {
+        const lift = beat * flap * 0.42;
+        const fold = (1 - flap) * 0.22;
+        wing.rotation.x = index === 0 ? -lift + fold : lift - fold;
+      });
+      if (data.mode === 'land') {
+        const dx = tx - bird.position.x;
+        const dy = ty - bird.position.y;
+        const dz = tz - bird.position.z;
+        if (dx * dx + dy * dy + dz * dz < 0.16) {
+          data.mode = 'perch';
+          data.timer = 7 + (data.phase % 5) * 1.4;
+        }
+      }
+    });
+  };
+  return { update };
+}
+
 function createBite(scene, source) {
   const shark = source.clone(true);
   shark.visible = false;
@@ -2117,6 +2310,15 @@ function sandPatch(radius) {
   return geo;
 }
 
+const SEA_OUTCROPS = [
+  [-24, -9, 2.8, 1.2],
+  [-36, 4, 3.15, 2.5],
+  [-18, 14, 2.25, 3.4],
+  [-44, -16, 2.85, 4.7],
+  [-22.5, -4.2, 1.45, 6.1],
+  [-29, 2.4, 1.25, 7.3],
+];
+
 function createSeaRocks(scene) {
   const map = seaRockTexture();
   const material = new THREE.MeshStandardMaterial({
@@ -2126,14 +2328,7 @@ function createSeaRocks(scene) {
     flatShading: true,
     vertexColors: true,
   });
-  [
-    [-24, -9, 2.8, 1.2],
-    [-36, 4, 3.15, 2.5],
-    [-18, 14, 2.25, 3.4],
-    [-44, -16, 2.85, 4.7],
-    [-22.5, -4.2, 1.45, 6.1],
-    [-29, 2.4, 1.25, 7.3],
-  ].forEach(([x, z, scale, seed]) => addSeaOutcrop(scene, material, x, z, scale, seed));
+  SEA_OUTCROPS.forEach(([x, z, scale, seed]) => addSeaOutcrop(scene, material, x, z, scale, seed));
 }
 
 function canoeHullGeometry() {
@@ -3047,6 +3242,7 @@ export function createWorld() {
   createFinds(scene, targets, rockMap);
   const sharks = createSharks(scene, cliff.splash);
   const angels = createAngels(scene);
+  const birds = createBirds(scene);
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white);
   const gear = createGear(scene, camera, targets, roof);
@@ -3068,6 +3264,7 @@ export function createWorld() {
     update(dt) {
       sharks.update(dt);
       angels.update(dt);
+      birds.update(dt);
       bite.update(dt);
       cliff.update(dt);
       puddles.update(dt);

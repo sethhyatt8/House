@@ -299,11 +299,21 @@ export function createGear(scene, camera, targets, roof) {
     arrow.userData.life = 4.2;
     arrow.userData.stuck = false;
     arrow.userData.stuckFish = false;
+    arrow.userData.stuckBird = false;
     arrow.userData.hurt = false;
     poseArrow(arrow, from, to);
     nock.copy(nockRest);
     poseString();
     if (onLoose) onLoose();
+  }
+
+  function birdHost(object) {
+    let node = object;
+    while (node) {
+      if (node.userData?.bird) return node;
+      node = node.parent;
+    }
+    return null;
   }
 
   function fishHost(object) {
@@ -371,7 +381,7 @@ export function createGear(scene, camera, targets, roof) {
     }
     for (const arrow of quiver) {
       if (!arrow.visible || !arrow.userData.vel) continue;
-      if (arrow.userData.stuckFish) continue;
+      if (arrow.userData.stuckFish || arrow.userData.stuckBird) continue;
       arrow.userData.life -= dt;
       if (arrow.userData.life <= 0) {
         arrow.visible = false;
@@ -401,6 +411,20 @@ export function createGear(scene, camera, targets, roof) {
           hurt(found);
         }
         arrow.position.copy(hit.point).addScaledVector(arrowAim, -0.66);
+        const bird = birdHost(hit.object);
+        if (bird) {
+          if (!bird.userData.dead) {
+            bird.userData.dead = true;
+            bird.userData.vx = arrowAim.x * 3.2;
+            bird.userData.vz = arrowAim.z * 3.2;
+            bird.userData.vy = 1.1;
+            bird.userData.spin = arrowAim.x > 0 ? 3.2 : -3.2;
+          }
+          bird.attach(arrow);
+          arrow.userData.stuckBird = true;
+          arrow.userData.stuck = true;
+          break;
+        }
         const host = fishHost(hit.object);
         if (host) {
           host.attach(arrow);
