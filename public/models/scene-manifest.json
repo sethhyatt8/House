@@ -1,39 +1,406 @@
 {
   "version": 1,
-  "notes": "Phase 1 draft. Positions are copied from the current procedural code (world.js / gear.js). 'fit' tells the asset manager how to scale a model from its bounding box, so no hand-computed scale factors are needed. Units: metres, radians, three.js Y-up.",
+  "notes": "Phase 1 draft. Positions are copied from the current procedural code (world.js / gear.js). 'fit' tells the asset manager how to scale a model from its bounding box, so no hand-computed scale factors are needed. Units: metres, radians, three.js Y-up. Phase 2 adds env, rock materials, sea boulders, and pines.",
   "models": {
     "crate": {
       "url": "models/props/wooden_crate_02.glb",
       "source": "https://polyhaven.com/a/wooden_crate_02",
       "license": "CC0",
-      "nativeSizeM": [0.529, 0.464, 1.166],
+      "nativeSizeM": [
+        0.529,
+        0.464,
+        1.166
+      ],
       "originNote": "x/z centred, base at y≈-0.01. Long axis is +Z."
     },
     "boulder": {
       "url": "models/props/boulder_01.glb",
       "source": "https://polyhaven.com/a/boulder_01",
       "license": "CC0",
-      "nativeSizeM": [1.269, 1.003, 1.822],
+      "nativeSizeM": [
+        1.269,
+        1.003,
+        1.822
+      ],
       "originNote": "base at y≈-0.074. Longest axis is +Z."
     },
     "hatchet": {
       "url": "models/props/hatchet.glb",
       "source": "https://polyhaven.com/a/hatchet",
       "license": "CC0",
-      "nativeSizeM": [0.026, 0.289, 0.104],
+      "nativeSizeM": [
+        0.026,
+        0.289,
+        0.104
+      ],
       "originNote": "Handle runs along +Y (y -0.062..0.227) and the blade extends toward +Z, so rotate +PI/2 about Y to match the procedural hatchet (blade toward +X)."
+    },
+    "rock_cliff": {
+      "url": "models/materials/dark_rock.glb",
+      "kind": "material",
+      "source": "https://polyhaven.com/a/dark_rock",
+      "license": "CC0",
+      "tileM": 2.42,
+      "note": "2-tri carrier quad; use only its MeshStandardMaterial (baseColor ETC1S 2048, normal UASTC 2048, ARM UASTC 1024 also wired as aoMap). Sampler is REPEAT."
+    },
+    "rock_floor": {
+      "url": "models/materials/seaside_rock.glb",
+      "kind": "material",
+      "source": "https://polyhaven.com/a/seaside_rock",
+      "license": "CC0",
+      "tileM": 2,
+      "note": "Same layout as rock_cliff. For beach, pad and ladder courses/rungs."
+    },
+    "sea_boulder": {
+      "url": "models/nature/namaqualand_boulder_04.glb",
+      "source": "https://polyhaven.com/a/namaqualand_boulder_04",
+      "license": "CC0",
+      "tris": 2000,
+      "nativeSizeM": [
+        2.516,
+        1.89,
+        2.48
+      ],
+      "bboxMin": [
+        -1.336,
+        -0.023,
+        -1.025
+      ],
+      "bboxMax": [
+        1.18,
+        1.867,
+        1.455
+      ],
+      "tint": "#9ea3a8",
+      "originNote": "Base at y≈-0.023. One mesh, one material -> use as a single InstancedMesh."
+    },
+    "pines": {
+      "url": "models/nature/pines.glb",
+      "source": "https://quaternius.com/packs/stylizednaturemegakit.html",
+      "license": "CC0",
+      "nodes": {
+        "pine_a": {
+          "from": "Pine_5",
+          "tris": 459,
+          "parts": {
+            "Bark_NormalTree": 60,
+            "Leaves_Pine": 399
+          },
+          "bboxMin": [
+            -2.988,
+            -0.235,
+            -3.778
+          ],
+          "bboxMax": [
+            3.433,
+            8.489,
+            2.443
+          ]
+        },
+        "pine_b": {
+          "from": "Pine_2",
+          "tris": 358,
+          "parts": {
+            "Bark_NormalTree": 60,
+            "Leaves_Pine": 298
+          },
+          "bboxMin": [
+            -2.892,
+            -0.235,
+            -2.694
+          ],
+          "bboxMax": [
+            2.836,
+            7.141,
+            2.528
+          ]
+        },
+        "pine_far": {
+          "from": "impostor baked from pine_b (2 crossed quads)",
+          "tris": 4,
+          "parts": {
+            "Pine_Impostor": 4
+          },
+          "bboxMin": [
+            -2.949,
+            -0.235,
+            -3.004
+          ],
+          "bboxMax": [
+            2.893,
+            7.215,
+            2.838
+          ]
+        }
+      },
+      "sharedMaterials": [
+        "Bark_NormalTree",
+        "Leaves_Pine",
+        "Pine_Impostor"
+      ],
+      "tints": {
+        "Leaves_Pine": "#6f8f78",
+        "Pine_Impostor": "#6f8f78",
+        "Bark_NormalTree": "#9a8c80"
+      },
+      "originNote": "Each node's origin is the trunk base; roots go 0.235 m below y=0. Scale uniformly by spot.h / bboxMax.y."
     }
   },
   "placements": [
-    { "id": "room-boulder-0", "model": "boulder", "replaces": "world.js createWorld() boulder [1.35,-0.35,r=0.34,spin=0.7]", "position": [1.35, 0.1428, -0.35], "rotation": [0.7, 0.42, 0.14], "fit": { "maxExtent": 0.68 }, "collider": { "type": "sphere", "radius": 0.34 }, "userData": { "type": "prop", "label": "stone", "role": "loose", "floorY": 0.1428 } },
-    { "id": "room-boulder-1", "model": "boulder", "replaces": "world.js createWorld() boulder [0.15,1.55,r=0.22,spin=1.4]", "position": [0.15, 0.0924, 1.55], "rotation": [1.4, 0.84, 0.28], "fit": { "maxExtent": 0.44 }, "collider": { "type": "sphere", "radius": 0.22 }, "userData": { "type": "prop", "label": "stone", "role": "loose", "floorY": 0.0924 } },
-    { "id": "room-boulder-2", "model": "boulder", "replaces": "world.js createWorld() boulder [2.05,-1.7,r=0.28,spin=0.4]", "position": [2.05, 0.1176, -1.7], "rotation": [0.4, 0.24, 0.08], "fit": { "maxExtent": 0.56 }, "collider": { "type": "sphere", "radius": 0.28 }, "userData": { "type": "prop", "label": "stone", "role": "loose", "floorY": 0.1176 } },
-    { "id": "yard-boulder-0", "model": "boulder", "replaces": "world.js createCrateYard() rim boulder 0 (yard.x0+0.55, yard.z1-0.7, r=0.48)", "position": [-1.19, 0.2016, 9.5], "rotation": [0, 0, 0], "fit": { "maxExtent": 0.96 }, "collider": { "type": "none" } },
-    { "id": "yard-boulder-1", "model": "boulder", "replaces": "world.js createCrateYard() rim boulder 1 (yard.x1-0.6, yard.z1-0.85, r=0.4)", "position": [2.75, 0.168, 9.35], "rotation": [0, 0, 0], "fit": { "maxExtent": 0.8 }, "collider": { "type": "none" } },
-    { "id": "yard-boulder-2", "model": "boulder", "replaces": "world.js createCrateYard() rim boulder 2 (yard.x1-0.5, 3.35, r=0.32)", "position": [2.85, 0.1344, 3.35], "rotation": [0, 0, 0], "fit": { "maxExtent": 0.64 }, "collider": { "type": "none" } }
+    {
+      "id": "room-boulder-0",
+      "model": "boulder",
+      "replaces": "world.js createWorld() boulder [1.35,-0.35,r=0.34,spin=0.7]",
+      "position": [
+        1.35,
+        0.1428,
+        -0.35
+      ],
+      "rotation": [
+        0.7,
+        0.42,
+        0.14
+      ],
+      "fit": {
+        "maxExtent": 0.68
+      },
+      "collider": {
+        "type": "sphere",
+        "radius": 0.34
+      },
+      "userData": {
+        "type": "prop",
+        "label": "stone",
+        "role": "loose",
+        "floorY": 0.1428
+      }
+    },
+    {
+      "id": "room-boulder-1",
+      "model": "boulder",
+      "replaces": "world.js createWorld() boulder [0.15,1.55,r=0.22,spin=1.4]",
+      "position": [
+        0.15,
+        0.0924,
+        1.55
+      ],
+      "rotation": [
+        1.4,
+        0.84,
+        0.28
+      ],
+      "fit": {
+        "maxExtent": 0.44
+      },
+      "collider": {
+        "type": "sphere",
+        "radius": 0.22
+      },
+      "userData": {
+        "type": "prop",
+        "label": "stone",
+        "role": "loose",
+        "floorY": 0.0924
+      }
+    },
+    {
+      "id": "room-boulder-2",
+      "model": "boulder",
+      "replaces": "world.js createWorld() boulder [2.05,-1.7,r=0.28,spin=0.4]",
+      "position": [
+        2.05,
+        0.1176,
+        -1.7
+      ],
+      "rotation": [
+        0.4,
+        0.24,
+        0.08
+      ],
+      "fit": {
+        "maxExtent": 0.56
+      },
+      "collider": {
+        "type": "sphere",
+        "radius": 0.28
+      },
+      "userData": {
+        "type": "prop",
+        "label": "stone",
+        "role": "loose",
+        "floorY": 0.1176
+      }
+    },
+    {
+      "id": "yard-boulder-0",
+      "model": "boulder",
+      "replaces": "world.js createCrateYard() rim boulder 0 (yard.x0+0.55, yard.z1-0.7, r=0.48)",
+      "position": [
+        -1.19,
+        0.2016,
+        9.5
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "fit": {
+        "maxExtent": 0.96
+      },
+      "collider": {
+        "type": "none"
+      }
+    },
+    {
+      "id": "yard-boulder-1",
+      "model": "boulder",
+      "replaces": "world.js createCrateYard() rim boulder 1 (yard.x1-0.6, yard.z1-0.85, r=0.4)",
+      "position": [
+        2.75,
+        0.168,
+        9.35
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "fit": {
+        "maxExtent": 0.8
+      },
+      "collider": {
+        "type": "none"
+      }
+    },
+    {
+      "id": "yard-boulder-2",
+      "model": "boulder",
+      "replaces": "world.js createCrateYard() rim boulder 2 (yard.x1-0.5, 3.35, r=0.32)",
+      "position": [
+        2.85,
+        0.1344,
+        3.35
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "fit": {
+        "maxExtent": 0.64
+      },
+      "collider": {
+        "type": "none"
+      }
+    }
   ],
   "templates": {
-    "crate": { "model": "crate", "usedBy": "world.js createCrateYard() addCrate()", "fit": { "height": "h (per crate)", "uniform": true }, "orientation": "long axis (+Z) along the pile's row direction; derive w/d (and userData.hx/hz/stackSpan) from the scaled model bbox", "collider": "keep the existing BoxGeometry mesh as the raycast/chop/stand proxy with material.visible = false, sized to the scaled model bbox" },
-    "hatchet": { "model": "hatchet", "usedBy": "gear.js createGear() hatchet group", "localRotation": [0, 1.5708, 0], "localPosition": [0, 0, 0], "fit": { "uniform": 1.0 }, "keep": "userData.blade (move this invisible marker to the model's blade centre), userData.grip, holdPose()" }
+    "crate": {
+      "model": "crate",
+      "usedBy": "world.js createCrateYard() addCrate()",
+      "fit": {
+        "height": "h (per crate)",
+        "uniform": true
+      },
+      "orientation": "long axis (+Z) along the pile's row direction; derive w/d (and userData.hx/hz/stackSpan) from the scaled model bbox",
+      "collider": "keep the existing BoxGeometry mesh as the raycast/chop/stand proxy with material.visible = false, sized to the scaled model bbox"
+    },
+    "hatchet": {
+      "model": "hatchet",
+      "usedBy": "gear.js createGear() hatchet group",
+      "localRotation": [
+        0,
+        1.5708,
+        0
+      ],
+      "localPosition": [
+        0,
+        0,
+        0
+      ],
+      "fit": {
+        "uniform": 1
+      },
+      "keep": "userData.blade (move this invisible marker to the model's blade centre), userData.grip, holdPose()"
+    },
+    "rockMaterials": {
+      "usedBy": "world.js createCliff() rock boxes (mass, slab, beach, pad, ladder course/rung, jamb, brow, haunch) and createWorld() addRock()/wallMat",
+      "rule": "rock_floor for beach, pad, ladder courses and rungs; rock_cliff for everything else. Rewrite each box's UVs in world space (applyWorldUv(mesh, tileM)) after the mesh is positioned."
+    },
+    "seaRocks": {
+      "usedBy": "world.js createSeaRocks() / addSeaOutcrop() / SEA_OUTCROPS",
+      "stones": [
+        [
+          1,
+          0,
+          0,
+          0.4
+        ],
+        [
+          0.58,
+          0.78,
+          0.22,
+          1.6
+        ],
+        [
+          0.46,
+          -0.62,
+          -0.36,
+          2.8
+        ]
+      ],
+      "stonesNote": "[k, dx, dz, salt]: the main stone and the two biggest satellites of addSeaOutcrop()'s 5 stones.",
+      "rule": "s = 2*scale*k / max(nativeSize.x, nativeSize.z); top = k === 1 ? WATER_Y + scale*0.95 : WATER_Y + scale*k*0.55; position (x + dx*scale, top - bboxMax.y*s, z + dz*scale); rotation.y = hash01(seed + salt + 3) * 6.2. Then raycast straight down at each outcrop (x, z) to get the real perch height for createBirds()."
+    },
+    "forest": {
+      "usedBy": "world.js createForest()",
+      "rule": "keep scatter() unchanged but tag each spot with its band (0 = the three 3.5 m scatters, 1 = the three 7.2 m scatters, 2 = the three 15 m scatters). band 0: hash01(x*5.3 + z*2.9) < 0.5 ? pine_a : pine_b; band 1: pine_b; band 2: pine_far. One InstancedMesh per (variant, part) = 5 InstancedMeshes. Matrix: position (x, 0, z), rotation.y = spot.spin, uniform scale spot.h / bboxMax.y.",
+      "expectedCounts": {
+        "pine_a": 93,
+        "pine_b": 194,
+        "pine_far": 87,
+        "total": 374,
+        "tris": 112487
+      }
+    }
+  },
+  "env": {
+    "sky_backdrop": {
+      "url": "env/qwantani_moonrise_backdrop_2k.ktx2",
+      "source": "https://polyhaven.com/a/qwantani_moonrise_puresky",
+      "license": "CC0",
+      "size": [
+        2048,
+        1024
+      ],
+      "encoding": "KTX2 UASTC + zstd, sRGB, no mipmaps, stored bottom-up (KTX2 textures cannot flipY)",
+      "use": "map of the existing sky sphere (SphereGeometry r=120) after geometry.scale(-1,1,1).rotateY(Math.PI), side FrontSide, wrapS RepeatWrapping, Linear filters, toneMapped stays true",
+      "moonDirWorld": [
+        -0.9701,
+        0.2385,
+        0.0441
+      ],
+      "moonElevationDeg": 13.8,
+      "note": "Pre-rotated so the HDRI moon sits at the azimuth of the old procedural moon mesh (-22, 9, 1); no rotation needed in code."
+    },
+    "sky_env": {
+      "url": "env/qwantani_moonrise_env_512.hdr",
+      "size": [
+        512,
+        256
+      ],
+      "encoding": "Radiance RGBE (flat), linear",
+      "use": "HDRLoader (three r180; RGBELoader is deprecated) with HalfFloatType -> mapping EquirectangularReflectionMapping -> PMREMGenerator.fromEquirectangular() -> scene.environment; dispose the source texture afterwards",
+      "note": "Moon disc clamped out (54% of the HDRI's energy; the key DirectionalLight already plays the moon) and normalised to mean radiance 0.541 = main.js envScene sphere 0xb7c4d0, so scene.environmentIntensity 1 gives about today's ambient level.",
+      "pmremSize": [
+        384,
+        512
+      ]
+    },
+    "fogSuggestion": {
+      "current": "#10182c",
+      "hdriHorizon6to15deg": "#212d37"
+    }
   }
 }
