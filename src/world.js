@@ -1527,7 +1527,7 @@ function createBirds(scene) {
   const perches = SEA_OUTCROPS.map(([x, z, scale], index) => ({
     x,
     z,
-    y: WATER_Y + scale * 0.95,
+    y: SEA_PERCH_Y[index] ?? WATER_Y + scale * 0.95,
     yaw: index * 0.9,
   }));
   const wingSpan = (sign) => {
@@ -2332,8 +2332,48 @@ const SEA_OUTCROPS = [
   [-22.5, -4.2, 1.45, 6.1],
   [-29, 2.4, 1.25, 7.3],
 ];
+export const SEA_PERCH_Y = [];
 
-function createSeaRocks(scene) {
+function createSeaRocks(scene, assets) {
+  const gltf = assets?.feature('searocks') ? assets.gltf('sea_boulder') : null;
+  if (gltf) {
+    const STONES = [[1, 0, 0, 0.4], [0.58, 0.78, 0.22, 1.6], [0.46, -0.62, -0.36, 2.8]];
+    let src;
+    gltf.scene.traverse((object) => { if (!src && object.isMesh) src = object; });
+    src.material.color.set(0x9ea3a8);
+    const geo = src.geometry;
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const size = bb.getSize(new THREE.Vector3());
+    const rocks = new THREE.InstancedMesh(geo, src.material, SEA_OUTCROPS.length * STONES.length);
+    const dummy = new THREE.Object3D();
+    let index = 0;
+    for (const [x, z, scale, seed] of SEA_OUTCROPS) {
+      for (const [k, dx, dz, salt] of STONES) {
+        const s = (2 * scale * k) / Math.max(size.x, size.z);
+        const top = k === 1 ? WATER_Y + scale * 0.95 : WATER_Y + scale * k * 0.55;
+        dummy.position.set(x + dx * scale, top - bb.max.y * s, z + dz * scale);
+        dummy.rotation.set(0, hash01(seed + salt + 3) * 6.2, 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        rocks.setMatrixAt(index, dummy.matrix);
+        index += 1;
+      }
+    }
+    scene.add(rocks);
+    rocks.updateMatrixWorld(true);
+    rocks.computeBoundingSphere();
+    const ray = new THREE.Raycaster();
+    const down = new THREE.Vector3(0, -1, 0);
+    SEA_PERCH_Y.length = 0;
+    for (const [x, z, scale] of SEA_OUTCROPS) {
+      ray.set(new THREE.Vector3(x, WATER_Y + 20, z), down);
+      const hit = ray.intersectObject(rocks)[0];
+      SEA_PERCH_Y.push(hit ? hit.point.y : WATER_Y + scale * 0.95);
+    }
+    rocks.raycast = () => {};
+    return;
+  }
   const map = seaRockTexture();
   const material = new THREE.MeshStandardMaterial({
     map,
@@ -2871,7 +2911,7 @@ function createCliff(scene, targets, assets) {
   addSheet(playFar, waterNear, 48, 64);
   addSheet(waterFar, playFar, 12, 10);
 
-  createSeaRocks(scene);
+  createSeaRocks(scene, assets);
   createWreck(scene);
 
   const mistMap = canvasTexture(128, 128, (ctx, w, h) => {
