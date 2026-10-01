@@ -57,7 +57,11 @@ const loadingEl = document.getElementById('loading');
 const loadingBar = document.getElementById('loading-bar');
 const assets = createAssetManager(renderer);
 await assets.loadManifest('models/scene-manifest.json');
-await assets.preload(['crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env'], ({ loaded, total }) => {
+await assets.preload([
+  'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env',
+  'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe',
+  'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
+], ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
 });
 if (loadingEl) loadingEl.hidden = true;

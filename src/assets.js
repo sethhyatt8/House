@@ -113,9 +113,19 @@ export function createAssetManager(renderer) {
     return enabled && params.get(name) !== '0';
   }
 
+  function featureOf(id) {
+    if (FEATURE_FOR[id]) return FEATURE_FOR[id];
+    const features = manifest?.features;
+    if (!features) return null;
+    for (const [name, ids] of Object.entries(features)) {
+      if (ids.includes(id)) return name;
+    }
+    return null;
+  }
+
   function shouldLoad(id) {
     if (!enabled || unavailable.has(id)) return false;
-    const name = FEATURE_FOR[id];
+    const name = featureOf(id);
     return !name || feature(name);
   }
 

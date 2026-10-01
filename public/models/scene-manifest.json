@@ -144,6 +144,447 @@
         "Bark_NormalTree": "#9a8c80"
       },
       "originNote": "Each node's origin is the trunk base; roots go 0.235 m below y=0. Scale uniformly by spot.h / bboxMax.y."
+    },
+    "shark_white": {
+      "url": "models/sea/shark_white.glb",
+      "kind": "skinned",
+      "source": "https://poly.pizza/m/YYsK3gRCBZ",
+      "author": "Quaternius",
+      "license": "CC0",
+      "bboxMin": [
+        -1.58,
+        -0.339,
+        -0.539
+      ],
+      "bboxMax": [
+        1.06,
+        0.604,
+        0.539
+      ],
+      "clips": {
+        "Swim": 1.333,
+        "SwimFast": 1,
+        "Bite": 1.083
+      },
+      "joints": 20,
+      "meshes": [
+        "Shark",
+        "Shark.001"
+      ],
+      "params": {
+        "faces": "+X, same unit space as makeWhite() (nose x 1.06, tail x -1.58)",
+        "waterline": 0.344,
+        "finTip": 0.604,
+        "waterlineNote": "keeps today's fin exposure (finTip-waterline = 0.46-0.2 = 0.26 units): 0.604-0.26",
+        "swimTimeScale": "clip.duration / (2*PI/4.2)  (same tail-beat period as tail.rotation.y wag 4.2 rad/s)",
+        "biteOpenTime": 0.208,
+        "biteOpenNote": "LowerJaw opens from 22.8 deg (t=0) to 46.2 deg at t=0.208 s; poseSharkMouth(open) -> Bite action paused at time = open*0.208",
+        "mouthUnitOpen": [
+          0.837,
+          0.253
+        ],
+        "noseUnitRest": 1.06,
+        "noseUnitOpen": 0.934,
+        "mouthNote": "measured in a headless r180 render: midpoint of LowerJaw_end (0.825,-0.02) and Head_end (0.849,0.525) at Bite t=0.208"
+      },
+      "note": "2 SkinnedMeshes (body atlas + teeth) on one 20-joint skeleton. KHR_mesh_quantization (no Draco). Clone with SkeletonUtils.clone(), never Object3D.clone().",
+      "tris": 3602,
+      "bytes": 132024,
+      "texVramMB": 0.044
+    },
+    "swordfish": {
+      "url": "models/sea/swordfish.glb",
+      "kind": "skinned",
+      "source": "https://poly.pizza/m/7hMOlBjln0",
+      "author": "Quaternius",
+      "license": "CC0",
+      "bboxMin": [
+        -1.5,
+        -0.415,
+        -0.525
+      ],
+      "bboxMax": [
+        1.64,
+        0.887,
+        0.525
+      ],
+      "clips": {
+        "Swim": 2.292,
+        "SwimFast": 1.042,
+        "SwimImpulse": 1.167,
+        "Attack": 0.625,
+        "Death": 3,
+        "OutOfWater": 1.5
+      },
+      "joints": 6,
+      "params": {
+        "faces": "+X (bill tip x 1.64, tail x -1.5) = makeSwordfish() unit space",
+        "waterline": 0.687,
+        "finTip": 0.887,
+        "waterlineNote": "keeps today's fin exposure (0.36-0.16 = 0.2 units): 0.887-0.2",
+        "swimTimeScale": "clip.duration / (2*PI/5.4)",
+        "deathClip": "Death (optional, play once with clampWhenFinished when userData.dead)"
+      },
+      "note": "1 SkinnedMesh, vertex colours, 6 joints. KHR_mesh_quantization.",
+      "tris": 1384,
+      "bytes": 100996,
+      "texVramMB": 0
+    },
+    "angelfish": {
+      "url": "models/sea/angelfish.glb",
+      "kind": "morph-instanced",
+      "source": "https://poly.pizza/m/M0UX3rVvNX",
+      "author": "Quaternius (Moorish Idol, Animated Fish Bundle)",
+      "license": "CC0",
+      "morphTargets": [
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+        "f5"
+      ],
+      "params": {
+        "faces": "+X like createAngels() fish",
+        "loop": "6 frames: base + f1..f5, 1.0 s per cycle; phase per fish = userData.phase*0.16",
+        "instancing": "one InstancedMesh per school (14, 11, 12) using setMorphAt(); instanceMatrix = fish.matrixWorld * meshNode.matrixWorld",
+        "length": 0.638
+      },
+      "note": "Swim clip baked to 5 relative morph targets from the original skinned rig; vertex colours, 1 primitive, length 0.638 (matches createAngels). Positions are quantized, so the mesh node carries the dequantization scale/offset: multiply it into every instance matrix.",
+      "tris": 1428,
+      "bytes": 433744,
+      "texVramMB": 0,
+      "bboxMin": [
+        -0.319,
+        -0.213,
+        -0.145
+      ],
+      "bboxMax": [
+        0.319,
+        0.213,
+        0.145
+      ]
+    },
+    "gull_fly": {
+      "url": "models/sea/gull_fly.glb",
+      "kind": "morph-instanced",
+      "source": "https://poly.pizza/m/eMNhHDZakYp",
+      "author": "Poly by Google",
+      "license": "CC-BY 3.0",
+      "morphTargets": [
+        "up",
+        "down"
+      ],
+      "params": {
+        "faces": "+X, wings along +-Z like createBirds()",
+        "wingHingeX": 0.08,
+        "span": 1.05,
+        "flap": "v = -bird.userData.wings[0].rotation.x; influences[0] (up, +0.5 rad) = max(0,v)/0.42; influences[1] (down, -0.95 rad) = max(0,-v)/0.42*0.6",
+        "instancing": "one InstancedMesh for all 8; perched/dead-on-perch birds get a zero-scale matrix"
+      },
+      "note": "Wing flap baked to 2 morph targets. KTX2 ETC1S 256 texture.",
+      "tris": 410,
+      "bytes": 74112,
+      "texVramMB": 0.044,
+      "bboxMin": [
+        -0.488,
+        -0.263,
+        -0.525
+      ],
+      "bboxMax": [
+        0.488,
+        0.263,
+        0.525
+      ]
+    },
+    "gull_perch": {
+      "url": "models/sea/gull_perch.glb",
+      "kind": "instanced",
+      "source": "https://poly.pizza/m/0WRzrtCIIRp",
+      "author": "Poly by Google",
+      "license": "CC-BY 3.0",
+      "params": {
+        "faces": "+X",
+        "feetY": -0.07,
+        "instancing": "one InstancedMesh for all 8; visible only when userData.mode==='perch' && !dead"
+      },
+      "tris": 434,
+      "bytes": 25964,
+      "texVramMB": 0.005,
+      "bboxMin": [
+        -0.25,
+        -0.07,
+        -0.085
+      ],
+      "bboxMax": [
+        0.25,
+        0.363,
+        0.085
+      ]
+    },
+    "shipwreck": {
+      "url": "models/sea/shipwreck.glb",
+      "kind": "static",
+      "source": "https://kenney.nl/assets/pirate-kit",
+      "author": "Kenney (Pirate Kit 2.1, ship-wreck.glb)",
+      "license": "CC0",
+      "params": {
+        "parent": "createWreck() group (already at WATER_Y-3.55, rotation.y 1.15)",
+        "material": "MeshBasicMaterial({ map, color: 0x2a4048 }) like today's silhouette",
+        "clip": "triangles above y 3.35 removed so nothing breaks the surface; keep the procedural standard-material mast and crow's nest"
+      },
+      "tris": 885,
+      "bytes": 13388,
+      "texVramMB": 0.044,
+      "bboxMin": [
+        -6.1,
+        -1.13,
+        -2.861
+      ],
+      "bboxMax": [
+        6.3,
+        2.835,
+        2.862
+      ]
+    },
+    "canoe": {
+      "url": "models/props/canoe.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/0ciipfLS8Nf",
+      "author": "Poly by Google",
+      "license": "CC-BY 3.0",
+      "params": {
+        "parent": "createCanoe() group; length along Z (3.7 m), keel y -0.09 like the procedural hull",
+        "hide": "boatHull and boatEnd proxy meshes (material only); boatSeat/oar stay visible",
+        "colours": "recoloured to wood 6b4a30 / 9a7048 (vertex colours)"
+      },
+      "tris": 2916,
+      "bytes": 7544,
+      "texVramMB": 0,
+      "bboxMin": [
+        -0.46,
+        -0.09,
+        -1.85
+      ],
+      "bboxMax": [
+        0.461,
+        0.486,
+        1.85
+      ]
+    },
+    "chest": {
+      "url": "models/props/chest.glb",
+      "kind": "static",
+      "source": "https://polyhaven.com/a/treasure_chest",
+      "author": "Rico Cilliers (Poly Haven)",
+      "license": "CC0",
+      "nodes": {
+        "treasure_chest_bottom": 2204,
+        "treasure_chest_lid": 1135
+      },
+      "params": {
+        "parent": "chest group in createGear(); base at y 0",
+        "lidNode": "treasure_chest_lid",
+        "lidPivot": [
+          0,
+          0.159,
+          -0.0984
+        ],
+        "lid": "glbLid.rotation.x = proxyLid.rotation.x every frame (proxy: lid.rotation.x = -open*1.35)"
+      },
+      "note": "512 px: baseColor ETC1S, normal + ORM UASTC. Lid re-pivoted at the back hinge.",
+      "tris": 3339,
+      "bytes": 700084,
+      "texVramMB": 0.875,
+      "bboxMin": [
+        -0.18,
+        0,
+        -0.099
+      ],
+      "bboxMax": [
+        0.18,
+        0.233,
+        0.099
+      ]
+    },
+    "torch": {
+      "url": "models/gear/torch.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/pNsfJzhXiD",
+      "author": "Quaternius",
+      "license": "CC0",
+      "params": {
+        "replaces": "stick + pitch (direct MeshStandard children); keep flame/core/halo MeshBasic, PointLight and torchGrip",
+        "origin": "bottom of stick, +Y up, top at 0.47"
+      },
+      "tris": 448,
+      "bytes": 3704,
+      "texVramMB": 0,
+      "bboxMin": [
+        -0.04,
+        0,
+        -0.037
+      ],
+      "bboxMax": [
+        0.04,
+        0.47,
+        0.037
+      ]
+    },
+    "brush": {
+      "url": "models/gear/brush.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/tCyM4HHoNC",
+      "author": "MilkAndBanana",
+      "license": "CC0",
+      "params": {
+        "replaces": "handle, ferrule, bristles",
+        "tipY": 0.385,
+        "colours": "palette recoloured: handle 6d4c32 (gear.js wood), bristles c2a878"
+      },
+      "tris": 196,
+      "bytes": 3712,
+      "texVramMB": 0.001,
+      "bboxMin": [
+        -0.013,
+        0,
+        -0.018
+      ],
+      "bboxMax": [
+        0.013,
+        0.385,
+        0.018
+      ]
+    },
+    "bow": {
+      "url": "models/gear/bow.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/QnpqjLSKFU",
+      "author": "Quaternius",
+      "license": "CC0",
+      "params": {
+        "replaces": "riser, wrap and limb meshes; keep the procedural strings (CylinderGeometry radius 0.0032)",
+        "tipHigh": [
+          0,
+          0.66,
+          0.304
+        ],
+        "tipLow": [
+          0,
+          -0.54,
+          0.304
+        ],
+        "tipNote": "move tipHigh/tipLow z from 0.34/0.3 to 0.304 so the procedural strings meet the GLB limb tips"
+      },
+      "tris": 636,
+      "bytes": 4212,
+      "texVramMB": 0,
+      "bboxMin": [
+        -0.027,
+        -0.54,
+        -0.112
+      ],
+      "bboxMax": [
+        0.027,
+        0.66,
+        0.317
+      ]
+    },
+    "arrow": {
+      "url": "models/gear/arrow.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/Rt48KEPDGt",
+      "author": "Quaternius",
+      "license": "CC0",
+      "params": {
+        "replaces": "shaft, head, vanes in makeArrow()",
+        "axis": "+Y, nock at 0, tip at 0.685 (same as makeArrow)"
+      },
+      "tris": 224,
+      "bytes": 2500,
+      "texVramMB": 0,
+      "bboxMin": [
+        -0.03,
+        0,
+        -0.034
+      ],
+      "bboxMax": [
+        0.03,
+        0.685,
+        0.034
+      ]
+    },
+    "bag": {
+      "url": "models/gear/bag.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/Wq1JPPqHZS",
+      "author": "Quaternius",
+      "license": "CC0",
+      "params": {
+        "replaces": "body, flap, strap",
+        "front": "+Z, centred like the 0.34x0.22x0.16 body box"
+      },
+      "tris": 1232,
+      "bytes": 6852,
+      "texVramMB": 0,
+      "bboxMin": [
+        -0.17,
+        -0.11,
+        -0.079
+      ],
+      "bboxMax": [
+        0.17,
+        0.11,
+        0.079
+      ]
+    },
+    "crab": {
+      "url": "models/gear/crab.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/2DgM36qZW2u",
+      "author": "Poly by Google",
+      "license": "CC-BY 3.0",
+      "params": {
+        "replaces": "carapace, claws, legs",
+        "front": "+Z, centred on the carapace"
+      },
+      "tris": 624,
+      "bytes": 6288,
+      "texVramMB": 0.005,
+      "bboxMin": [
+        -0.11,
+        -0.045,
+        -0.14
+      ],
+      "bboxMax": [
+        0.11,
+        0.009,
+        0.14
+      ]
+    },
+    "rough_wood": {
+      "url": "models/materials/rough_wood.glb",
+      "kind": "material",
+      "source": "https://polyhaven.com/a/rough_wood",
+      "author": "Rob Tuytel (Poly Haven)",
+      "license": "CC0",
+      "tileM": 0.5,
+      "params": {
+        "use": "the 5 plank meshes (gear 'board'): material = rough_wood clone with color 0xc49a74, applyWorldUv(plank, 0.5)"
+      },
+      "note": "2-tri carrier quad; 512 baseColor ETC1S + normal UASTC, REPEAT.",
+      "tris": 2,
+      "bytes": 398584,
+      "texVramMB": 0.525,
+      "bboxMin": [
+        -0.5,
+        0,
+        -0.5
+      ],
+      "bboxMax": [
+        0.5,
+        0,
+        0.5
+      ]
     }
   },
   "placements": [
@@ -402,5 +843,32 @@
       "current": "#10182c",
       "hdriHorizon6to15deg": "#212d37"
     }
+  },
+  "features": {
+    "sharks": [
+      "shark_white",
+      "swordfish"
+    ],
+    "fish": [
+      "angelfish"
+    ],
+    "gulls": [
+      "gull_fly",
+      "gull_perch"
+    ],
+    "boats": [
+      "shipwreck",
+      "canoe"
+    ],
+    "gear": [
+      "chest",
+      "torch",
+      "brush",
+      "bow",
+      "arrow",
+      "bag",
+      "crab",
+      "rough_wood"
+    ]
   }
 }
