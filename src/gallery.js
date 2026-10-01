@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { proxyMaterial } from './assets.js';
+import { applyWorldUv } from './uv.js';
 
 const PAINTS = ['#c4322a', '#e07a1f', '#e2c04a', '#2f8a45', '#2a5fbf', '#6a3d9a', '#1a1a1a', '#f7f4ee'];
 const STORE = 'house-gallery-paint';
@@ -23,6 +25,13 @@ export function createGallery(scene, spec) {
   const ceilY = floorY + height;
   const dark = new THREE.MeshStandardMaterial({ color: 0x14110e, roughness: 1 });
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1612, roughness: 1 });
+  const props4 = spec.assets?.feature('props4');
+  const wallSource = props4 ? spec.assets.material('rock_cliff') : null;
+  const floorSource = props4 ? spec.assets.material('rock_floor') : null;
+  const wallRock = wallSource ? wallSource.clone() : null;
+  const floorRock = floorSource ? floorSource.clone() : null;
+  if (wallRock) wallRock.color.set(0x4a423a);
+  if (floorRock) floorRock.color.set(0x5a5048);
   const walls = [];
   const buckets = [];
   let lit = false;
@@ -37,6 +46,13 @@ export function createGallery(scene, spec) {
     );
     mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     mesh.receiveShadow = true;
+    if (material === dark && wallRock) {
+      mesh.material = wallRock;
+      applyWorldUv(mesh, 2.42);
+    } else if (material === floorMat && floorRock) {
+      mesh.material = floorRock;
+      applyWorldUv(mesh, 2.0);
+    }
     scene.add(mesh);
     return mesh;
   }
@@ -132,9 +148,20 @@ export function createGallery(scene, spec) {
   fireLight.position.y = 0.45;
   fire.add(fireLight);
   scene.add(fire);
+  if (props4) {
+    const pitSrc = spec.assets.gltf('fire_pit')?.scene.getObjectByName('fire_pit');
+    if (pitSrc) {
+      const pit = pitSrc.clone();
+      pit.raycast = () => {};
+      pit.castShadow = true;
+      pit.receiveShadow = true;
+      fire.add(pit);
+    }
+  }
   firePoint.set(midX, floorY + 0.34, midZ);
 
   const bucketMat = new THREE.MeshStandardMaterial({ color: 0x2c3036, roughness: 0.45, metalness: 0.55 });
+  const bucketGroups = [];
   PAINTS.forEach((color, index) => {
     const bucket = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.15, 10), bucketMat);
@@ -150,6 +177,7 @@ export function createGallery(scene, spec) {
     const span = PAINTS.length - 1;
     bucket.position.set(roomX0 + 0.7 + (index / span) * (depth - 1.3), floorY + 0.075, roomZ0 + 0.42);
     scene.add(bucket);
+    bucketGroups.push({ bucket, body, coat });
     buckets.push({
       x: bucket.position.x,
       y: floorY + 0.08,
@@ -157,6 +185,29 @@ export function createGallery(scene, spec) {
       color,
     });
   });
+  if (props4) {
+    const bodySrc = spec.assets.gltf('paint_can')?.scene.getObjectByName('paintcan_body');
+    const paintSrc = spec.assets.gltf('paint_can')?.scene.getObjectByName('paintcan_paint');
+    if (bodySrc && paintSrc) {
+      const bodyMesh = new THREE.InstancedMesh(bodySrc.geometry, bodySrc.material, PAINTS.length);
+      const paintMesh = new THREE.InstancedMesh(paintSrc.geometry, paintSrc.material, PAINTS.length);
+      bucketGroups.forEach(({ bucket, body, coat }, index) => {
+        body.material = proxyMaterial;
+        coat.position.y = 0.046;
+        bucket.updateWorldMatrix(true, false);
+        bodyMesh.setMatrixAt(index, bucket.matrixWorld);
+        paintMesh.setMatrixAt(index, bucket.matrixWorld);
+        paintMesh.setColorAt(index, new THREE.Color(PAINTS[index]));
+      });
+      for (const mesh of [bodyMesh, paintMesh]) {
+        mesh.raycast = () => {};
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.computeBoundingSphere();
+        scene.add(mesh);
+      }
+    }
+  }
 
   function light() {
     if (lit) return;
