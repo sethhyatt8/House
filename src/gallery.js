@@ -274,6 +274,7 @@ export function createGallery(scene, spec) {
       marked = true;
     }
     if (marked) saveTimer = 0.8;
+    return marked;
   }
 
   function save() {

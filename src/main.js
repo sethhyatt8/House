@@ -90,7 +90,7 @@ if (envHdr) {
   pmrem.dispose();
 }
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
-world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike });
+world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike, dip: playDip });
 world.gear.setHaptics(pulseController);
 world.canoe.setHaptics(pulseController);
 const grid = createGrid();
@@ -1034,6 +1034,44 @@ function playLoose() {
   filter.connect(whiskGain);
   whisk.start(t);
   whisk.stop(t + 0.06);
+}
+
+function playDip(color, same) {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const vol = same ? 0.45 : 1;
+  const blob = ctx.createOscillator();
+  blob.type = 'sine';
+  blob.frequency.setValueAtTime(380, t);
+  blob.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+  blob.connect(envGain(ctx, t, 0.09 * vol, 0.004, 0.09));
+  blob.start(t);
+  blob.stop(t + 0.12);
+  const bub = ctx.createOscillator();
+  bub.type = 'sine';
+  bub.frequency.setValueAtTime(720, t + 0.06);
+  bub.frequency.exponentialRampToValueAtTime(330, t + 0.11);
+  bub.connect(envGain(ctx, t + 0.06, 0.05 * vol, 0.003, 0.06));
+  bub.start(t + 0.06);
+  bub.stop(t + 0.14);
+  const len = Math.floor(ctx.sampleRate * 0.16);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const samples = buf.getChannelData(0);
+  for (let i = 0; i < len; i += 1) {
+    const fade = 1 - i / len;
+    samples[i] = (Math.random() * 2 - 1) * fade * fade;
+  }
+  const slosh = ctx.createBufferSource();
+  slosh.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.value = 1.4;
+  bp.frequency.setValueAtTime(1300, t);
+  bp.frequency.exponentialRampToValueAtTime(320, t + 0.14);
+  slosh.connect(bp);
+  bp.connect(envGain(ctx, t, 0.07 * vol, 0.006, 0.14));
+  slosh.start(t);
+  slosh.stop(t + 0.16);
 }
 
 function playStrike() {

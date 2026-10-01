@@ -293,6 +293,53 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
 
   const paintTip = new THREE.Vector3();
   const bristleMat = new THREE.MeshStandardMaterial({ color: 0xc2a878, roughness: 0.75 });
+
+  function fitPaintCoat(root, coat) {
+    root.updateWorldMatrix(true, true);
+    const samples = [];
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const point = new THREE.Vector3();
+    root.traverse((child) => {
+      if (!child.isMesh || child === coat || child.material === proxyMaterial) return;
+      const pos = child.geometry?.attributes?.position;
+      if (!pos) return;
+      for (let i = 0; i < pos.count; i += 1) {
+        point.fromBufferAttribute(pos, i);
+        child.localToWorld(point);
+        root.worldToLocal(point);
+        samples.push(point.x, point.y, point.z);
+        if (point.y < minY) minY = point.y;
+        if (point.y > maxY) maxY = point.y;
+      }
+    });
+    if (!samples.length || !(maxY > minY)) return;
+    const cut = maxY - (maxY - minY) * 0.22;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    let rLow = 0;
+    let rHigh = 0;
+    for (let i = 0; i < samples.length; i += 3) {
+      const y = samples[i + 1];
+      if (y < cut) continue;
+      const radius = Math.hypot(samples[i], samples[i + 2]);
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (y >= (cut + maxY) * 0.5) rHigh = Math.max(rHigh, radius);
+      else rLow = Math.max(rLow, radius);
+    }
+    if (!(y1 > y0)) return;
+    const pad = 0.0015;
+    coat.geometry.dispose();
+    coat.geometry = new THREE.CylinderGeometry(
+      Math.max(0.004, rHigh + pad),
+      Math.max(0.004, (rLow || rHigh) + pad),
+      y1 - y0 + pad * 2,
+      12,
+    );
+    coat.position.y = (y0 + y1) / 2;
+  }
+
   const brush = new THREE.Group();
   if (gallery) {
     const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.28, 6), wood);
@@ -313,9 +360,28 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     const brushPalm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.036, 0.04), torchSkin);
     brushGrip.add(brushPalm);
     brush.add(brushGrip);
+    let brushModel = null;
     if (gearModels && assets.gltf('brush')) {
       hideParts([handle, ferrule, bristles]);
-      addModel(brush, 'brush');
+      brushModel = addModel(brush, 'brush');
+    }
+    const coatMat = new THREE.MeshStandardMaterial({
+      color: 0xc2a878,
+      roughness: 0.32,
+      metalness: 0,
+      emissive: 0xc2a878,
+      emissiveIntensity: 0.18,
+    });
+    const paintCoat = legacy('brush') ? null : new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0165, 0.0095, 0.05, 12),
+      coatMat,
+    );
+    if (paintCoat) {
+      paintCoat.position.y = 0.355;
+      paintCoat.raycast = () => {};
+      paintCoat.castShadow = false;
+      paintCoat.visible = false;
+      brush.add(paintCoat);
     }
     brush.position.set(gallery.brushAt.x, gallery.brushAt.y, gallery.brushAt.z);
     brush.rotation.z = Math.PI / 2;
@@ -328,9 +394,13 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       grip: brushGrip,
       tip,
       paint: null,
+      inBucket: null,
+      coat: paintCoat,
     };
-    holdPose(brush, [0.015, -0.02, -0.05], [Math.PI / 2, 0, 0.2]);
+    if (legacy('brush')) holdPose(brush, [0.015, -0.02, -0.05], [Math.PI / 2, 0, 0.2]);
+    else holdPose(brush, [0, -0.02, 0.09], [-Math.PI / 2, 0, 0]);
     scene.add(brush);
+    if (paintCoat && brushModel) fitPaintCoat(brush, paintCoat);
     enlist(brush);
   }
 
@@ -1321,13 +1391,43 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
         brush.updateWorldMatrix(true, true);
         brush.userData.tip.getWorldPosition(paintTip);
         const dipped = gallery.dip(paintTip);
-        if (dipped) {
-          brush.userData.paint = dipped;
-          bristleMat.color.set(dipped);
-          bristleMat.emissive.set(dipped);
-          bristleMat.emissiveIntensity = 0.45;
+        const brushHand = [...vrHands.keys()].find((hand) => vrHands.get(hand) === brush) || null;
+        if (legacy('brush')) {
+          if (dipped) {
+            brush.userData.paint = dipped;
+            bristleMat.color.set(dipped);
+            bristleMat.emissive.set(dipped);
+            bristleMat.emissiveIntensity = 0.45;
+          }
+        } else if (dipped) {
+          if (brush.userData.inBucket !== dipped) {
+            const same = brush.userData.paint === dipped;
+            if (!same) {
+              brush.userData.paint = dipped;
+              bristleMat.color.set(dipped);
+              bristleMat.emissive.set(dipped);
+              bristleMat.emissiveIntensity = 0.45;
+              if (brush.userData.coat) {
+                brush.userData.coat.material.color.set(dipped);
+                brush.userData.coat.material.emissive.set(dipped);
+                brush.userData.coat.visible = true;
+              }
+              onDip?.(dipped);
+              onHaptic?.(brushHand, 0.35, 40);
+            } else onDip?.(dipped, true);
+            brush.userData.inBucket = dipped;
+          }
+        } else brush.userData.inBucket = null;
+        if (brush.userData.paint) {
+          const marked = gallery.paint(paintTip, brush.userData.paint);
+          if (marked && !legacy('brush')) {
+            const now = performance.now();
+            if (now - (brush.userData.paintPulseAt || 0) >= 90) {
+              brush.userData.paintPulseAt = now;
+              onHaptic?.(brushHand, 0.12, 12);
+            }
+          }
         }
-        if (brush.userData.paint) gallery.paint(paintTip, brush.userData.paint);
       }
     }
     const want = chest.userData.want || 0;
