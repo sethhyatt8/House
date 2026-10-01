@@ -3281,7 +3281,7 @@ function createCrateYard(scene, targets, rockMap, assets) {
   return { yard, crates };
 }
 
-function createForest(scene) {
+function createForest(scene, assets) {
   const soil = new THREE.MeshStandardMaterial({ color: 0x1a261e, roughness: 1 });
   const addGround = (x0, x1, z0, z1) => {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), soil);
@@ -3295,15 +3295,9 @@ function createForest(scene) {
   addGround(-1.55, 3.7, 11.3, far);
   addGround(-1.55, 3.7, -far, -4.1);
 
-  const trunkGeo = new THREE.CylinderGeometry(0.09, 0.14, 1, 5);
-  trunkGeo.translate(0, 0.5, 0);
-  const coneGeo = new THREE.ConeGeometry(1, 1, 6);
-  coneGeo.translate(0, 0.5, 0);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d342b, roughness: 0.96 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x24382c, roughness: 0.9 });
-  const shadeMat = new THREE.MeshStandardMaterial({ color: 0x1a2c22, roughness: 0.94 });
   const spots = [];
   const blocked = (x, z) => x < 6.4 && z > -5 && z < 12.6;
+  let band = 0;
   const scatter = (x0, x1, z0, z1, step, chance, height) => {
     for (let x = x0; x <= x1; x += step) {
       for (let z = z0; z <= z1; z += step) {
@@ -3321,6 +3315,7 @@ function createForest(scene) {
           r: 0.85 + roll * 0.7,
           trunk: 0.22 + roll * 0.16,
           spin: roll * 6.2,
+          band,
         });
       }
     }
@@ -3328,13 +3323,79 @@ function createForest(scene) {
   scatter(3.9, 34, -38, 46, 3.5, 0.78, 5.2);
   scatter(-1.05, 3.9, 12.2, 38, 3.5, 0.74, 4.8);
   scatter(-1.05, 3.9, -38, -4.6, 3.5, 0.74, 4.8);
+  band = 1;
   scatter(34, 78, -78, 78, 7.2, 0.5, 7.4);
   scatter(-1.05, 34, 38, 78, 7.2, 0.46, 6.8);
   scatter(-1.05, 34, -78, -38, 7.2, 0.46, 6.8);
+  band = 2;
   scatter(78, 145, -145, 145, 15, 0.62, 11);
   scatter(-1.05, 78, 78, 145, 15, 0.55, 10);
   scatter(-1.05, 78, -145, -78, 15, 0.55, 10);
   if (!spots.length) return;
+
+  const pines = assets?.feature('trees') ? assets.gltf('pines') : null;
+  if (pines) {
+    // Later, not now: pine_far on band 1 would drop the forest to about 80k tris.
+    // Splitting each InstancedMesh into 4 quadrants with frustum culling would
+    // roughly halve the visible trees for about 15 extra draw calls.
+    // frustumCulled stays false, so every tree is submitted every frame.
+    const variants = {};
+    pines.scene.updateWorldMatrix(true, true);
+    for (const node of pines.scene.children) {
+      variants[node.name] = { node, h: new THREE.Box3().setFromObject(node).max.y, list: [] };
+    }
+    for (const spot of spots) {
+      const name = spot.band === 0
+        ? (hash01(spot.x * 5.3 + spot.z * 2.9) < 0.5 ? 'pine_a' : 'pine_b')
+        : spot.band === 1 ? 'pine_b' : 'pine_far';
+      variants[name].list.push(spot);
+    }
+    const counts = {
+      pine_a: variants.pine_a.list.length,
+      pine_b: variants.pine_b.list.length,
+      pine_far: variants.pine_far.list.length,
+    };
+    counts.total = counts.pine_a + counts.pine_b + counts.pine_far;
+    if (import.meta.env.DEV) console.info('forest trees', counts);
+    if (counts.total !== 374) console.warn('Forest tree count is', counts.total, 'instead of 374.');
+    const alphaToCoverage = new URLSearchParams(location.search).get('a2c') === '1';
+    const dummy = new THREE.Object3D();
+    for (const variant of Object.values(variants)) {
+      if (!variant.list.length) continue;
+      variant.node.traverse((part) => {
+        if (!part.isMesh) return;
+        const mat = part.material;
+        if (/Leaves|Impostor/.test(mat.name)) {
+          mat.color.set(0x6f8f78);
+          if (alphaToCoverage) mat.alphaToCoverage = true;
+        }
+        if (/Bark/.test(mat.name)) mat.color.set(0x9a8c80);
+        const mesh = new THREE.InstancedMesh(part.geometry, mat, variant.list.length);
+        variant.list.forEach((spot, index) => {
+          dummy.position.set(spot.x, 0, spot.z);
+          dummy.rotation.set(0, spot.spin, 0);
+          dummy.scale.setScalar(spot.h / variant.h);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(index, dummy.matrix);
+        });
+        mesh.userData.backdrop = true;
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.frustumCulled = false;
+        mesh.raycast = () => {};
+        scene.add(mesh);
+      });
+    }
+    return;
+  }
+
+  const trunkGeo = new THREE.CylinderGeometry(0.09, 0.14, 1, 5);
+  trunkGeo.translate(0, 0.5, 0);
+  const coneGeo = new THREE.ConeGeometry(1, 1, 6);
+  coneGeo.translate(0, 0.5, 0);
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d342b, roughness: 0.96 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x24382c, roughness: 0.9 });
+  const shadeMat = new THREE.MeshStandardMaterial({ color: 0x1a2c22, roughness: 0.94 });
 
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
   const tops = new THREE.InstancedMesh(coneGeo, leafMat, spots.length);
@@ -3565,7 +3626,7 @@ export function createWorld({ assets } = {}) {
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
-  createForest(scene);
+  createForest(scene, assets);
 
   return {
     scene,
