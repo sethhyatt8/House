@@ -91,6 +91,8 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   let onChop = null;
   let onLoose = null;
   let onStrike = null;
+  let onDip = null;
+  let onHaptic = null;
   let drawHand = null;
   const deck = roof?.y ?? 0;
   const puzzleX = roof ? (roof.x0 + roof.x1) * 0.5 - 0.15 : -0.55;
@@ -1367,6 +1369,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       onChop = sounds?.chop || null;
       onLoose = sounds?.loose || null;
       onStrike = sounds?.strike || null;
+      onDip = sounds?.dip || null;
+    },
+    setHaptics(fn) {
+      onHaptic = fn || null;
     },
     hatchet,
     bag,

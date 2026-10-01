@@ -2768,6 +2768,7 @@ function createCanoe(scene, targets, cave, assets) {
   targets.push(group);
 
   const state = { vx: 0, vz: 0, mode: 'beach', yaw: 0, stroke: 0 };
+  let onHaptic = null;
   const center = new THREE.Vector3();
   const seatPoint = new THREE.Vector3();
   const forward = new THREE.Vector3();
@@ -2822,7 +2823,11 @@ function createCanoe(scene, targets, cave, assets) {
     seat.getWorldPosition(seatPoint);
   }
 
-  return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center };
+  function setHaptics(fn) {
+    onHaptic = fn || null;
+  }
+
+  return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center, setHaptics };
 }
 
 function tintRock(material) {

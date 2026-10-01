@@ -91,6 +91,8 @@ if (envHdr) {
 }
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
 world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike });
+world.gear.setHaptics(pulseController);
+world.canoe.setHaptics(pulseController);
 const grid = createGrid();
 const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
 document.body.appendChild(renderer.domElement);
@@ -424,10 +426,10 @@ function standAtLadder(ladder) {
   if (Math.hypot(dx, dz) > 0.55) shiftPlayer(dx, 0, dz);
 }
 
-function pulseController(controller) {
+function pulseController(controller, intensity = 0.7, ms = 50) {
   const pad = controller?.userData?.inputSource?.gamepad;
   const haptic = pad?.hapticActuators?.[0] || pad?.vibrationActuator;
-  if (haptic?.pulse) haptic.pulse(0.7, 50);
+  if (haptic?.pulse) haptic.pulse(intensity, ms);
 }
 
 function attachClimb(controller, hit) {
