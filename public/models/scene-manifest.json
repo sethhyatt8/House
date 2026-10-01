@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "notes": "Phase 1 draft. Positions are copied from the current procedural code (world.js / gear.js). 'fit' tells the asset manager how to scale a model from its bounding box, so no hand-computed scale factors are needed. Units: metres, radians, three.js Y-up.",
+  "models": {
+    "crate": {
+      "url": "models/props/wooden_crate_02.glb",
+      "source": "https://polyhaven.com/a/wooden_crate_02",
+      "license": "CC0",
+      "nativeSizeM": [0.529, 0.464, 1.166],
+      "originNote": "x/z centred, base at y≈-0.01. Long axis is +Z."
+    },
+    "boulder": {
+      "url": "models/props/boulder_01.glb",
+      "source": "https://polyhaven.com/a/boulder_01",
+      "license": "CC0",
+      "nativeSizeM": [1.269, 1.003, 1.822],
+      "originNote": "base at y≈-0.074. Longest axis is +Z."
+    },
+    "hatchet": {
+      "url": "models/props/hatchet.glb",
+      "source": "https://polyhaven.com/a/hatchet",
+      "license": "CC0",
+      "nativeSizeM": [0.026, 0.289, 0.104],
+      "originNote": "Handle runs along +Y (y -0.062..0.227) and the blade extends toward +Z, so rotate +PI/2 about Y to match the procedural hatchet (blade toward +X)."
+    }
+  },
+  "placements": [
+    { "id": "room-boulder-0", "model": "boulder", "replaces": "world.js createWorld() boulder [1.35,-0.35,r=0.34,spin=0.7]", "position": [1.35, 0.1428, -0.35], "rotation": [0.7, 0.42, 0.14], "fit": { "maxExtent": 0.68 }, "collider": { "type": "sphere", "radius": 0.34 }, "userData": { "type": "prop", "label": "stone", "role": "loose", "floorY": 0.1428 } },
+    { "id": "room-boulder-1", "model": "boulder", "replaces": "world.js createWorld() boulder [0.15,1.55,r=0.22,spin=1.4]", "position": [0.15, 0.0924, 1.55], "rotation": [1.4, 0.84, 0.28], "fit": { "maxExtent": 0.44 }, "collider": { "type": "sphere", "radius": 0.22 }, "userData": { "type": "prop", "label": "stone", "role": "loose", "floorY": 0.0924 } },
+    { "id": "room-boulder-2", "model": "boulder", "replaces": "world.js createWorld() boulder [2.05,-1.7,r=0.28,spin=0.4]", "position": [2.05, 0.1176, -1.7], "rotation": [0.4, 0.24, 0.08], "fit": { "maxExtent": 0.56 }, "collider": { "type": "sphere", "radius": 0.28 }, "userData": { "type": "prop", "label": "stone", "role": "loose", "floorY": 0.1176 } },
+    { "id": "yard-boulder-0", "model": "boulder", "replaces": "world.js createCrateYard() rim boulder 0 (yard.x0+0.55, yard.z1-0.7, r=0.48)", "position": [-1.19, 0.2016, 9.5], "rotation": [0, 0, 0], "fit": { "maxExtent": 0.96 }, "collider": { "type": "none" } },
+    { "id": "yard-boulder-1", "model": "boulder", "replaces": "world.js createCrateYard() rim boulder 1 (yard.x1-0.6, yard.z1-0.85, r=0.4)", "position": [2.75, 0.168, 9.35], "rotation": [0, 0, 0], "fit": { "maxExtent": 0.8 }, "collider": { "type": "none" } },
+    { "id": "yard-boulder-2", "model": "boulder", "replaces": "world.js createCrateYard() rim boulder 2 (yard.x1-0.5, 3.35, r=0.32)", "position": [2.85, 0.1344, 3.35], "rotation": [0, 0, 0], "fit": { "maxExtent": 0.64 }, "collider": { "type": "none" } }
+  ],
+  "templates": {
+    "crate": { "model": "crate", "usedBy": "world.js createCrateYard() addCrate()", "fit": { "height": "h (per crate)", "uniform": true }, "orientation": "long axis (+Z) along the pile's row direction; derive w/d (and userData.hx/hz/stackSpan) from the scaled model bbox", "collider": "keep the existing BoxGeometry mesh as the raycast/chop/stand proxy with material.visible = false, sized to the scaled model bbox" },
+    "hatchet": { "model": "hatchet", "usedBy": "gear.js createGear() hatchet group", "localRotation": [0, 1.5708, 0], "localPosition": [0, 0, 0], "fit": { "uniform": 1.0 }, "keep": "userData.blade (move this invisible marker to the model's blade centre), userData.grip, holdPose()" }
+  }
+}
