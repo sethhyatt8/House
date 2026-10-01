@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { proxyMaterial } from './assets.js';
 import { legacy } from './flags.js';
 import { createSprayCan, createSprayFx, createSprayShared, sprayDirections } from './spray.js';
+import { START_CELL } from './cell.js';
 import { applyWorldUv } from './uv.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -156,7 +157,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   blade.position.set(0.07, 0.25, 0);
   blade.rotation.z = -0.45;
   hatchet.add(blade);
-  hatchet.position.set(1.48, 0.04, -0.42);
+  hatchet.position.set(START_CELL.hatchet.x, START_CELL.hatchet.y, START_CELL.hatchet.z);
   hatchet.rotation.z = Math.PI / 2;
   hatchet.rotation.y = 0.4;
   hatchet.traverse((child) => {
@@ -229,7 +230,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     blade.getWorldPosition(bladeCenter);
     console.info('[hatchet] blade marker', blade.position.toArray(), 'inside model', modelBox.containsPoint(bladeCenter));
   }
-  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade, grip, hatchetModel };
+  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: START_CELL.hatchet.y, blade, grip, hatchetModel };
   holdPose(hatchet, [0, -0.012, 0.06], [-Math.PI / 2, 0.08, -0.45]);
   scene.add(hatchet);
   enlist(hatchet);
@@ -848,16 +849,28 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const roughWood = gearModels ? assets.material('rough_wood') : null;
   const plankMat = roughWood ? roughWood.clone() : wood;
   if (roughWood) plankMat.color.set(0xc49a74);
-  for (let i = 0; i < 5; i += 1) {
-    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.56), plankMat);
-    plank.position.set(2.28, 0.66 + i * 0.12, 0.12);
+  const doorBoards = [];
+  const door = START_CELL.door;
+  const doorSpan = door.z1 - door.z0 + 0.08;
+  const rowH = door.h / door.rows;
+  for (let i = 0; i < door.rows; i += 1) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(door.thick, rowH + 0.012, doorSpan), plankMat);
+    plank.position.set(door.x, rowH * (i + 0.5), (door.z0 + door.z1) / 2);
     plank.castShadow = true;
     plank.receiveShadow = true;
-    plank.userData = { type: 'gear', gear: 'board', hp: 1, dead: false };
+    plank.userData = {
+      type: 'gear',
+      gear: 'board',
+      hp: 1,
+      dead: false,
+      hx: door.thick / 2,
+      hz: doorSpan / 2,
+    };
     if (roughWood) applyWorldUv(plank, 0.5);
     scene.add(plank);
     enlist(plank);
     choppables.push(plank);
+    doorBoards.push(plank);
   }
 
   const bag = new THREE.Group();
@@ -1639,5 +1652,6 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     hatchet,
     bag,
     crab,
+    doorBoards,
   };
 }

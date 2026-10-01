@@ -8,6 +8,7 @@ import { createGear } from './gear.js';
 import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
 import { addLadderVisuals, createFollower, p4Node } from './props4.js';
+import { START_CELL } from './cell.js';
 import { applyWorldUv } from './uv.js';
 
 const TABLE_TOP = 0.76;
@@ -3787,7 +3788,8 @@ export function createWorld({ assets } = {}) {
   scene.fog = new THREE.Fog(fogColor, 18, 210);
 
   const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.05, 160);
-  camera.position.set(-0.05, 1.58, 1.22);
+  camera.position.set(START_CELL.spawnX, 1.58, START_CELL.spawnZ);
+  camera.layers.enable(1);
 
   const targets = [];
 
@@ -3810,7 +3812,28 @@ export function createWorld({ assets } = {}) {
     scene.add(mesh);
   };
   addRock(roomSpan + 0.8, 2.7, 0.7, roomMidX, 1.35, -roomZ - 0.2);
-  addRock(0.7, 3.1, roomZ * 2 + 0.6, roomRight + 0.28, 1.55, 0);
+  const wallX = roomRight + 0.28;
+  const wallW = 0.7;
+  const wallH = 3.1;
+  const wallZ0 = -roomZ - 0.3;
+  const wallZ1 = roomZ + 0.3;
+  const door = START_CELL.door;
+  const southD = door.z0 - wallZ0;
+  const northD = wallZ1 - door.z1;
+  const lintelH = wallH - door.h;
+  addRock(wallW, wallH, southD, wallX, wallH / 2, wallZ0 + southD / 2);
+  addRock(wallW, wallH, northD, wallX, wallH / 2, door.z1 + northD / 2);
+  addRock(wallW, lintelH, door.z1 - door.z0, wallX, door.h + lintelH / 2, (door.z0 + door.z1) / 2);
+  const annexX0 = wallX + wallW / 2;
+  const annexX1 = 4.88;
+  const annexZ0 = -0.9;
+  const annexZ1 = 1.14;
+  const annexH = 2.42;
+  const annexT = 0.16;
+  addRock(annexX1 - annexX0, annexH, annexT, (annexX0 + annexX1) / 2, annexH / 2, annexZ0 + annexT / 2);
+  addRock(annexX1 - annexX0, annexH, annexT, (annexX0 + annexX1) / 2, annexH / 2, annexZ1 - annexT / 2);
+  addRock(annexT, annexH, annexZ1 - annexZ0, annexX1 - annexT / 2, annexH / 2, (annexZ0 + annexZ1) / 2);
+  addRock(annexX1 - annexX0 + annexT, annexT, annexZ1 - annexZ0, (annexX0 + annexX1) / 2, annexH - annexT / 2, (annexZ0 + annexZ1) / 2);
   addRock(1.1, 1.15, 0.8, 1.15, 0.58, -2.15);
   addRock(0.7, 0.85, 1.3, 2.15, 0.42, 1.55);
   const coverFrom = roomMidX;
@@ -3830,6 +3853,40 @@ export function createWorld({ assets } = {}) {
       object.material = roomRock;
     });
   }
+  const cellDark = new THREE.MeshStandardMaterial({ color: 0x2a241c, roughness: 1 });
+  const addCell = (w, h, d, x, y, z) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cellDark);
+    mesh.position.set(x, y, z);
+    mesh.layers.set(1);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  };
+  const cellX0 = annexX0 + 0.02;
+  const cellX1 = annexX1 - annexT - 0.02;
+  const cellZ0 = annexZ0 + annexT + 0.02;
+  const cellZ1 = annexZ1 - annexT - 0.02;
+  const liner = 0.04;
+  const cellTop = door.h + liner;
+  addCell(cellX1 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + cellX1) / 2, liner / 2, (cellZ0 + cellZ1) / 2);
+  addCell(cellX1 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + cellX1) / 2, cellTop - liner / 2, (cellZ0 + cellZ1) / 2);
+  addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ0 + liner / 2);
+  addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ1 - liner / 2);
+  addCell(liner, cellTop, cellZ1 - cellZ0, cellX1 - liner / 2, cellTop / 2, (cellZ0 + cellZ1) / 2);
+  addCell(liner, cellTop, door.z0 - cellZ0, cellX0 + liner / 2, cellTop / 2, (cellZ0 + door.z0) / 2);
+  addCell(liner, cellTop, cellZ1 - door.z1, cellX0 + liner / 2, cellTop / 2, (door.z1 + cellZ1) / 2);
+  addCell(liner, cellTop - door.h, door.z1 - door.z0, cellX0 + liner / 2, door.h + (cellTop - door.h) / 2, (door.z0 + door.z1) / 2);
+  const sill = new THREE.Mesh(
+    new THREE.BoxGeometry(cellX0 - 2.55, 0.02, door.z1 - door.z0),
+    new THREE.MeshStandardMaterial({ color: 0x2a241e, roughness: 1 }),
+  );
+  sill.position.set((2.55 + cellX0) / 2, 0.01, (door.z0 + door.z1) / 2);
+  sill.receiveShadow = true;
+  scene.add(sill);
+  const gloom = new THREE.PointLight(0xffc9a0, 14, 5, 2);
+  gloom.layers.set(1);
+  gloom.position.set((cellX0 + cellX1) / 2, 1.35, (door.z0 + door.z1) / 2);
+  scene.add(gloom);
   const roofTop = 2.95 + 0.31;
   const roofDepth = roomZ * 2 + 1.15;
   const roof = {

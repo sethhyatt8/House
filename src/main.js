@@ -9,6 +9,7 @@ import { brickLocalPosition, canPlaceAssembly, columnTop, connectedBricks, creat
 import { hostRoomCode, openRoom, watchCodeFromUrl } from './watch.js';
 import { createAssetManager } from './assets.js';
 import { legacy } from './flags.js';
+import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 
 const statusEl = document.getElementById('status');
@@ -113,7 +114,7 @@ document.body.appendChild(XRButton.createButton(renderer, {
 }));
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0.12, 1.02, -0.42);
+controls.target.set(START_CELL.door.x, 0.72, (START_CELL.door.z0 + START_CELL.door.z1) / 2);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.62;
 controls.minDistance = 0.45;
@@ -202,8 +203,13 @@ addTeleportSpot({
   status: 'In the canoe.',
 });
 
+function doorStanding() {
+  return world.gear.doorBoards?.some((board) => !board.userData.dead);
+}
+
 function teleportTo(index) {
   if (biteHold) return;
+  if (renderer.xr.isPresenting && doorStanding()) return;
   const spot = teleportSpots[index];
   if (!spot) return;
   leaveClimb();
@@ -250,6 +256,7 @@ let fallVy = 0;
 let biteHold = false;
 let xrBaseSpace = null;
 let xrYaw = 0;
+let cellPhase = 0;
 let gazeLock = null;
 const xrOffset = new THREE.Vector3();
 const spaceQuat = new THREE.Quaternion();
@@ -363,6 +370,85 @@ function shiftPlayer(dx, dy, dz) {
     return false;
   }
   return true;
+}
+
+function enableCellView() {
+  camera.layers.enable(1);
+  const xrCamera = renderer.xr.getCamera?.();
+  if (!xrCamera) return;
+  xrCamera.layers.enable(1);
+  xrCamera.cameras?.forEach((eye) => eye.layers.enable(1));
+}
+
+function placeInCell() {
+  if (cellPhase > 1 || watching || !renderer.xr.isPresenting || !xrFrame) return;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const head = pose.transform.position;
+  if (cellPhase === 0) {
+    if (shiftPlayer(START_CELL.spawnX - head.x, 0, START_CELL.spawnZ - head.z)) cellPhase = 1;
+    return;
+  }
+  const orient = pose.transform.orientation;
+  spaceQuat.set(orient.x, orient.y, orient.z, orient.w);
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(spaceQuat);
+  forward.y = 0;
+  if (forward.lengthSq() > 1e-6) {
+    forward.normalize();
+    const delta = Math.atan2(-forward.z, -forward.x);
+    if (Math.abs(delta) > 0.03) yawAround(delta, head.x, head.z);
+  }
+  cellPhase = 2;
+}
+
+function pushOutOf(x, z, box, radius) {
+  const x0 = box.x0 - radius;
+  const x1 = box.x1 + radius;
+  const z0 = box.z0 - radius;
+  const z1 = box.z1 + radius;
+  if (x <= x0 || x >= x1 || z <= z0 || z >= z1) return null;
+  const left = x - x0;
+  const right = x1 - x;
+  const near = z - z0;
+  const far = z1 - z;
+  const min = Math.min(left, right, near, far);
+  if (min === left) return { dx: -left, dz: 0 };
+  if (min === right) return { dx: right, dz: 0 };
+  if (min === near) return { dx: 0, dz: -near };
+  return { dx: 0, dz: far };
+}
+
+function containPlayer() {
+  if (cellPhase < 2 || watching || aboard || biteHold || !renderer.xr.isPresenting || !xrFrame) return;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  let x = pose.transform.position.x;
+  let z = pose.transform.position.z;
+  const radius = 0.2;
+  const boxes = START_CELL.blocks.slice();
+  for (const board of world.gear.doorBoards || []) {
+    if (board.userData.dead) continue;
+    boxes.push({
+      x0: board.position.x - board.userData.hx,
+      x1: board.position.x + board.userData.hx,
+      z0: board.position.z - board.userData.hz,
+      z1: board.position.z + board.userData.hz,
+    });
+  }
+  for (let pass = 0; pass < 4; pass += 1) {
+    let hit = false;
+    for (const box of boxes) {
+      const push = pushOutOf(x, z, box, radius);
+      if (!push) continue;
+      if (!shiftPlayer(push.dx, 0, push.dz)) return;
+      x += push.dx;
+      z += push.dz;
+      hit = true;
+    }
+    if (!hit) break;
+  }
 }
 
 function yawAround(delta, pivotX, pivotZ) {
@@ -886,6 +972,8 @@ renderer.xr.addEventListener('sessionstart', () => {
   xrBaseSpace = renderer.xr.getReferenceSpace();
   xrOffset.set(0, 0, 0);
   xrYaw = 0;
+  cellPhase = 0;
+  enableCellView();
   gazeLock = null;
   hudEl.style.display = 'none';
   if (scalePanel) scalePanel.style.display = 'none';
@@ -3400,6 +3488,8 @@ function notePerf(time) {
 
 function frame(time, frame) {
   xrFrame = frame ?? null;
+  placeInCell();
+  containPlayer();
   const dt = Math.min(clock.getDelta(), 0.05);
   for (let i = jobs.length - 1; i >= 0; i -= 1) {
     jobs[i].t += dt;
