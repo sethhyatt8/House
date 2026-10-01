@@ -25,7 +25,7 @@ const roomCode = watching ? watchCodeFromUrl() : hostRoomCode();
 
 const world = createWorld();
 const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
-world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose });
+world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike });
 const grid = createGrid();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -966,11 +966,53 @@ function playLoose() {
   const t = ctx.currentTime;
   const osc = ctx.createOscillator();
   osc.type = 'triangle';
-  osc.frequency.setValueAtTime(380, t);
-  osc.frequency.exponentialRampToValueAtTime(120, t + 0.1);
-  osc.connect(envGain(ctx, t, 0.07, 0.004, 0.12));
+  osc.frequency.setValueAtTime(620, t);
+  osc.frequency.exponentialRampToValueAtTime(140, t + 0.09);
+  osc.connect(envGain(ctx, t, 0.09, 0.003, 0.1));
   osc.start(t);
-  osc.stop(t + 0.14);
+  osc.stop(t + 0.11);
+  const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.06), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const whisk = ctx.createBufferSource();
+  whisk.buffer = noise;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 900;
+  const whiskGain = envGain(ctx, t, 0.08, 0.002, 0.05);
+  whisk.connect(filter);
+  filter.connect(whiskGain);
+  whisk.start(t);
+  whisk.stop(t + 0.06);
+}
+
+function playStrike() {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.09), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) {
+    const fade = 1 - i / data.length;
+    data[i] = (Math.random() * 2 - 1) * fade * fade;
+  }
+  const burst = ctx.createBufferSource();
+  burst.buffer = noise;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(1600, t);
+  filter.frequency.exponentialRampToValueAtTime(240, t + 0.07);
+  const noiseGain = envGain(ctx, t, 0.2, 0.002, 0.08);
+  burst.connect(filter);
+  filter.connect(noiseGain);
+  burst.start(t);
+  burst.stop(t + 0.09);
+  const thump = ctx.createOscillator();
+  thump.type = 'sine';
+  thump.frequency.setValueAtTime(160, t);
+  thump.frequency.exponentialRampToValueAtTime(55, t + 0.06);
+  thump.connect(envGain(ctx, t, 0.14, 0.002, 0.07));
+  thump.start(t);
+  thump.stop(t + 0.08);
 }
 
 function playPickup() {

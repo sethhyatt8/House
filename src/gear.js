@@ -86,6 +86,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
   let onPickup = null;
   let onChop = null;
   let onLoose = null;
+  let onStrike = null;
   let drawHand = null;
   const deck = roof?.y ?? 0;
   const puzzleX = roof ? (roof.x0 + roof.x1) * 0.5 - 0.15 : -0.55;
@@ -386,7 +387,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
     arrowAim.copy(to).sub(from);
     if (arrowAim.lengthSq() < 1e-6) arrowAim.set(0, 0, -1);
     arrowAim.normalize();
-    const speed = 7 + Math.min(power, 0.58) * 32;
+    const speed = 8 + Math.min(power, 0.58) * 18;
     arrow.visible = true;
     arrow.userData.vel = arrowAim.clone().multiplyScalar(speed);
     arrow.userData.life = 4.2;
@@ -453,6 +454,58 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
     return arrowMask;
   }
 
+  const puffs = [];
+  const dustMap = (() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const glow = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    glow.addColorStop(0, 'rgba(214, 202, 184, 0.9)');
+    glow.addColorStop(0.4, 'rgba(168, 154, 136, 0.4)');
+    glow.addColorStop(1, 'rgba(140, 128, 112, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 64, 64);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  })();
+  const dustNormal = new THREE.Vector3();
+
+  function puff(point, normal) {
+    dustNormal.copy(normal && normal.lengthSq() > 1e-6 ? normal : tmp.set(0, 1, 0)).normalize();
+    for (let i = 0; i < 7; i += 1) {
+      const material = new THREE.SpriteMaterial({
+        map: dustMap,
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.75,
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.position.copy(point).addScaledVector(dustNormal, 0.03);
+      const size = 0.05 + Math.random() * 0.09;
+      sprite.scale.setScalar(size);
+      scene.add(sprite);
+      const spray = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+      if (spray.dot(dustNormal) < 0) spray.negate();
+      spray.addScaledVector(dustNormal, 0.85).normalize();
+      puffs.push({
+        mesh: sprite,
+        v: spray.multiplyScalar(0.45 + Math.random() * 0.9),
+        life: 0.32 + Math.random() * 0.22,
+        age: 0,
+        grow: size,
+      });
+    }
+    if (onStrike) onStrike();
+  }
+
+  function landArrow(arrow, point, normal) {
+    puff(point, normal);
+    arrow.userData.vel = null;
+    arrow.userData.stuck = true;
+  }
+
   function updateArrows(dt) {
     if (drawHand && bow.userData.carried) {
       handWorld(drawHand, tmp);
@@ -477,19 +530,26 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
       if (arrow.userData.stuckFish || arrow.userData.stuckBird) continue;
       arrow.userData.life -= dt;
       if (arrow.userData.life <= 0) {
+        if (!arrow.userData.stuck) puff(arrow.position, tmp.set(0, 1, 0));
         arrow.visible = false;
         arrow.userData.vel = null;
         continue;
       }
       if (arrow.userData.stuck) continue;
       const vel = arrow.userData.vel;
-      vel.y -= 2.4 * dt;
+      vel.y -= 9.2 * dt;
       const step = vel.length() * dt;
       if (step < 1e-5) continue;
       arrowPrev.copy(arrow.position);
       tmp.set(0, 1, 0).applyQuaternion(arrow.quaternion);
       arrowPrev.addScaledVector(tmp, 0.66);
       arrow.position.addScaledVector(vel, dt);
+      if (arrow.position.y < -7.95) {
+        arrow.position.y = -7.95;
+        arrow.visible = false;
+        landArrow(arrow, arrow.position, tmp.set(0, 1, 0));
+        continue;
+      }
       arrowAim.copy(vel).multiplyScalar(1 / (vel.length() || 1));
       arrow.quaternion.setFromUnitVectors(upAxis, arrowAim);
       arrowRay.set(arrowPrev, arrowAim);
@@ -504,6 +564,9 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
           hurt(found);
         }
         arrow.position.copy(hit.point).addScaledVector(arrowAim, -0.66);
+        if (hit.face) dustNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+        else dustNormal.set(0, 1, 0);
+        puff(hit.point, dustNormal);
         const bird = birdHost(hit.object);
         if (bird) {
           if (!bird.userData.dead) {
@@ -1110,6 +1173,21 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
       }
     }
     updateArrows(dt);
+    for (let i = puffs.length - 1; i >= 0; i -= 1) {
+      const mote = puffs[i];
+      mote.age += dt;
+      const k = mote.age / mote.life;
+      if (k >= 1) {
+        scene.remove(mote.mesh);
+        mote.mesh.material.dispose();
+        puffs.splice(i, 1);
+        continue;
+      }
+      mote.v.y -= 1.4 * dt;
+      mote.mesh.position.addScaledVector(mote.v, dt);
+      mote.mesh.scale.setScalar(mote.grow * (1 + k * 2.4));
+      mote.mesh.material.opacity = 0.72 * (1 - k);
+    }
   }
 
   return {
@@ -1141,6 +1219,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
       onPickup = sounds?.pickup || null;
       onChop = sounds?.chop || null;
       onLoose = sounds?.loose || null;
+      onStrike = sounds?.strike || null;
     },
     hatchet,
     bag,
