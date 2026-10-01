@@ -3780,6 +3780,73 @@ function createForest(scene, assets) {
   });
 }
 
+function addBlackPit(scene, back) {
+  const voidMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const x0 = 4.72;
+  const x1 = 5.42;
+  const z0 = back.z0 - 0.55;
+  const z1 = back.z1 + 0.55;
+  const top = 2.25;
+  const t = 0.08;
+  const add = (w, h, d, x, y, z) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), voidMat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    scene.add(mesh);
+  };
+  add(x1 - x0, t, z1 - z0, (x0 + x1) / 2, t / 2, (z0 + z1) / 2);
+  add(x1 - x0, t, z1 - z0, (x0 + x1) / 2, top - t / 2, (z0 + z1) / 2);
+  add(x1 - x0, top, t, (x0 + x1) / 2, top / 2, z0 + t / 2);
+  add(x1 - x0, top, t, (x0 + x1) / 2, top / 2, z1 - t / 2);
+  add(t, top, z1 - z0, x1 - t / 2, top / 2, (z0 + z1) / 2);
+}
+
+function addLockedGate(scene, back) {
+  const iron = new THREE.MeshStandardMaterial({
+    color: 0x6a727a,
+    metalness: 0.92,
+    roughness: 0.38,
+    emissive: 0xa8b0b8,
+    emissiveIntensity: 0.5,
+  });
+  const gate = new THREE.Group();
+  const midZ = (back.z0 + back.z1) / 2;
+  const bar = (w, h, d, x, y, z) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), iron);
+    mesh.position.set(x, y, z);
+    mesh.layers.set(1);
+    gate.add(mesh);
+  };
+  const leaf = (zFrom, zTo) => {
+    const leafSpan = zTo - zFrom;
+    const leafMid = (zFrom + zTo) / 2 - midZ;
+    bar(0.045, back.h, 0.045, 0, back.h / 2, zFrom - midZ);
+    bar(0.045, back.h, 0.045, 0, back.h / 2, zTo - midZ);
+    bar(0.04, 0.05, leafSpan, 0, back.h - 0.025, leafMid);
+    bar(0.03, 0.04, leafSpan, 0, 1.02, leafMid);
+    const count = 3;
+    for (let i = 0; i < count; i += 1) {
+      const z = zFrom + ((i + 1) / (count + 1)) * leafSpan;
+      bar(0.02, back.h - 0.08, 0.02, 0, (back.h - 0.08) / 2 + 0.02, z - midZ);
+    }
+  };
+  const gap = 0.04;
+  leaf(back.z0, midZ - gap);
+  leaf(midZ + gap, back.z1);
+  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.11, 0.045), iron);
+  lock.position.set(-0.03, 1.0, 0);
+  lock.layers.set(1);
+  gate.add(lock);
+  const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.008, 6, 14, Math.PI), iron);
+  shackle.rotation.y = Math.PI / 2;
+  shackle.position.set(-0.03, 1.05, 0);
+  shackle.layers.set(1);
+  gate.add(shackle);
+  gate.position.set(back.gateX, 0, midZ);
+  scene.add(gate);
+}
+
 export function createWorld({ assets } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
@@ -3832,7 +3899,14 @@ export function createWorld({ assets } = {}) {
   const annexT = 0.16;
   addRock(annexX1 - annexX0, annexH, annexT, (annexX0 + annexX1) / 2, annexH / 2, annexZ0 + annexT / 2);
   addRock(annexX1 - annexX0, annexH, annexT, (annexX0 + annexX1) / 2, annexH / 2, annexZ1 - annexT / 2);
-  addRock(annexT, annexH, annexZ1 - annexZ0, annexX1 - annexT / 2, annexH / 2, (annexZ0 + annexZ1) / 2);
+  const back = START_CELL.back;
+  const backX = annexX1 - annexT / 2;
+  const backSouth = back.z0 - annexZ0;
+  const backNorth = annexZ1 - back.z1;
+  const backLintel = annexH - back.h;
+  addRock(annexT, annexH, backSouth, backX, annexH / 2, annexZ0 + backSouth / 2);
+  addRock(annexT, annexH, backNorth, backX, annexH / 2, back.z1 + backNorth / 2);
+  addRock(annexT, backLintel, back.z1 - back.z0, backX, back.h + backLintel / 2, (back.z0 + back.z1) / 2);
   addRock(annexX1 - annexX0 + annexT, annexT, annexZ1 - annexZ0, (annexX0 + annexX1) / 2, annexH - annexT / 2, (annexZ0 + annexZ1) / 2);
   addRock(1.1, 1.15, 0.8, 1.15, 0.58, -2.15);
   addRock(0.7, 0.85, 1.3, 2.15, 0.42, 1.55);
@@ -3872,7 +3946,14 @@ export function createWorld({ assets } = {}) {
   addCell(cellX1 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + cellX1) / 2, cellTop - liner / 2, (cellZ0 + cellZ1) / 2);
   addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ0 + liner / 2);
   addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ1 - liner / 2);
-  addCell(liner, cellTop, cellZ1 - cellZ0, cellX1 - liner / 2, cellTop / 2, (cellZ0 + cellZ1) / 2);
+  const backLinerX = cellX1 - liner / 2;
+  const linerSouth = back.z0 - cellZ0;
+  const linerNorth = cellZ1 - back.z1;
+  addCell(liner, cellTop, linerSouth, backLinerX, cellTop / 2, cellZ0 + linerSouth / 2);
+  addCell(liner, cellTop, linerNorth, backLinerX, cellTop / 2, back.z1 + linerNorth / 2);
+  addCell(liner, Math.max(0.02, cellTop - back.h), back.z1 - back.z0, backLinerX, back.h + Math.max(0.02, cellTop - back.h) / 2, (back.z0 + back.z1) / 2);
+  addBlackPit(scene, back);
+  addLockedGate(scene, back);
   addCell(liner, cellTop, door.z0 - cellZ0, cellX0 + liner / 2, cellTop / 2, (cellZ0 + door.z0) / 2);
   addCell(liner, cellTop, cellZ1 - door.z1, cellX0 + liner / 2, cellTop / 2, (door.z1 + cellZ1) / 2);
   addCell(liner, cellTop - door.h, door.z1 - door.z0, cellX0 + liner / 2, door.h + (cellTop - door.h) / 2, (door.z0 + door.z1) / 2);
@@ -3883,9 +3964,9 @@ export function createWorld({ assets } = {}) {
   sill.position.set((2.55 + cellX0) / 2, 0.01, (door.z0 + door.z1) / 2);
   sill.receiveShadow = true;
   scene.add(sill);
-  const gloom = new THREE.PointLight(0xffc9a0, 14, 5, 2);
+  const gloom = new THREE.PointLight(0xffc9a0, 14, 1.35, 2);
   gloom.layers.set(1);
-  gloom.position.set((cellX0 + cellX1) / 2, 1.35, (door.z0 + door.z1) / 2);
+  gloom.position.set(cellX0 + 0.22, 1.25, (door.z0 + door.z1) / 2);
   scene.add(gloom);
   const roofTop = 2.95 + 0.31;
   const roofDepth = roomZ * 2 + 1.15;

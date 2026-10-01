@@ -976,6 +976,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   xrYaw = 0;
   cellPhase = 0;
   enableCellView();
+  try { audio(); } catch { /* the roar starts once the headset session is running */ }
   gazeLock = null;
   hudEl.style.display = 'none';
   if (scalePanel) scalePanel.style.display = 'none';
@@ -1075,6 +1076,82 @@ function audio() {
   if (!audioCtx) audioCtx = new AudioContext();
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
+}
+
+let roar = null;
+
+function ensureRoar() {
+  if (roar) return roar;
+  const ctx = audio();
+  const master = ctx.createGain();
+  master.gain.value = 0;
+  master.connect(ctx.destination);
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.value = 34;
+  const subGain = ctx.createGain();
+  subGain.gain.value = 0.45;
+  sub.connect(subGain);
+  subGain.connect(master);
+  sub.start();
+  const rumble = ctx.createOscillator();
+  rumble.type = 'sawtooth';
+  rumble.frequency.value = 52;
+  const low = ctx.createBiquadFilter();
+  low.type = 'lowpass';
+  low.frequency.value = 120;
+  const rumbleGain = ctx.createGain();
+  rumbleGain.gain.value = 0.14;
+  rumble.connect(low);
+  low.connect(rumbleGain);
+  rumbleGain.connect(master);
+  rumble.start();
+  const seconds = 3;
+  const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = noiseBuf;
+  noise.loop = true;
+  const growl = ctx.createBiquadFilter();
+  growl.type = 'bandpass';
+  growl.frequency.value = 160;
+  growl.Q.value = 3.2;
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.value = 0;
+  noise.connect(growl);
+  growl.connect(noiseGain);
+  noiseGain.connect(master);
+  noise.start();
+  roar = { ctx, master, sub, rumble, growl, noiseGain };
+  return roar;
+}
+
+function listenerXZ() {
+  if (renderer.xr.isPresenting && xrFrame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (pose) return { x: pose.transform.position.x, z: pose.transform.position.z };
+  }
+  return { x: camera.position.x, z: camera.position.z };
+}
+
+function updateRoar(dt) {
+  const ear = listenerXZ();
+  const room = START_CELL.floor;
+  const inside = ear.x >= room.x0 && ear.x <= room.x1 && ear.z >= room.z0 && ear.z <= room.z1;
+  if (!inside && !roar) return;
+  const voice = ensureRoar();
+  if (voice.ctx.state === 'suspended') voice.ctx.resume();
+  const now = voice.ctx.currentTime;
+  const blend = 1 - Math.exp(-dt / 0.35);
+  voice.master.gain.value += ((inside ? 0.16 : 0) - voice.master.gain.value) * blend;
+  const breath = 0.5 + 0.5 * Math.sin(now * 0.55);
+  const swell = inside ? 0.08 + breath * breath * 0.28 : 0;
+  voice.noiseGain.gain.value += (swell - voice.noiseGain.gain.value) * blend;
+  voice.growl.frequency.value = 110 + breath * 90 + Math.sin(now * 0.17) * 30;
+  voice.rumble.frequency.value = 46 + Math.sin(now * 0.23) * 7;
+  voice.sub.frequency.value = 31 + Math.sin(now * 0.13) * 4;
 }
 
 function envGain(ctx, start, peak, attack, release) {
@@ -3493,6 +3570,7 @@ function frame(time, frame) {
   placeInCell();
   containPlayer();
   const dt = Math.min(clock.getDelta(), 0.05);
+  updateRoar(dt);
   for (let i = jobs.length - 1; i >= 0; i -= 1) {
     jobs[i].t += dt;
     const k = Math.min(1, jobs[i].t / jobs[i].d);
