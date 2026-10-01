@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { proxyMaterial } from './assets.js';
+import { legacy } from './flags.js';
 import { applyWorldUv } from './uv.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -94,6 +95,8 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   let onDip = null;
   let onHaptic = null;
   let drawHand = null;
+  let drawTickSent = false;
+  let drawRumbleAt = 0;
   const deck = roof?.y ?? 0;
   const puzzleX = roof ? (roof.x0 + roof.x1) * 0.5 - 0.15 : -0.55;
   const puzzleZ = roof ? 1.35 : 2.18;
@@ -458,6 +461,8 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     handWorld(controller, tmp);
     if (tmp.distanceTo(rest) > 0.36) return false;
     drawHand = controller;
+    drawTickSent = false;
+    drawRumbleAt = 0;
     return true;
   }
 
@@ -469,11 +474,13 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     else {
       nock.copy(nockRest);
       poseString();
+      if (!legacy('bow')) onHaptic?.(controller, 0.22, 28);
     }
     return true;
   }
 
   function loose(power) {
+    if (!legacy('bow')) arrowMask = null;
     let arrow = quiver.find((item) => !item.visible);
     if (!arrow) {
       arrow = makeArrow();
@@ -497,6 +504,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     arrow.userData.stuckFish = false;
     arrow.userData.stuckBird = false;
     arrow.userData.hurt = false;
+    arrow.userData.launchFrom = to.clone();
     poseArrow(arrow, from, to);
     nock.copy(nockRest);
     poseString();
@@ -534,21 +542,35 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   }
 
   let arrowMask = null;
+  function blocksArrow(mesh) {
+    let node = mesh;
+    while (node) {
+      if (node.userData?.noArrow || node.userData?.arrow || node.userData?.fishHost) return false;
+      if (node === bow) return false;
+      for (const held of vrHands.values()) {
+        if (node === held) return false;
+      }
+      node = node.parent;
+    }
+    return true;
+  }
   function arrowSolids() {
     if (arrowMask) return arrowMask;
     arrowMask = [];
-    const underShadow = (mesh) => {
-      let node = mesh;
-      while (node) {
-        if (node.userData?.fishHost) return true;
-        node = node.parent;
-      }
-      return false;
-    };
     scene.traverse((obj) => {
       if (!obj.isMesh || !obj.geometry) return;
-      if (obj.userData?.water || obj.userData?.backdrop || obj.userData?.arrow) return;
-      if (underShadow(obj)) return;
+      let node = obj;
+      let attached = false;
+      while (node) {
+        if (node === scene) {
+          attached = true;
+          break;
+        }
+        node = node.parent;
+      }
+      if (!attached) return;
+      if (obj.userData?.water || obj.userData?.backdrop) return;
+      if (!blocksArrow(obj)) return;
       const count = obj.geometry.attributes?.position?.count || 0;
       if (count > 2500 && !obj.userData?.fishBody) return;
       arrowMask.push(obj);
@@ -623,6 +645,20 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       }
       nock.set(nockRest.x + dx, nockRest.y + dy, nockRest.z + pull);
       poseString();
+      if (!legacy('bow')) {
+        const drawn = nock.z - nockRest.z;
+        if (!drawTickSent && drawn >= 0.16) {
+          drawTickSent = true;
+          onHaptic?.(drawHand, 0.25, 15);
+        }
+        if (drawn > 0.4) {
+          const now = performance.now();
+          if (now - drawRumbleAt >= 80) {
+            drawRumbleAt = now;
+            onHaptic?.(drawHand, 0.1 + 0.4 * (drawn / 0.58), 20);
+          }
+        }
+      }
     } else if (!drawHand) {
       nock.copy(nockRest);
       poseString();
@@ -653,6 +689,11 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
         continue;
       }
       arrowAim.copy(vel).multiplyScalar(1 / (vel.length() || 1));
+      if (arrow.userData.launchFrom) {
+        const shelfPoint = arrow.userData.launchFrom;
+        if (shelfPoint.dot(arrowAim) > arrowPrev.dot(arrowAim)) arrowPrev.copy(shelfPoint);
+        arrow.userData.launchFrom = null;
+      }
       arrow.quaternion.setFromUnitVectors(upAxis, arrowAim);
       arrowRay.set(arrowPrev, arrowAim);
       arrowRay.far = step + 0.08;
@@ -1136,6 +1177,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     spawnChips(object, 22, 1.8);
     object.visible = false;
     scene.remove(object);
+    if (!legacy('bow')) arrowMask = null;
   }
 
   function hurt(object) {

@@ -932,13 +932,14 @@ function setupController(index) {
     onXrRelease(controller);
   });
   scene.add(controller);
+  controller.userData.noArrow = true;
 
   const beam = new THREE.Mesh(
     new THREE.CylinderGeometry(0.004, 0.0014, 1, 8),
     new THREE.MeshBasicMaterial({ color: 0x3ef0c4 }),
   );
   beam.geometry.translate(0, 0.5, 0);
-  beam.rotation.x = Math.PI / 2;
+  beam.rotation.x = -Math.PI / 2;
   beam.visible = false;
   controller.add(beam);
   const dot = new THREE.Mesh(
@@ -951,6 +952,7 @@ function setupController(index) {
 
   const grip = renderer.xr.getControllerGrip(index);
   controller.userData.grip = grip;
+  grip.userData.noArrow = true;
   grip.add(controllerFactory.createControllerModel(grip));
   scene.add(grip);
   return controller;
