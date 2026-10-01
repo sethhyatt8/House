@@ -5,7 +5,7 @@ import { proxyMaterial } from './assets.js';
 // left hand works the starboard oar. A starboard-only power stroke yaws the bow to port:
 // positive yaw, counter-clockwise from above. From the seat, the stern swings to the left.
 const BLADE = 78;
-const OARLOCK = { x: 0.5, y: 0.33, z: 0.32 };
+const OARLOCK = { x: 0.5, y: 0.34, z: 0.02 };
 
 export function createBoatSim(aboard = true) {
   return {
@@ -67,6 +67,7 @@ export function stepBoat(sim, dt, input = {}) {
   sim.vx += (ax * cos + az * sin) * dt;
   sim.vz += (ax * -sin + az * cos) * dt;
   sim.yawRate += (torque / sim.inertia - 1.8 * sim.yawRate) * dt;
+  sim.yawRate = THREE.MathUtils.clamp(sim.yawRate, -1.2, 1.2);
   sim.yaw += sim.yawRate * dt;
 }
 
@@ -101,7 +102,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     loops.push(loop);
   });
   const oars = [];
-  const restDir = new THREE.Vector3(0.25, -0.05, -0.97).normalize();
+  const restDir = new THREE.Vector3(0.62, -0.05, -0.78).normalize();
   [-1, 1].forEach((side) => {
     const fork = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.04), trim);
     fork.position.set(side * OARLOCK.x, OARLOCK.y, OARLOCK.z);
@@ -112,7 +113,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     oar.add(shaft);
     const gripZone = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.12, 6), leather);
     gripZone.rotation.z = Math.PI / 2;
-    gripZone.position.x = -side * 0.56;
+    gripZone.position.x = -side * 0.3;
     oar.add(gripZone);
     const blade = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, 0.45), oarMat);
     blade.position.set(side * 1.48, 0, 0);
@@ -262,12 +263,13 @@ export function createCanoe(scene, targets, cave, assets, water) {
   }
 
   function tryOar(controller, points) {
-    const handle = nearest(points, oars.map((oar) => oar.userData.gripZone), 0.3);
+    const handle = nearest(points, oars.map((oar) => oar.userData.gripZone), 0.42);
     if (!handle) return false;
     const oar = handle.parent;
     const name = oar.userData.name;
     if (oarGrips[name]) return false;
     oarGrips[name] = controller;
+    oar.userData.prevBlade.set(0, 0, 0);
     onHaptic?.(controller, 0.8, 60);
     snapHand(controller, handle);
     return true;
@@ -392,7 +394,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
       if (prev.lengthSq() > 0 && dt > 0) {
         const vel = blade.clone().sub(prev).multiplyScalar(1 / dt);
         group.worldToLocal(vel.add(group.position));
-        along = vel.z;
+        along = THREE.MathUtils.clamp(vel.z, -2.2, 2.2);
       }
       prev.copy(blade);
       const caught = k > 0.3 && along > 0.2;
