@@ -2512,6 +2512,35 @@ function createCanoe(scene, targets, cave) {
   return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center };
 }
 
+function applyWorldUv(mesh, tile) {
+  mesh.updateWorldMatrix(true, false);
+  const g = mesh.geometry;
+  const pos = g.attributes.position;
+  const nor = g.attributes.normal;
+  const uv = g.attributes.uv;
+  const m = mesh.matrixWorld;
+  const nm = new THREE.Matrix3().getNormalMatrix(m);
+  const p = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 1) {
+    p.fromBufferAttribute(pos, i).applyMatrix4(m);
+    n.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize();
+    const ax = Math.abs(n.x);
+    const ay = Math.abs(n.y);
+    const az = Math.abs(n.z);
+    if (ax >= ay && ax >= az) uv.setXY(i, (n.x > 0 ? -p.z : p.z) / tile, p.y / tile);
+    else if (ay >= az) uv.setXY(i, p.x / tile, (n.y > 0 ? -p.z : p.z) / tile);
+    else uv.setXY(i, (n.z > 0 ? p.x : -p.x) / tile, p.y / tile);
+  }
+  uv.needsUpdate = true;
+}
+
+function tintRock(material) {
+  if (!material) return;
+  const tint = Number(new URLSearchParams(location.search).get('rocktint'));
+  if (Number.isFinite(tint) && tint > 0) material.color.setScalar(tint);
+}
+
 function createCliff(scene, targets, assets) {
   const params = new URLSearchParams(location.search);
   const skyTex = assets?.feature('sky') ? assets.texture('sky_backdrop') : null;
@@ -2711,6 +2740,21 @@ function createCliff(scene, targets, assets) {
     haunch.rotation.x = side * -0.55;
     scene.add(haunch);
   });
+
+  const rockCliff = assets?.feature('rock') ? assets.material('rock_cliff') : null;
+  const rockFloor = assets?.feature('rock') ? assets.material('rock_floor') : null;
+  if (rockCliff && rockFloor) {
+    tintRock(rockCliff);
+    tintRock(rockFloor);
+    const floorish = new Set([beach, pad, ...ladder.children.filter((child) => child.material === rock)]);
+    scene.traverse((object) => {
+      if (!object.isMesh || object.material !== rock) return;
+      const floorRock = floorish.has(object);
+      applyWorldUv(object, floorRock ? 2.0 : 2.42);
+      object.material = floorRock ? rockFloor : rockCliff;
+    });
+    stoneMap.dispose();
+  }
 
   const lip = new THREE.Mesh(
     new THREE.BoxGeometry(0.22, 0.08, 5.6),
@@ -3322,6 +3366,15 @@ export function createWorld({ assets } = {}) {
   [[-1.4, 0.55, 0.85], [0.2, 0.7, 1.05], [1.7, 0.42, 0.75]].forEach(([z, hang, depth]) => {
     addRock(0.85, 0.38, depth, coverFrom + 0.15, 2.55 - hang * 0.15, z);
   });
+  const roomRock = assets?.feature('rock') ? assets.material('rock_cliff') : null;
+  if (roomRock) {
+    tintRock(roomRock);
+    scene.traverse((object) => {
+      if (!object.isMesh || object.material !== wallMat) return;
+      applyWorldUv(object, 2.42);
+      object.material = roomRock;
+    });
+  }
   const roofTop = 2.95 + 0.31;
   const roofDepth = roomZ * 2 + 1.15;
   const roof = {
