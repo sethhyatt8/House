@@ -231,7 +231,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     console.info('[hatchet] blade marker', blade.position.toArray(), 'inside model', modelBox.containsPoint(bladeCenter));
   }
   hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: START_CELL.hatchet.y, blade, grip, hatchetModel };
-  holdPose(hatchet, [0, -0.012, 0.06], [-Math.PI / 2, 0.08, -0.45]);
+  holdPose(hatchet, [0, -0.05, 0], [0, Math.PI / 2, 0]);
   scene.add(hatchet);
   enlist(hatchet);
 
