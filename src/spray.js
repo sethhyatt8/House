@@ -67,7 +67,7 @@ export function createSprayCan(color, shared) {
 }
 
 export function createSprayFx(scene) {
-  const count = 600;
+  const count = 8000;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) positions[i * 3 + 1] = -50;
@@ -75,10 +75,10 @@ export function createSprayFx(scene) {
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
-    size: 0.012,
+    size: 0.0028,
     vertexColors: true,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.72,
     depthWrite: false,
   });
   const points = new THREE.Points(geometry, material);
@@ -86,30 +86,29 @@ export function createSprayFx(scene) {
   points.raycast = () => {};
   points.userData.noArrow = true;
   scene.add(points);
+  const slots = Array.from({ length: count }, (_, index) => ({ index, life: 0 }));
   const live = [];
   let cursor = 0;
   const color = new THREE.Color();
 
   function emit(origin, direction, hex, speed, life, mist) {
-    const index = cursor;
+    const particle = slots[cursor];
     cursor = (cursor + 1) % count;
-    const slot = live.find((item) => item.index === index);
-    const particle = slot || { index };
-    if (!slot) live.push(particle);
+    if (particle.life <= 0) live.push(particle);
     particle.age = 0;
     particle.life = life;
     particle.mist = mist;
-    particle.v = direction.clone().multiplyScalar(speed);
-    if (!mist) particle.v.y -= 0.2;
+    particle.vx = direction.x * speed;
+    particle.vy = direction.y * speed - (mist ? 0.05 : 0.15);
+    particle.vz = direction.z * speed;
     color.set(hex);
     particle.rgb = [color.r, color.g, color.b];
-    positions[index * 3] = origin.x;
-    positions[index * 3 + 1] = origin.y;
-    positions[index * 3 + 2] = origin.z;
-    color.set(hex);
-    colors[index * 3] = color.r;
-    colors[index * 3 + 1] = color.g;
-    colors[index * 3 + 2] = color.b;
+    positions[particle.index * 3] = origin.x;
+    positions[particle.index * 3 + 1] = origin.y;
+    positions[particle.index * 3 + 2] = origin.z;
+    colors[particle.index * 3] = color.r;
+    colors[particle.index * 3 + 1] = color.g;
+    colors[particle.index * 3 + 2] = color.b;
   }
 
   function update(dt) {
@@ -118,16 +117,17 @@ export function createSprayFx(scene) {
       particle.age += dt;
       const index = particle.index;
       if (particle.age >= particle.life) {
+        particle.life = 0;
         positions[index * 3 + 1] = -50;
         live.splice(i, 1);
         continue;
       }
-      particle.v.y -= (particle.mist ? 0.4 : 2.2) * dt;
-      positions[index * 3] += particle.v.x * dt;
-      positions[index * 3 + 1] += particle.v.y * dt;
-      positions[index * 3 + 2] += particle.v.z * dt;
+      particle.vy -= (particle.mist ? 0.35 : 0.8) * dt;
+      positions[index * 3] += particle.vx * dt;
+      positions[index * 3 + 1] += particle.vy * dt;
+      positions[index * 3 + 2] += particle.vz * dt;
       const fade = 1 - particle.age / particle.life;
-      const scale = particle.mist ? fade : 0.35 + 0.65 * fade;
+      const scale = particle.mist ? fade : 0.45 + 0.55 * fade;
       colors[index * 3] = particle.rgb[0] * scale;
       colors[index * 3 + 1] = particle.rgb[1] * scale;
       colors[index * 3 + 2] = particle.rgb[2] * scale;

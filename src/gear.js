@@ -1519,15 +1519,17 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
           flow,
           dt,
         });
-        const burst = Math.max(1, Math.round(140 * flow * dt));
+        const burst = Math.max(16, Math.round(4200 * flow * dt));
+        const reach = data.reach * 1.6;
         sprayDirections(tmp2, data.cone, burst).forEach((sample, index) => {
-          const hit = distances[index % Math.max(1, distances.length)] ?? data.reach * 1.6;
-          const speed = 5 + Math.random() * 2;
-          sprayFx.emit(tmp, sample, data.color, speed, Math.min(hit, data.reach * 1.6) / speed, false);
+          const hit = distances[index % Math.max(1, distances.length)] ?? reach;
+          const speed = 6 + Math.random() * 2.5;
+          sprayFx.emit(tmp, sample, data.color, speed, Math.min(hit, reach) / speed, false);
         });
-        if (Math.random() < 8 * flow * dt) {
-          sprayFx.emit(tmp, tmp2, data.color, 1.5, 0.4, true);
-        }
+        const mistCount = Math.max(6, Math.round(1400 * flow * dt));
+        sprayDirections(tmp2, data.cone * 1.35, mistCount).forEach((sample) => {
+          sprayFx.emit(tmp, sample, data.color, 1.4 + Math.random() * 1.1, 0.55 + Math.random() * 0.35, true);
+        });
         const now = performance.now();
         if (now - (data.sprayPulseAt || 0) >= 60) {
           data.sprayPulseAt = now;
