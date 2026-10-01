@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { proxyMaterial } from './assets.js';
-import { applyWorldUv } from './world.js';
+import { applyWorldUv } from './uv.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const CAPACITY = 100;
@@ -764,14 +765,27 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   scene.add(menu);
 
   const tileMat = new THREE.MeshStandardMaterial({ color: 0xf3efe6, roughness: 0.55 });
+  const roundedTiles = !!assets?.feature('props4');
+  const tileBodyGeo = roundedTiles ? new RoundedBoxGeometry(0.072, 0.104, 0.016, 2, 0.004) : null;
+  const tileFaceGeo = roundedTiles ? new THREE.PlaneGeometry(0.064, 0.096) : null;
   for (let rank = 1; rank <= 9; rank += 1) {
     const tile = new THREE.Group();
     const faceMat = new THREE.MeshStandardMaterial({ map: paintTile(rank), roughness: 0.5 });
     const face = new THREE.Mesh(
       new THREE.BoxGeometry(0.072, 0.104, 0.016),
-      [tileMat, tileMat, tileMat, tileMat, faceMat, tileMat],
+      roundedTiles ? proxyMaterial : [tileMat, tileMat, tileMat, tileMat, faceMat, tileMat],
     );
+    if (roundedTiles) face.castShadow = false;
     tile.add(face);
+    if (roundedTiles) {
+      const body = new THREE.Mesh(tileBodyGeo, tileMat);
+      body.raycast = () => {};
+      body.castShadow = true;
+      const printed = new THREE.Mesh(tileFaceGeo, faceMat);
+      printed.raycast = () => {};
+      printed.position.z = 0.0081;
+      tile.add(body, printed);
+    }
     tile.userData = {
       type: 'gear',
       gear: 'tile',
@@ -822,6 +836,11 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
 
   const plinth = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.28, 0.28), stone);
   plinth.position.set(puzzleX, deck + 0.14, puzzleZ);
+  const floorRock = assets?.feature('props4') ? assets.material('rock_floor') : null;
+  if (floorRock) {
+    plinth.material = floorRock.clone();
+    applyWorldUv(plinth, 2.0);
+  }
   plinth.castShadow = true;
   plinth.receiveShadow = true;
   scene.add(plinth);
