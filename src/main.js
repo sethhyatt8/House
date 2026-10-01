@@ -812,7 +812,9 @@ function groundUnder(x, z, feetY) {
   const shaft = world.shaft;
   if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.42 && Math.abs(z - shaft.z) < 0.5) return shaft.floor;
   const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
-  if (overFloor) return standHeight(x, z, feetY, 0);
+  const cell = START_CELL.floor;
+  const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
+  if (overFloor || inCell) return standHeight(x, z, feetY, 0);
   const yard = world.yard;
   if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
     return standHeight(x, z, feetY, yard.y);
