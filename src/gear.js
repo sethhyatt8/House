@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { proxyMaterial } from './assets.js';
+import { applyWorldUv } from './world.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const CAPACITY = 100;
@@ -93,6 +94,29 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const deck = roof?.y ?? 0;
   const puzzleX = roof ? (roof.x0 + roof.x1) * 0.5 - 0.15 : -0.55;
   const puzzleZ = roof ? 1.35 : 2.18;
+  const gearModels = assets?.feature('gear');
+
+  function addModel(parent, id) {
+    if (!gearModels) return null;
+    const model = assets.instance(id);
+    if (!model) return null;
+    parent.add(model);
+    model.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      child.raycast = () => {};
+    });
+    return model;
+  }
+
+  function hideParts(parts) {
+    for (const part of parts) {
+      part.material = proxyMaterial;
+      part.castShadow = false;
+      part.receiveShadow = false;
+    }
+  }
 
   function enlist(object) {
     if (!targets.includes(object)) targets.push(object);
@@ -244,6 +268,15 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   torchThumb.rotation.z = 0.9;
   torchGrip.add(torchThumb);
   torch.add(torchGrip);
+  if (gearModels && assets.gltf('torch')) {
+    torch.children.forEach((child) => {
+      if (!child.isMesh || !child.material?.isMeshStandardMaterial) return;
+      child.material = proxyMaterial;
+      child.castShadow = false;
+      child.receiveShadow = false;
+    });
+    addModel(torch, 'torch');
+  }
   torch.position.set(cave.x1 - 0.85, cave.floor, cave.z + 0.85);
   torch.rotation.y = -0.6;
   torch.rotation.z = 0.08;
@@ -274,6 +307,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     const brushPalm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.036, 0.04), torchSkin);
     brushGrip.add(brushPalm);
     brush.add(brushGrip);
+    if (gearModels && assets.gltf('brush')) {
+      hideParts([handle, ferrule, bristles]);
+      addModel(brush, 'brush');
+    }
     brush.position.set(gallery.brushAt.x, gallery.brushAt.y, gallery.brushAt.z);
     brush.rotation.z = Math.PI / 2;
     brush.rotation.y = 0.4;
@@ -300,10 +337,12 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   bow.add(riser);
   const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.11, 8), leatherDark);
   bow.add(wrap);
-  const tipHigh = new THREE.Vector3(0, 0.66, 0.34);
-  const tipLow = new THREE.Vector3(0, -0.54, 0.3);
+  const bowHasModel = !!(gearModels && assets.gltf('bow'));
+  const tipHigh = new THREE.Vector3(0, 0.66, bowHasModel ? 0.304 : 0.34);
+  const tipLow = new THREE.Vector3(0, -0.54, bowHasModel ? 0.304 : 0.3);
   const nockRest = new THREE.Vector3(0, 0.04, 0.28);
   const shelf = new THREE.Vector3(0, 0.04, 0.02);
+  const limbs = [];
   const addLimb = (from, to) => {
     const steps = 4;
     for (let i = 0; i < steps; i += 1) {
@@ -318,10 +357,15 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       seg.scale.y = a.distanceTo(b);
       seg.castShadow = true;
       bow.add(seg);
+      limbs.push(seg);
     }
   };
   addLimb(new THREE.Vector3(0, 0.1, 0.01), tipHigh);
   addLimb(new THREE.Vector3(0, -0.1, 0.01), tipLow);
+  if (bowHasModel) {
+    hideParts([riser, wrap, ...limbs]);
+    addModel(bow, 'bow');
+  }
   const stringHigh = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 1, 5), stringMat);
   const stringLow = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 1, 5), stringMat);
   bow.add(stringHigh, stringLow);
@@ -342,11 +386,17 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     const head = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.07, 6), metal);
     head.position.y = 0.65;
     arrow.add(head);
+    const vanes = [];
     for (let i = 0; i < 3; i += 1) {
       const vane = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.09, 0.028), fletchMat);
       vane.position.set(0, 0.06, 0);
       vane.rotation.y = i * (Math.PI * 2 / 3);
       arrow.add(vane);
+      vanes.push(vane);
+    }
+    if (gearModels && assets.gltf('arrow')) {
+      hideParts([shaft, head, ...vanes]);
+      addModel(arrow, 'arrow');
     }
     arrow.userData.arrow = true;
     return arrow;
@@ -645,12 +695,16 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     }
   }
 
+  const roughWood = gearModels ? assets.material('rough_wood') : null;
+  const plankMat = roughWood ? roughWood.clone() : wood;
+  if (roughWood) plankMat.color.set(0xc49a74);
   for (let i = 0; i < 5; i += 1) {
-    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.56), wood);
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.14, 0.56), plankMat);
     plank.position.set(2.28, 0.66 + i * 0.12, 0.12);
     plank.castShadow = true;
     plank.receiveShadow = true;
     plank.userData = { type: 'gear', gear: 'board', hp: 1, dead: false };
+    if (roughWood) applyWorldUv(plank, 0.5);
     scene.add(plank);
     enlist(plank);
     choppables.push(plank);
@@ -669,6 +723,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   strap.rotation.y = Math.PI / 2;
   strap.position.set(0, 0.12, 0);
   bag.add(strap);
+  if (gearModels && assets.gltf('bag')) {
+    hideParts([body, flap, strap]);
+    addModel(bag, 'bag');
+  }
   bag.position.set(1.85, cave.floor + 0.11, -3.7);
   bag.rotation.y = 0.5;
   bag.userData = { type: 'gear', gear: 'bag', floorY: cave.floor + 0.11, houseY: 0.12 };
@@ -748,6 +806,15 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   });
   crab.position.set(1.92, 0.05, -0.55);
   crab.rotation.y = 0.8;
+  if (gearModels && assets.gltf('crab')) {
+    crab.traverse((child) => {
+      if (!child.isMesh) return;
+      child.material = proxyMaterial;
+      child.castShadow = false;
+      child.receiveShadow = false;
+    });
+    addModel(crab, 'crab');
+  }
   crab.userData = { type: 'gear', gear: 'crab', hp: 2, dead: false };
   scene.add(crab);
   enlist(crab);
@@ -778,6 +845,12 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   lid.position.set(0, 0.2, -0.12);
   lid.castShadow = true;
   chest.add(lid);
+  let chestLid = null;
+  if (gearModels && assets.gltf('chest')) {
+    hideParts([chestBody, lid]);
+    const chestVis = addModel(chest, 'chest');
+    chestLid = chestVis?.getObjectByName('treasure_chest_lid') || null;
+  }
   chest.userData = { open: 0 };
   scene.add(chest);
   refreshPockets();
@@ -1197,6 +1270,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     const want = chest.userData.want || 0;
     chest.userData.open = THREE.MathUtils.damp(chest.userData.open, want, 4, dt);
     lid.rotation.x = -chest.userData.open * 1.35;
+    if (chestLid) chestLid.rotation.x = lid.rotation.x;
     for (const plank of falls) {
       plank.userData.vy -= 9.2 * dt;
       plank.position.y += plank.userData.vy * dt;
