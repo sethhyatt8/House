@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { applyPlacements, proxyMaterial } from './assets.js';
+import { createCanoe as createPhysicalCanoe } from './canoe.js';
+import { legacy } from './flags.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createGallery } from './gallery.js';
@@ -2257,6 +2259,7 @@ function moonTexture() {
 }
 
 const waterWaveGlsl = `
+  uniform vec4 uBoat;
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
   }
@@ -2281,6 +2284,15 @@ const waterWaveGlsl = `
     float band = exp(-abs(dist - front) * 3.6);
     return sin(dist * 8.0 - age * 13.0) * band * amp * exp(-age * 1.35) * live;
   }
+  float boatEllipse(vec2 xz, float ax, float az) {
+    if (uBoat.w < 0.5) return 2.0;
+    float c = cos(uBoat.z);
+    float s = sin(uBoat.z);
+    vec2 d = xz - uBoat.xy;
+    float lx = d.x * c - d.y * s;
+    float lz = d.x * s + d.y * c;
+    return length(vec2(lx / ax, lz / az));
+  }
   float heightAt(vec2 xz) {
     vec2 wind = normalize(vec2(-0.22, 0.98));
     vec2 flow = xz - wind * uTime * 0.62;
@@ -2301,7 +2313,8 @@ const waterWaveGlsl = `
     float ripple = sin(along * freq * 1.7 + crossw * 0.2 - uTime * 2.2 + phase);
     float sea = (primary * 0.7 + ripple * 0.4) * amp;
     float wake = ringWave(uRings[0], xz) + ringWave(uRings[1], xz) + ringWave(uRings[2], xz) + ringWave(uRings[3], xz);
-    return sea * 0.11 + wake * 0.045;
+    float mask = 1.0 - smoothstep(1.0, 1.14, boatEllipse(xz, 0.85, 2.2));
+    return sea * (1.0 - mask) * 0.11 + wake * 0.045;
   }
 `;
 
@@ -2703,7 +2716,7 @@ function canoeHullGeometry() {
   return geometry;
 }
 
-function createCanoe(scene, targets, cave, assets) {
+function createLegacyCanoe(scene, targets, cave, assets) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a30, roughness: 0.74, side: THREE.DoubleSide });
   const trim = new THREE.MeshStandardMaterial({ color: 0x4e3422, roughness: 0.82 });
   const oarMat = new THREE.MeshStandardMaterial({ color: 0x9a7048, roughness: 0.68 });
@@ -2961,7 +2974,8 @@ function createCliff(scene, targets, assets) {
     new THREE.BoxGeometry(3.4, 0.16, caveZ1 - caveZ0),
     new THREE.MeshStandardMaterial({ color: 0x8a8176, roughness: 1 }),
   );
-  shoal.position.set(-4.2, WATER_Y - 0.24, caveMid);
+  shoal.position.set(legacy('canoe') ? -4.2 : -5.5, WATER_Y - 0.24, caveMid);
+  if (!legacy('canoe')) shoal.scale.x = 2.2 / 3.4;
   scene.add(shoal);
   const caveLamp = new THREE.PointLight(0xc9d6e2, 0.85, 16, 1.4);
   caveLamp.position.set(-2.4, -5.4, caveMid);
@@ -3019,6 +3033,32 @@ function createCliff(scene, targets, assets) {
     wetX: -3.15,
     lane: 2.8,
   };
+  if (!legacy('canoe')) {
+    const shallowY = WATER_Y - 0.6;
+    cave.shallows = {
+      x0: -4.4,
+      x1: cave.x0,
+      z0: cave.z0,
+      z1: cave.z1,
+      floorY: shallowY,
+      rampTo: -2.25,
+    };
+    const floorRock = assets?.feature('rock') ? assets.material('rock_floor') : null;
+    const shallowMat = floorRock ? floorRock.clone() : rock;
+    const spanZ = cave.z1 - cave.z0;
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.18, spanZ), shallowMat);
+    slab.position.set((-4.4 + -2.25) / 2, shallowY - 0.09, cave.z);
+    slab.receiveShadow = true;
+    scene.add(slab);
+    if (floorRock) applyWorldUv(slab, 2.0);
+    const rampLen = Math.hypot(cave.x0 - -2.25, beachTop - shallowY);
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampLen, 0.16, spanZ), shallowMat);
+    ramp.position.set((cave.x0 + -2.25) / 2, (beachTop + shallowY) / 2, cave.z);
+    ramp.rotation.z = Math.atan2(beachTop - shallowY, cave.x0 - -2.25);
+    ramp.receiveShadow = true;
+    scene.add(ramp);
+    if (floorRock) applyWorldUv(ramp, 2.0);
+  }
   const shaft = { x: rungX - 0.42, z: caveMid, floor: beachTop };
   const jamb = (z) => {
     const edge = new THREE.Mesh(new THREE.BoxGeometry(0.1, shaftTop - caveTop, 0.08), rock);
@@ -3108,6 +3148,7 @@ function createCliff(scene, targets, assets) {
         uMoon: { value: params.get('moonpath') === 'hdri'
           ? new THREE.Vector3(-0.9701, 0.2385, 0.0441)
           : new THREE.Vector3(-0.45, 0.72, 0.12) },
+        uBoat: { value: new THREE.Vector4(0, 0, 0, 0) },
       },
     ]),
     vertexShader: `
@@ -3146,6 +3187,7 @@ function createCliff(scene, targets, assets) {
       varying float vHeight;
       ${waterWaveGlsl}
       void main() {
+        if (boatEllipse(vWorldPos.xz, 0.5, 1.82) < 1.0) discard;
         vec2 xz = vWorldPos.xz;
         float e = 0.2;
         float h = heightAt(xz);
@@ -3246,6 +3288,21 @@ function createCliff(scene, targets, assets) {
     }
   }
 
+  function ripple(x, z, strength = 0.45) {
+    ringSlots[ringCursor].set(x, z, 0, strength);
+    ringCursor = (ringCursor + 1) % ringSlots.length;
+    for (let i = 0; i < 6; i += 1) {
+      spray(
+        x + (Math.random() - 0.5) * 0.25,
+        z + (Math.random() - 0.5) * 0.25,
+        0.35,
+        0.25,
+        0.12 + Math.random() * 0.12,
+        0.35,
+      );
+    }
+  }
+
   function update(dt) {
     waterMat.uniforms.uTime.value += dt;
     ringSlots.forEach((slot) => {
@@ -3283,7 +3340,7 @@ function createCliff(scene, targets, assets) {
   cave.tunnel = gallery.tunnel;
   cave.room = gallery.room;
 
-  return { update, splash, cave, shaft, gallery };
+  return { update, splash, ripple, cave, shaft, gallery, waterMat };
 }
 
 function plateTexture() {
@@ -3811,7 +3868,29 @@ export function createWorld({ assets } = {}) {
   });
   const puddles = createPuddles(scene, floor, floorMap);
   const cliff = createCliff(scene, targets, assets);
-  const canoe = createCanoe(scene, targets, cliff.cave, assets);
+  function shallowFloor(x, z) {
+    const shelf = cliff.cave.shallows;
+    if (!shelf || z < shelf.z0 || z > shelf.z1) return null;
+    if (x <= shelf.x1 && x >= shelf.rampTo) {
+      const t = (shelf.x1 - x) / (shelf.x1 - shelf.rampTo);
+      return cliff.cave.floor + (shelf.floorY - cliff.cave.floor) * t;
+    }
+    if (x < shelf.rampTo && x >= shelf.x0) return shelf.floorY;
+    return null;
+  }
+  const canoe = legacy('canoe')
+    ? createLegacyCanoe(scene, targets, cliff.cave, assets)
+    : createPhysicalCanoe(scene, targets, cliff.cave, assets, {
+      level: WATER_Y,
+      uniform: cliff.waterMat.uniforms.uBoat,
+      ground(x, z) {
+        const home = cliff.cave;
+        if (x >= home.x0 && x <= home.x1 && z >= home.z0 && z <= home.z1) return home.floor;
+        const shelf = shallowFloor(x, z);
+        return shelf == null ? -Infinity : shelf;
+      },
+      ripple: cliff.ripple,
+    });
 
   const hemi = new THREE.HemisphereLight(0x8ea4cc, 0x2a2622, 0.26);
   scene.add(hemi);
@@ -3980,6 +4059,8 @@ export function createWorld({ assets } = {}) {
     shaft: cliff.shaft,
     gallery: cliff.gallery,
     splash: cliff.splash,
+    ripple: cliff.ripple,
+    shallowFloor,
     startBite: bite.start,
     clearBite: bite.clear,
     biteActive: bite.active,

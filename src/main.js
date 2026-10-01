@@ -8,6 +8,7 @@ import { colorById, GRID_X, GRID_Z, HEIGHT, heightById, LAYER, MAX_PEDESTALS, pa
 import { brickLocalPosition, canPlaceAssembly, columnTop, connectedBricks, createGrid, findAssemblySnap, findSnap, footprintOf, occupy, release, rotatePieceRecords } from './grid.js';
 import { hostRoomCode, openRoom, watchCodeFromUrl } from './watch.js';
 import { createAssetManager } from './assets.js';
+import { legacy } from './flags.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 
 const statusEl = document.getElementById('status');
@@ -102,6 +103,7 @@ world.gear.setSounds({
   rattle: playRattle,
 });
 world.gear.setHaptics(pulseController);
+world.gear.setGround((x, z) => world.shallowFloor?.(x, z) ?? null);
 world.canoe.setHaptics(pulseController);
 const grid = createGrid();
 const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
@@ -729,6 +731,8 @@ function groundUnder(x, z, feetY) {
   if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
     return standHeight(x, z, feetY, yard.y);
   }
+  const shelf = world.shallowFloor?.(x, z);
+  if (shelf != null && feetY < -1) return shelf;
   return WATER_Y;
 }
 
@@ -785,7 +789,8 @@ function updatePlayerFall(dt) {
   const gap = feetY - ground;
   if (gap <= 0.12) {
     if (gap < -0.01) landShift(ground, feetY, head);
-    if (fallVy < -1.2 && ground <= WATER_Y + 0.05) {
+    const wading = world.shallowFloor?.(head.x, head.z) != null;
+    if (!wading && fallVy < -1.2 && ground <= WATER_Y + 0.05) {
       fallVy = 0;
       startWaterBite(head.x, head.z);
       return;
@@ -798,7 +803,8 @@ function updatePlayerFall(dt) {
   const next = feetY + fallVy * dt;
   if (next <= ground) {
     landShift(ground, feetY, head);
-    if (ground <= WATER_Y + 0.05) {
+    const wading = world.shallowFloor?.(head.x, head.z) != null;
+    if (!wading && ground <= WATER_Y + 0.05) {
       fallVy = 0;
       startWaterBite(head.x, head.z);
       return;
@@ -2375,6 +2381,7 @@ function handNearBoat(points) {
 }
 
 function gripBoatEnd(controller) {
+  if (!legacy('canoe') && world.canoe.grab) return world.canoe.grab(controller, handPoints(controller));
   const points = handPoints(controller);
   const near = closestBoat(world.canoe.ends, points, 0.42);
   if (!near && !handNearBoat(points)) return false;
@@ -2386,6 +2393,7 @@ function gripBoatEnd(controller) {
 }
 
 function gripOar(controller) {
+  if (!legacy('row') && world.canoe.tryOar) return world.canoe.tryOar(controller, handPoints(controller));
   if (!aboard) return false;
   const near = closestBoat(world.canoe.oars, handPoints(controller), 0.42);
   if (!near) return false;
@@ -2433,6 +2441,7 @@ function boardCanoe() {
 }
 
 const lastSeat = new THREE.Vector3();
+let lastBoatYaw = 0;
 
 function syncAboard() {
   if (!aboard) return;
@@ -2440,17 +2449,37 @@ function syncAboard() {
   const dx = seat.x - lastSeat.x;
   const dy = seat.y - lastSeat.y;
   const dz = seat.z - lastSeat.z;
-  if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 0.0001) return;
-  if (renderer.xr.isPresenting) shiftPlayer(dx, dy, dz);
-  else {
-    camera.position.x += dx;
-    camera.position.y += dy;
-    camera.position.z += dz;
-    controls.target.x += dx;
-    controls.target.y += dy;
-    controls.target.z += dz;
+  const yaw = world.canoe.group.rotation.y;
+  const deltaYaw = yaw - lastBoatYaw;
+  if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 0.0001) {
+    if (renderer.xr.isPresenting) shiftPlayer(dx, dy, dz);
+    else {
+      camera.position.x += dx;
+      camera.position.y += dy;
+      camera.position.z += dz;
+      controls.target.x += dx;
+      controls.target.y += dy;
+      controls.target.z += dz;
+    }
+  }
+  if (!legacy('row') && Math.abs(deltaYaw) > 0.0001) {
+    if (renderer.xr.isPresenting) yawAround(deltaYaw, seat.x, seat.z);
+    else {
+      spinAbout(camera.position, seat, deltaYaw);
+      spinAbout(controls.target, seat, deltaYaw);
+    }
   }
   lastSeat.copy(seat);
+  lastBoatYaw = yaw;
+}
+
+function spinAbout(point, pivot, delta) {
+  const cos = Math.cos(delta);
+  const sin = Math.sin(delta);
+  const dx = point.x - pivot.x;
+  const dz = point.z - pivot.z;
+  point.x = pivot.x + cos * dx - sin * dz;
+  point.z = pivot.z + sin * dx + cos * dz;
 }
 
 function pullOar() {
@@ -2587,6 +2616,8 @@ function onKeyDown(event) {
   }
   if (event.repeat) return;
   if ((event.key === 'q' || event.key === 'Q') && world.gear.dropDesktop()) return;
+  if (!legacy('row') && aboard && (event.key === 'z' || event.key === 'Z') && world.canoe.stroke?.('port')) return;
+  if (!legacy('row') && aboard && (event.key === 'c' || event.key === 'C') && world.canoe.stroke?.('starboard')) return;
   if (event.key === 'f' || event.key === 'F') {
     if (world.gear.useDesktop()) return;
     if (aboard) {
@@ -2719,6 +2750,7 @@ function piecePoint() {
 
 function onXrRelease(controller) {
   if (world.gear.releaseDraw(controller)) return;
+  world.canoe.release?.(controller);
   if (boatGrip?.controller === controller) boatGrip = null;
   if (oarGrip?.controller === controller) oarGrip = null;
   if (climb?.hand === controller && !controller.userData.triggerDown) {
@@ -2739,7 +2771,7 @@ function onXrRelease(controller) {
 }
 
 function pollGazeLock() {
-  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || world.gear.drawing()) {
+  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || world.canoe.anyOar?.() || world.gear.drawing()) {
     gazeLock = null;
     return;
   }
@@ -2931,6 +2963,8 @@ function propRestY(prop) {
   if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && y >= yard.y - 0.4) {
     return standHeight(x, z, y, yard.y) + lift;
   }
+  const shelf = world.shallowFloor?.(x, z);
+  if (shelf != null && y < -1) return shelf + lift;
   return standHeight(x, z, y, 0) + lift;
 }
 
@@ -2959,15 +2993,16 @@ function dropProp() {
         && prop.position.x >= yard.x0 && prop.position.x <= yard.x1
         && prop.position.z >= yard.z0 && prop.position.z <= yard.z1;
       const inCave = prop.position.y < -1 && overCave(prop.position.x, prop.position.z);
+      const onShallow = world.shallowFloor?.(prop.position.x, prop.position.z) != null && prop.position.y < -1;
       const inHouse = !inCave && prop.position.y > -1 && prop.position.x >= CLIFF_X;
-      if (!inHouse && !onYard && !inCave && prop.position.y <= WATER_Y) {
+      if (!inHouse && !onYard && !inCave && !onShallow && prop.position.y <= WATER_Y) {
         world.splash(prop.position.x, prop.position.z);
         prop.parent?.remove(prop);
         job.t = job.d;
         return;
       }
       const rest = propRestY(prop);
-      if ((inHouse || onYard || inCave) && prop.position.y <= rest) {
+      if ((inHouse || onYard || inCave || onShallow) && prop.position.y <= rest) {
         prop.position.y = rest;
         prop.userData.role = 'loose';
         setBrickRaycast(prop, true);
@@ -3037,6 +3072,7 @@ function throwProp(prop, velocity) {
         && prop.position.x >= yard.x0 && prop.position.x <= yard.x1
         && prop.position.z >= yard.z0 && prop.position.z <= yard.z1;
       const inCave = prop.position.y < -1 && overCave(prop.position.x, prop.position.z);
+      const onShallow = world.shallowFloor?.(prop.position.x, prop.position.z) != null && prop.position.y < -1;
       const inHouse = !inCave && prop.position.y > -1 && prop.position.x >= CLIFF_X;
       if (inHouse) {
         if (prop.position.x > 2.35) {
@@ -3052,14 +3088,14 @@ function throwProp(prop, velocity) {
           vz = -Math.abs(vz) * 0.45;
         }
       }
-      if (!inHouse && !onYard && !inCave && prop.position.y <= WATER_Y) {
+      if (!inHouse && !onYard && !inCave && !onShallow && prop.position.y <= WATER_Y) {
         world.splash(prop.position.x, prop.position.z);
         prop.parent?.remove(prop);
         job.t = job.d;
         return;
       }
       const rest = prop.userData.stackH != null ? supportY(prop) : floorY;
-      if ((inHouse || onYard || inCave) && prop.position.y <= rest && vy <= 0) {
+      if ((inHouse || onYard || inCave || onShallow) && prop.position.y <= rest && vy <= 0) {
         prop.position.y = rest;
         if (vy < -1.3) {
           vy = -vy * 0.32;
@@ -3369,6 +3405,7 @@ function frame(time, frame) {
   }
   machine.update(dt);
   world.challenge.update(dt);
+  world.canoe.setAboard?.(aboard);
   world.update(dt);
   syncAboard();
   pullOar();
@@ -3399,7 +3436,8 @@ function frame(time, frame) {
         gripOar(controller);
       }
       if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !world.gear.isHolding(controller)) {
-        if (!gripBoatEnd(controller)) {
+        const grabbedBoat = legacy('canoe') && gripBoatEnd(controller);
+        if (!grabbedBoat) {
           const near = rungFromController(controller);
           if (near) attachClimb(controller, near);
         }

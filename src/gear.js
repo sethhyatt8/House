@@ -99,6 +99,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   let onSprayStop = null;
   let onRattle = null;
   let onHaptic = null;
+  let groundAt = null;
   let drawHand = null;
   let drawTickSent = false;
   let drawRumbleAt = 0;
@@ -1093,9 +1094,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     releasePocket(item);
     item.visible = true;
     scene.attach(item);
+    const shelf = groundAt?.(point.x, point.z);
     item.position.set(
       point.x + (Math.random() - 0.5) * 0.08,
-      point.y > -1.5 && item.userData.houseY != null ? item.userData.houseY : (item.userData.floorY ?? 0.03),
+      shelf != null && point.y < -1 ? shelf + 0.03 : (point.y > -1.5 && item.userData.houseY != null ? item.userData.houseY : (item.userData.floorY ?? 0.03)),
       point.z + (Math.random() - 0.5) * 0.08,
     );
     if (item.userData.gear === 'tile' && faceYaw != null) item.rotation.set(0, faceYaw, 0);
@@ -1628,6 +1630,9 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     },
     setHaptics(fn) {
       onHaptic = fn || null;
+    },
+    setGround(fn) {
+      groundAt = fn || null;
     },
     hatchet,
     bag,
