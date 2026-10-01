@@ -52,30 +52,39 @@ const fovParam = pageParams.get('fov');
 renderer.xr.setFoveation(fovParam == null || fovParam === '' ? 1 : Number(fovParam));
 renderer.xr.setReferenceSpaceType('local-floor');
 renderer.localClippingEnabled = true;
-const envScene = new THREE.Scene();
-envScene.add(new THREE.HemisphereLight(0x9aafd4, 0x2a3038, 0.85));
-envScene.add(new THREE.Mesh(
-  new THREE.SphereGeometry(8, 20, 14),
-  new THREE.MeshBasicMaterial({ color: 0xb7c4d0, side: THREE.BackSide }),
-));
-const envGlow = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-envGlow.position.set(1.2, 3.4, 1.6);
-envScene.add(envGlow);
-const pmrem = new THREE.PMREMGenerator(renderer);
-const envTexture = pmrem.fromScene(envScene, 0.04).texture;
-pmrem.dispose();
 
 const loadingEl = document.getElementById('loading');
 const loadingBar = document.getElementById('loading-bar');
 const assets = createAssetManager(renderer);
 await assets.loadManifest('models/scene-manifest.json');
-await assets.preload(['crate', 'boulder', 'hatchet'], ({ loaded, total }) => {
+await assets.preload(['crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env'], ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
 });
 if (loadingEl) loadingEl.hidden = true;
 
 const world = createWorld({ assets });
-world.scene.environment = envTexture;
+const envHdr = assets.feature('sky') ? assets.hdr('sky_env') : null;
+if (envHdr) {
+  envHdr.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  world.scene.environment = pmrem.fromEquirectangular(envHdr).texture;
+  envHdr.dispose();
+  pmrem.dispose();
+} else {
+  const envScene = new THREE.Scene();
+  envScene.add(new THREE.HemisphereLight(0x9aafd4, 0x2a3038, 0.85));
+  envScene.add(new THREE.Mesh(
+    new THREE.SphereGeometry(8, 20, 14),
+    new THREE.MeshBasicMaterial({ color: 0xb7c4d0, side: THREE.BackSide }),
+  ));
+  const envGlow = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  envGlow.position.set(1.2, 3.4, 1.6);
+  envScene.add(envGlow);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  world.scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+  pmrem.dispose();
+}
+world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
 world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike });
 const grid = createGrid();
 const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;

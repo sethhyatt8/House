@@ -2512,11 +2512,33 @@ function createCanoe(scene, targets, cave) {
   return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center };
 }
 
-function createCliff(scene, targets) {
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(120, 20, 16),
-    new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, depthWrite: false, fog: false }),
-  );
+function createCliff(scene, targets, assets) {
+  const params = new URLSearchParams(location.search);
+  const skyTex = assets?.feature('sky') ? assets.texture('sky_backdrop') : null;
+  const skyGeo = new THREE.SphereGeometry(120, 20, 16);
+  let skyMap;
+  if (skyTex) {
+    skyGeo.scale(-1, 1, 1);
+    skyGeo.rotateY(Math.PI);
+    skyTex.colorSpace = THREE.SRGBColorSpace;
+    skyTex.wrapS = THREE.RepeatWrapping;
+    skyTex.minFilter = THREE.LinearFilter;
+    skyTex.magFilter = THREE.LinearFilter;
+    skyTex.generateMipmaps = false;
+    skyMap = skyTex;
+  } else {
+    skyMap = skyTexture();
+  }
+  const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({
+    map: skyMap,
+    side: skyTex ? THREE.FrontSide : THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+  }));
+  if (skyTex) {
+    sky.renderOrder = -1;
+    sky.material.color.setScalar(+(params.get('skygain') ?? 1));
+  }
   sky.userData.backdrop = true;
   scene.add(sky);
   const moon = new THREE.Mesh(
@@ -2524,6 +2546,7 @@ function createCliff(scene, targets) {
     new THREE.MeshBasicMaterial({ map: moonTexture(), fog: false }),
   );
   moon.position.set(-22, 9, 1);
+  moon.visible = !skyTex || params.get('moon') === '1';
   scene.add(moon);
 
   const stoneMap = rockTexture();
@@ -2724,6 +2747,9 @@ function createCliff(scene, targets) {
         uGlint: { value: new THREE.Color(0xd7e6ea) },
         uRings: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
         uSpan: { value: new THREE.Vector2(playFar, waterNear) },
+        uMoon: { value: params.get('moonpath') === 'hdri'
+          ? new THREE.Vector3(-0.9701, 0.2385, 0.0441)
+          : new THREE.Vector3(-0.45, 0.72, 0.12) },
       },
     ]),
     vertexShader: `
@@ -2757,6 +2783,7 @@ function createCliff(scene, targets) {
       uniform vec3 uShallow;
       uniform vec3 uGlint;
       uniform vec2 uSpan;
+      uniform vec3 uMoon;
       varying vec3 vWorldPos;
       varying float vHeight;
       ${waterWaveGlsl}
@@ -2769,7 +2796,7 @@ function createCliff(scene, targets) {
         vec3 slope = vec3((h - hx) * 2.6, e, (h - hz) * 2.6);
         vec3 normal = normalize(slope);
         vec3 viewDir = normalize(cameraPosition - vWorldPos);
-        vec3 moon = normalize(vec3(-0.45, 0.72, 0.12));
+        vec3 moon = normalize(uMoon);
         vec3 halfVec = normalize(moon + viewDir);
         float lit = clamp(dot(normal, moon) * 0.5 + 0.5, 0.0, 1.0);
         float spec = pow(clamp(dot(normal, halfVec), 0.0, 1.0), 70.0);
@@ -3256,7 +3283,9 @@ function createForest(scene) {
 export function createWorld({ assets } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
-  scene.fog = new THREE.Fog(0x10182c, 18, 210);
+  const fogParam = new URLSearchParams(location.search).get('fog');
+  const fogColor = fogParam && /^[0-9a-fA-F]{6}$/.test(fogParam) ? Number.parseInt(fogParam, 16) : 0x10182c;
+  scene.fog = new THREE.Fog(fogColor, 18, 210);
 
   const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.05, 160);
   camera.position.set(-0.05, 1.58, 1.22);
@@ -3330,7 +3359,7 @@ export function createWorld({ assets } = {}) {
     targets.push(boulder);
   });
   const puddles = createPuddles(scene, floor, floorMap);
-  const cliff = createCliff(scene, targets);
+  const cliff = createCliff(scene, targets, assets);
   const canoe = createCanoe(scene, targets, cliff.cave);
 
   const hemi = new THREE.HemisphereLight(0x8ea4cc, 0x2a2622, 0.26);
