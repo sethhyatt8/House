@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { applyPlacements, proxyMaterial } from './assets.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
@@ -831,7 +832,15 @@ function clearOfRocks(x, z, reach) {
   return [THREE.MathUtils.clamp(px, -50, -9), THREE.MathUtils.clamp(pz, -22, 18)];
 }
 
-function createSharks(scene, splash) {
+function hideAll(root) {
+  root.traverse((child) => {
+    if (!child.isMesh) return;
+    child.material = proxyMaterial;
+    child.castShadow = false;
+  });
+}
+
+function createSharks(scene, splash, assets) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
   const darkMat = new THREE.MeshStandardMaterial({
@@ -957,6 +966,7 @@ function createSharks(scene, splash) {
     [0.34, -0.14],
     [0.1, -0.05],
   ], 0.012);
+  const models = assets?.feature('sharks');
   const addPair = (build) => {
     const fish = build();
     const shadow = fish.clone(true);
@@ -978,6 +988,38 @@ function createSharks(scene, splash) {
       material.metalness = (material.metalness ?? 0) * 0.15;
       child.material = material;
     });
+    const kind = build === makeWhite ? 'white' : 'sword';
+    const gltf = models ? assets.gltf(kind === 'white' ? 'shark_white' : 'swordfish') : null;
+    if (gltf) {
+      hideAll(fish);
+      hideAll(shadow);
+      const vis = skeletonClone(gltf.scene);
+      const skinned = [];
+      vis.traverse((object) => { if (object.isSkinnedMesh) skinned.push(object); });
+      for (const mesh of skinned) {
+        mesh.material = mesh.material.clone();
+        mesh.material.clippingPlanes = [aboveWater];
+        mesh.castShadow = true;
+        mesh.raycast = () => {};
+        const twinMat = mesh.material.clone();
+        twinMat.clippingPlanes = [belowWater];
+        twinMat.color.lerp(new THREE.Color(0x08343c), 0.78).multiplyScalar(0.42);
+        twinMat.roughness = Math.min(1, twinMat.roughness + 0.28);
+        twinMat.metalness *= 0.15;
+        const twin = new THREE.SkinnedMesh(mesh.geometry, twinMat);
+        twin.bind(mesh.skeleton, mesh.bindMatrix);
+        twin.position.copy(mesh.position);
+        twin.quaternion.copy(mesh.quaternion);
+        twin.scale.copy(mesh.scale);
+        twin.raycast = () => {};
+        mesh.parent.add(twin);
+      }
+      fish.add(vis);
+      const mixer = new THREE.AnimationMixer(vis);
+      const clip = THREE.AnimationClip.findByName(gltf.animations, 'Swim');
+      const swim = mixer.clipAction(clip).play();
+      fish.userData.glb = { mixer, swim, clip };
+    }
     fish.userData.tail = fish.getObjectByName('tail');
     shadow.userData.tail = shadow.getObjectByName('tail');
     fish.rotation.order = 'YXZ';
@@ -1203,6 +1245,7 @@ function createSharks(scene, splash) {
     return fish;
   };
   const waterline = { sword: 0.16, white: 0.2 };
+  const glbWaterline = { sword: 0.687, white: 0.344 };
   const routes = [
     { kind: 'sword', cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.42, phase: 0.3, scale: 2.15, dive: 0.7 },
     { kind: 'sword', cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.52, phase: 1.6, scale: 1.7, dive: 0.55 },
@@ -1210,7 +1253,7 @@ function createSharks(scene, splash) {
     { kind: 'white', cx: -41, cz: 5.5, rx: 5.2, rz: 4.2, speed: 0.24, phase: 0.9, scale: 2.65, dive: 0 },
     { kind: 'white', cx: -28, cz: -7.5, rx: 5.6, rz: 3.4, speed: -0.2, phase: 2.2, scale: 3.05, dive: 0 },
   ];
-  const sharks = routes.map((route) => {
+  const sharks = routes.map((route, index) => {
     const pair = addPair(route.kind === 'white' ? makeWhite : makeSwordfish);
     pair.shark.scale.setScalar(route.scale);
     pair.shadow.scale.setScalar(route.scale);
@@ -1218,8 +1261,14 @@ function createSharks(scene, splash) {
     pair.shadow.userData.fishHost = pair.shark;
     scene.add(pair.shark);
     scene.add(pair.shadow);
+    const glb = pair.shark.userData.glb;
+    if (glb) {
+      const wag = route.kind === 'sword' ? 5.4 : 4.2;
+      glb.swim.timeScale = glb.clip.duration / (2 * Math.PI / wag);
+      glb.swim.time = (index * 0.37) % glb.clip.duration;
+    }
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
-    route.finTip = route.kind === 'white' ? 0.46 : 0.36;
+    route.finTip = glb ? (route.kind === 'white' ? 0.604 : 0.887) : (route.kind === 'white' ? 0.46 : 0.36);
     route.wasAbove = true;
     route.wake = 0;
     return pair;
@@ -1283,6 +1332,11 @@ function createSharks(scene, splash) {
           pair.shark.position.z -= Math.sin(pair.shark.rotation.y) * drift;
           if (pair.shark.position.x > -12) pair.shark.position.x -= 0.35 * dt;
           pair.shark.userData.tail.rotation.y *= Math.max(0, 1 - dt * 3);
+          const glb = pair.shark.userData.glb;
+          if (glb) {
+            glb.swim.timeScale *= Math.max(0, 1 - dt * 3);
+            glb.mixer.update(dt);
+          }
           pair.shadow.position.copy(pair.shark.position);
           pair.shadow.rotation.copy(pair.shark.rotation);
           pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;
@@ -1303,7 +1357,8 @@ function createSharks(scene, splash) {
         route.pz = place.z;
         const wave = Math.sin(time * 0.62 + route.phase);
         const bob = route.dive ? wave * route.dive - route.dive * 0.35 : Math.sin(time * 1.1 + route.phase) * 0.012;
-        const y = WATER_Y - route.scale * waterline[route.kind] + bob;
+        const line = pair.shark.userData.glb ? glbWaterline[route.kind] : waterline[route.kind];
+        const y = WATER_Y - route.scale * line + bob;
         pair.shark.position.set(place.x, y, place.z);
         const angle = place.angle;
         const vx = -Math.sin(angle) * route.rx * Math.sign(route.speed);
@@ -1314,6 +1369,7 @@ function createSharks(scene, splash) {
         pair.shark.rotation.set(pitch, yaw, roll);
         const wag = route.kind === 'sword' ? 5.4 : 4.2;
         pair.shark.userData.tail.rotation.y = Math.sin(time * wag + route.phase) * 0.38;
+        if (pair.shark.userData.glb) pair.shark.userData.glb.mixer.update(dt);
         pair.shadow.position.copy(pair.shark.position);
         pair.shadow.rotation.copy(pair.shark.rotation);
         pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;
@@ -1344,6 +1400,20 @@ function createSharks(scene, splash) {
       child.material = material;
       child.castShadow = true;
     });
+    const gltf = models ? assets.gltf(kind === 'white' ? 'shark_white' : 'swordfish') : null;
+    if (gltf) {
+      hideAll(fish);
+      const vis = skeletonClone(gltf.scene);
+      vis.userData.glbVisual = true;
+      vis.traverse((child) => {
+        if (!child.isMesh) return;
+        child.material = child.material.clone();
+        child.material.side = THREE.DoubleSide;
+        child.castShadow = true;
+        child.raycast = () => {};
+      });
+      fish.add(vis);
+    }
     return fish;
   }
   return { update, sword: stillAnimal('sword'), white: stillAnimal('white') };
@@ -1369,7 +1439,7 @@ function angelSkinTexture() {
   return texture;
 }
 
-function createAngels(scene) {
+function createAngels(scene, assets) {
   const bodyMat = new THREE.MeshStandardMaterial({
     map: angelSkinTexture(),
     color: 0x9a5a78,
@@ -1485,6 +1555,26 @@ function createAngels(scene) {
       swimmers.push({ fish, school });
     }
   });
+  const angelGltf = assets?.feature('fish') ? assets.gltf('angelfish') : null;
+  let angelMesh = null;
+  if (angelGltf) {
+    angelGltf.scene.updateMatrixWorld(true);
+    angelGltf.scene.traverse((object) => { if (!angelMesh && object.isMesh) angelMesh = object; });
+    swimmers.forEach(({ fish }) => hideAll(fish));
+  }
+  const angelNodeMatrix = angelMesh ? angelMesh.matrixWorld.clone() : null;
+  const morphDummy = angelMesh ? new THREE.Mesh(angelMesh.geometry, angelMesh.material) : null;
+  if (morphDummy) morphDummy.morphTargetInfluences = new Array(5).fill(0);
+  const schoolMeshes = angelMesh
+    ? schools.map((school) => {
+      const mesh = new THREE.InstancedMesh(angelMesh.geometry, angelMesh.material, school.count);
+      mesh.raycast = () => {};
+      mesh.castShadow = false;
+      scene.add(mesh);
+      return mesh;
+    })
+    : null;
+  const angelMatrix = new THREE.Matrix4();
   let time = 0;
   return {
     update(dt) {
@@ -1514,11 +1604,34 @@ function createAngels(scene) {
         fish.rotation.set(sway * 0.08, yaw + sway * 0.12, sway * 0.18);
         if (fish.userData.tail) fish.userData.tail.rotation.y = Math.sin(time * 6 + fish.userData.phase) * 0.35;
       });
+      if (!schoolMeshes) return;
+      const counts = schools.map(() => 0);
+      swimmers.forEach(({ fish, school }) => {
+        const schoolIndex = schools.indexOf(school);
+        const mesh = schoolMeshes[schoolIndex];
+        const slot = counts[schoolIndex];
+        counts[schoolIndex] += 1;
+        fish.updateMatrixWorld();
+        mesh.setMatrixAt(slot, angelMatrix.multiplyMatrices(fish.matrixWorld, angelNodeMatrix));
+        const ph = ((((time + fish.userData.phase * 0.16) % 1) + 1) % 1) * 6;
+        const frame = Math.floor(ph);
+        const weight = ph - frame;
+        const next = (frame + 1) % 6;
+        morphDummy.morphTargetInfluences.fill(0);
+        if (frame > 0) morphDummy.morphTargetInfluences[frame - 1] = 1 - weight;
+        if (next > 0) morphDummy.morphTargetInfluences[next - 1] += weight;
+        mesh.setMorphAt(slot, morphDummy);
+      });
+      schoolMeshes.forEach((mesh) => {
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.morphTexture.needsUpdate = true;
+        mesh.computeBoundingSphere();
+      });
     },
   };
 }
 
-function createBirds(scene) {
+function createBirds(scene, assets) {
   const white = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
   const gray = new THREE.MeshStandardMaterial({ color: 0x7e8894, roughness: 0.68 });
   const tip = new THREE.MeshStandardMaterial({ color: 0x2c323a, roughness: 0.6 });
@@ -1618,6 +1731,41 @@ function createBirds(scene) {
     );
     bird.rotation.y = t;
   });
+  const gullFly = assets?.feature('gulls') ? assets.gltf('gull_fly') : null;
+  const gullPerch = assets?.feature('gulls') ? assets.gltf('gull_perch') : null;
+  let flyMesh = null;
+  let perchMesh = null;
+  if (gullFly && gullPerch) {
+    const firstMesh = (gltf) => {
+      let found = null;
+      gltf.scene.updateMatrixWorld(true);
+      gltf.scene.traverse((object) => { if (!found && object.isMesh) found = object; });
+      return found;
+    };
+    birds.forEach(hideAll);
+    flyMesh = firstMesh(gullFly);
+    perchMesh = firstMesh(gullPerch);
+  }
+  const flyNodeMatrix = flyMesh ? flyMesh.matrixWorld.clone() : null;
+  const perchNodeMatrix = perchMesh ? perchMesh.matrixWorld.clone() : null;
+  const flyIM = flyMesh ? new THREE.InstancedMesh(flyMesh.geometry, flyMesh.material, birds.length) : null;
+  const perchIM = perchMesh ? new THREE.InstancedMesh(perchMesh.geometry, perchMesh.material, birds.length) : null;
+  const flyDummy = flyMesh ? new THREE.Mesh(flyMesh.geometry, flyMesh.material) : null;
+  if (flyDummy) {
+    const influenceCount = Object.keys(flyMesh.morphTargetDictionary || {}).length || 2;
+    flyDummy.morphTargetInfluences = new Array(influenceCount).fill(0);
+    flyDummy.userData.up = flyMesh.morphTargetDictionary?.up ?? 0;
+    flyDummy.userData.down = flyMesh.morphTargetDictionary?.down ?? 1;
+  }
+  const gullMatrix = new THREE.Matrix4();
+  const gullHidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  if (flyIM && perchIM) {
+    flyIM.raycast = () => {};
+    perchIM.raycast = () => {};
+    flyIM.castShadow = true;
+    perchIM.castShadow = true;
+    scene.add(flyIM, perchIM);
+  }
   const update = (dt) => {
     time += dt;
     birds.forEach((bird) => {
@@ -1707,12 +1855,38 @@ function createBirds(scene) {
         }
       }
     });
+    if (!flyIM || !perchIM) return;
+    birds.forEach((bird, index) => {
+      const perched = bird.userData.mode === 'perch' && !bird.userData.dead;
+      bird.updateMatrixWorld();
+      flyIM.setMatrixAt(index, perched ? gullHidden : gullMatrix.multiplyMatrices(bird.matrixWorld, flyNodeMatrix));
+      perchIM.setMatrixAt(index, perched ? gullMatrix.multiplyMatrices(bird.matrixWorld, perchNodeMatrix) : gullHidden);
+      const lift = -bird.userData.wings[0].rotation.x;
+      flyDummy.morphTargetInfluences.fill(0);
+      flyDummy.morphTargetInfluences[flyDummy.userData.up] = Math.max(0, lift) / 0.42;
+      flyDummy.morphTargetInfluences[flyDummy.userData.down] = Math.max(0, -lift) / 0.42 * 0.6;
+      flyIM.setMorphAt(index, flyDummy);
+    });
+    flyIM.instanceMatrix.needsUpdate = true;
+    perchIM.instanceMatrix.needsUpdate = true;
+    if (flyIM.morphTexture) flyIM.morphTexture.needsUpdate = true;
+    flyIM.computeBoundingSphere();
+    perchIM.computeBoundingSphere();
   };
   return { update };
 }
 
-function createBite(scene, source) {
-  const shark = source.clone(true);
+function insideGlb(object) {
+  let node = object;
+  while (node) {
+    if (node.userData?.glbVisual) return true;
+    node = node.parent;
+  }
+  return false;
+}
+
+function createBite(scene, source, assets) {
+  const shark = skeletonClone(source);
   shark.visible = false;
   shark.scale.setScalar(2.6);
   shark.traverse((child) => {
@@ -1723,16 +1897,37 @@ function createBite(scene, source) {
   let jawX = 0;
   let jawY = 0;
   shark.traverse((child) => {
-    if (!child.isMesh || !child.geometry) return;
+    if (!child.isMesh || !child.geometry || insideGlb(child)) return;
     child.geometry.computeBoundingBox();
     reach = Math.max(reach, child.geometry.boundingBox.max.x);
     if (!child.userData.jawRibbon) return;
     jawX = Math.max(jawX, child.geometry.boundingBox.max.x);
     jawY += (child.geometry.boundingBox.min.y + child.geometry.boundingBox.max.y) / 2;
   });
-  const nose = reach * shark.scale.x;
-  const mouthX = (jawX || reach) * shark.scale.x;
-  const mouthY = (jawY / 4) * shark.scale.x;
+  let glbChild = null;
+  shark.traverse((child) => {
+    if (child.userData?.glbVisual) glbChild = child;
+  });
+  let nose = reach * shark.scale.x;
+  let mouthX = (jawX || reach) * shark.scale.x;
+  let mouthY = (jawY / 4) * shark.scale.x;
+  let biteMixer = null;
+  let biteAction = null;
+  if (glbChild && assets?.gltf('shark_white')) {
+    nose = 1.06 * shark.scale.x;
+    mouthX = 0.837 * shark.scale.x;
+    mouthY = 0.253 * shark.scale.x;
+    biteMixer = new THREE.AnimationMixer(glbChild);
+    biteAction = biteMixer.clipAction(THREE.AnimationClip.findByName(assets.gltf('shark_white').animations, 'Bite'));
+    biteAction.play();
+    biteAction.paused = true;
+  }
+  const poseBite = (open) => {
+    poseSharkMouth(shark, open);
+    if (!biteAction) return;
+    biteAction.time = open * 0.208;
+    biteMixer.update(0);
+  };
   const dropGeo = new THREE.SphereGeometry(0.05, 6, 5);
   const chunkGeo = new THREE.SphereGeometry(0.14, 7, 6);
   const bright = new THREE.MeshBasicMaterial({ color: 0xc41622 });
@@ -1807,7 +2002,7 @@ function createBite(scene, source) {
     shark.visible = true;
     shark.position.set(x - 7.2, WATER_Y - 0.7, z);
     shark.rotation.set(0.2, 0, 0.18);
-    poseSharkMouth(shark, 0.05);
+    poseBite(0.05);
   }
 
   function update(dt) {
@@ -1828,7 +2023,7 @@ function createBite(scene, source) {
     shark.position.z = bite.z + Math.sin(bite.t * 3.2) * 0.05;
     shark.rotation.z = 0.16 * (1 - swimEase);
     const openT = THREE.MathUtils.smoothstep(bite.t, 0.62, 1.32);
-    poseSharkMouth(shark, 0.06 + 0.94 * openT);
+    poseBite(0.06 + 0.94 * openT);
     const tail = shark.getObjectByName('tail');
     if (tail) tail.rotation.y = Math.sin(bite.t * (bite.t >= openAt ? 14 : 6)) * 0.42;
     if (bite.t >= openAt) {
@@ -2222,7 +2417,7 @@ function wreckHullGeometry() {
   return geometry;
 }
 
-function createWreck(scene) {
+function createWreck(scene, assets) {
   const wreck = new THREE.Group();
   const shadow = new THREE.MeshBasicMaterial({ color: 0x07141c, side: THREE.DoubleSide });
   const ribMat = new THREE.MeshBasicMaterial({ color: 0x0c1a22 });
@@ -2298,6 +2493,20 @@ function createWreck(scene) {
   wreck.position.set(-45.5, WATER_Y - 3.55, 12.5);
   wreck.rotation.y = 1.15;
   wreck.rotation.z = 0.05;
+  const wreckModel = assets?.feature('boats') ? assets.instance('shipwreck') : null;
+  if (wreckModel) {
+    wreck.traverse((child) => {
+      if (!child.isMesh || !child.material?.isMeshBasicMaterial) return;
+      child.material = proxyMaterial;
+      child.castShadow = false;
+    });
+    wreckModel.traverse((child) => {
+      if (!child.isMesh) return;
+      child.material = new THREE.MeshBasicMaterial({ map: child.material?.map || null, color: 0x2a4048 });
+      child.raycast = () => {};
+    });
+    wreck.add(wreckModel);
+  }
   scene.add(wreck);
 
   const sand = new THREE.Mesh(
@@ -2448,7 +2657,7 @@ function canoeHullGeometry() {
   return geometry;
 }
 
-function createCanoe(scene, targets, cave) {
+function createCanoe(scene, targets, cave, assets) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a30, roughness: 0.74, side: THREE.DoubleSide });
   const trim = new THREE.MeshStandardMaterial({ color: 0x4e3422, roughness: 0.82 });
   const oarMat = new THREE.MeshStandardMaterial({ color: 0x9a7048, roughness: 0.68 });
@@ -2490,6 +2699,24 @@ function createCanoe(scene, targets, cave) {
     group.add(oar);
     oars.push(oar);
   });
+  const canoeModel = assets?.feature('boats') ? assets.instance('canoe') : null;
+  if (canoeModel) {
+    hull.material = proxyMaterial;
+    hull.castShadow = false;
+    ends.forEach((stem) => {
+      stem.material = proxyMaterial;
+      stem.castShadow = false;
+    });
+    canoeModel.traverse((child) => {
+      if (!child.isMesh) return;
+      child.material = child.material.clone();
+      child.material.side = THREE.DoubleSide;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      child.raycast = () => {};
+    });
+    group.add(canoeModel);
+  }
   group.position.set(cave.boatX, cave.floor + 0.12, cave.z + 2.45);
   scene.add(group);
   targets.push(group);
@@ -2552,7 +2779,7 @@ function createCanoe(scene, targets, cave) {
   return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center };
 }
 
-function applyWorldUv(mesh, tile) {
+export function applyWorldUv(mesh, tile) {
   mesh.updateWorldMatrix(true, false);
   const g = mesh.geometry;
   const pos = g.attributes.position;
@@ -2912,7 +3139,7 @@ function createCliff(scene, targets, assets) {
   addSheet(waterFar, playFar, 12, 10);
 
   createSeaRocks(scene, assets);
-  createWreck(scene);
+  createWreck(scene, assets);
 
   const mistMap = canvasTexture(128, 128, (ctx, w, h) => {
     const glow = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
@@ -3514,7 +3741,7 @@ export function createWorld({ assets } = {}) {
   });
   const puddles = createPuddles(scene, floor, floorMap);
   const cliff = createCliff(scene, targets, assets);
-  const canoe = createCanoe(scene, targets, cliff.cave);
+  const canoe = createCanoe(scene, targets, cliff.cave, assets);
 
   const hemi = new THREE.HemisphereLight(0x8ea4cc, 0x2a2622, 0.26);
   scene.add(hemi);
@@ -3618,10 +3845,10 @@ export function createWorld({ assets } = {}) {
     if (kind === 'ui' || kind === 'plate') targets.splice(i, 1);
   }
   createFinds(scene, targets, rockMap);
-  const sharks = createSharks(scene, cliff.splash);
-  const angels = createAngels(scene);
-  const birds = createBirds(scene);
-  const bite = createBite(scene, sharks.white);
+  const sharks = createSharks(scene, cliff.splash, assets);
+  const angels = createAngels(scene, assets);
+  const birds = createBirds(scene, assets);
+  const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave);
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
