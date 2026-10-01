@@ -2381,7 +2381,11 @@ function handNearBoat(points) {
 }
 
 function gripBoatEnd(controller) {
-  if (!legacy('canoe') && world.canoe.grab) return world.canoe.grab(controller, handPoints(controller));
+  if (!legacy('canoe') && world.canoe.grab) {
+    const heldRing = world.canoe.grab(controller, handPoints(controller));
+    if (heldRing) boatGrip = { controller };
+    return heldRing;
+  }
   const points = handPoints(controller);
   const near = closestBoat(world.canoe.ends, points, 0.42);
   if (!near && !handNearBoat(points)) return false;
@@ -3407,6 +3411,7 @@ function frame(time, frame) {
   world.challenge.update(dt);
   world.canoe.setAboard?.(aboard);
   world.update(dt);
+  if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
   pullOar();
   for (const controller of controllers) updateLaser(controller);

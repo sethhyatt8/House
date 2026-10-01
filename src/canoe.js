@@ -168,7 +168,6 @@ export function createCanoe(scene, targets, cave, assets, water) {
   let hovered = null;
   const anchor = new THREE.Vector3();
   let drag = null;
-  const handTrail = [];
   const oarGrips = { starboard: null, port: null };
   const gripHand = makeGripHand();
   gripHand.visible = false;
@@ -194,9 +193,19 @@ export function createCanoe(scene, targets, cave, assets, water) {
   }
 
   function shove() {
-    const ahead = new THREE.Vector3(0, 0, -1).applyQuaternion(group.quaternion);
-    sim.vx += ahead.x * 1.4;
-    sim.vz += ahead.z * 1.4;
+    const aheadX = -Math.sin(sim.yaw);
+    const aheadZ = -Math.cos(sim.yaw);
+    const step = 0.9;
+    if (drag) {
+      drag.nudgeX += aheadX * step;
+      drag.nudgeZ += aheadZ * step;
+    }
+    group.position.x += aheadX * step;
+    group.position.z += aheadZ * step;
+    sim.vx = aheadX * 0.35;
+    sim.vz = aheadZ * 0.35;
+    sim.yawRate = 0;
+    onHaptic?.(drag?.controller, 0.5, 45);
     return floating() ? 'water' : 'again';
   }
 
@@ -228,10 +237,25 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const loop = nearest(points, loops, 0.35);
     const stem = loop || nearest(points, ends, 0.35);
     if (!stem) return false;
-    stem.getWorldPosition(anchor);
-    group.worldToLocal(anchor);
-    drag = { controller, anchor: anchor.clone(), aboard: false };
-    handTrail.length = 0;
+    if (drag?.controller && drag.controller !== controller) restoreHand(drag.controller);
+    anchor.copy(stem.position);
+    const hand = new THREE.Vector3();
+    controller.getWorldPosition(hand);
+    const framed = boatFrame(hand.x - group.position.x, hand.z - group.position.z, sim.yaw);
+    const ring = ringXZ(anchor, sim.yaw, group.position);
+    const sep = boatFrame(hand.x - ring.x, hand.z - ring.z, sim.yaw);
+    drag = {
+      controller,
+      anchor: anchor.clone(),
+      yaw0: sim.yaw,
+      pos0: group.position.clone(),
+      lat0: framed.lat,
+      along0: framed.along,
+      sepLat0: sep.lat,
+      sepAlong0: sep.along,
+      nudgeX: 0,
+      nudgeZ: 0,
+    };
     onHaptic?.(controller, 0.8, 60);
     snapHand(controller, stem);
     return true;
@@ -307,45 +331,16 @@ export function createCanoe(scene, targets, cave, assets, water) {
     group.rotation.x = Math.atan2(bowY - sternY, 3.2);
     group.rotation.z = 0.02 * Math.sin(1.1 * clock);
 
-    let push = null;
-    if (drag) {
-      const hand = new THREE.Vector3();
-      drag.controller.getWorldPosition(hand);
-      const now = performance.now() / 1000;
-      handTrail.push({ t: now, p: hand.clone() });
-      while (handTrail.length > 6) handTrail.shift();
-      local.copy(drag.anchor);
-      group.localToWorld(local);
-      if (hand.distanceTo(local) > 0.55) {
-        release(drag.controller);
-      } else {
-        const vHand = new THREE.Vector3();
-        if (handTrail.length > 1) {
-          const first = handTrail[0];
-          const last = handTrail[handTrail.length - 1];
-          const span = Math.max(0.016, last.t - first.t);
-          vHand.copy(last.p).sub(first.p).multiplyScalar(1 / span);
-        }
-        const delta = hand.clone().sub(local);
-        const force = delta.multiplyScalar(260).add(vHand.multiplyScalar(60));
-        if (force.length() > 240) force.multiplyScalar(240 / force.length());
-        group.worldToLocal(force.add(local));
-        force.sub(drag.anchor);
-        const rx = drag.anchor.x;
-        const rz = drag.anchor.z;
-        push = { x: force.x, z: force.z, torque: rx * force.z - rz * force.x };
-        if (groundedFrac > 0) {
-          const speed = Math.hypot(sim.vx, sim.vz);
-          onHaptic?.(drag.controller, 0.1 + 0.35 * Math.min(1, speed / 1.2), 30);
-        }
-      }
-    }
+    const poseX = group.position.x;
+    const poseZ = group.position.z;
+    const poseYaw = sim.yaw;
 
     poseOars(dt, aboard);
     const strokes = bladeStrokes(dt);
-    stepBoat(sim, dt, { ...strokes, push });
+    stepBoat(sim, dt, strokes);
     group.position.x += sim.vx * dt;
     group.position.z += sim.vz * dt;
+    if (drag) steerHeld(poseX, poseZ, poseYaw, dt);
     group.rotation.y = sim.yaw;
     const softX = -16;
     if (group.position.x < softX) sim.vx += (-16.4 - group.position.x) * dt;
@@ -415,6 +410,57 @@ export function createCanoe(scene, targets, cave, assets, water) {
     return result;
   }
 
+  function steerHeld(prevX, prevZ, prevYaw, dt) {
+    const held = drag;
+    if (!held) return;
+    const hand = new THREE.Vector3();
+    held.controller.getWorldPosition(hand);
+    const framed = boatFrame(hand.x - held.pos0.x, hand.z - held.pos0.z, held.yaw0);
+    const lever = Math.max(0.9, Math.abs(held.anchor.z));
+    const yaw = held.yaw0 + soften(framed.lat - held.lat0, 0.02) / lever;
+    const slide = soften(framed.along - held.along0, 0.03);
+    const sin0 = Math.sin(held.yaw0);
+    const cos0 = Math.cos(held.yaw0);
+    let x = held.pos0.x + sin0 * slide + held.nudgeX;
+    let z = held.pos0.z + cos0 * slide + held.nudgeZ;
+    if (x < -16) {
+      held.pos0.x += -16 - x;
+      x = -16;
+    }
+    const zOff = z - cave.z;
+    if (Math.abs(zOff) > 7) {
+      const clamped = cave.z + Math.sign(zOff) * 7;
+      held.pos0.z += clamped - z;
+      z = clamped;
+    }
+    const ring = ringXZ(held.anchor, yaw, { x, z });
+    const sep = boatFrame(hand.x - ring.x, hand.z - ring.z, yaw);
+    const slipLat = sep.lat - held.sepLat0;
+    const slipAlong = sep.along - held.sepAlong0;
+    if (Math.abs(slipLat) > 0.75 || Math.hypot(slipLat, slipAlong) > 2.6) {
+      release(held.controller);
+      return;
+    }
+    group.position.x = x;
+    group.position.z = z;
+    sim.yaw = yaw;
+    const safeDt = Math.max(dt, 1 / 120);
+    const vx = (x - prevX) / safeDt;
+    const vz = (z - prevZ) / safeDt;
+    const speed = Math.hypot(vx, vz);
+    const scale = speed > 2 ? 2 / speed : 1;
+    sim.vx = vx * scale;
+    sim.vz = vz * scale;
+    sim.yawRate = THREE.MathUtils.clamp((yaw - prevYaw) / safeDt, -1.4, 1.4);
+    if (groundedFrac > 0 && speed > 0.12) {
+      onHaptic?.(held.controller, 0.12 + 0.28 * Math.min(1, speed / 1.2), 30);
+    }
+  }
+
+  function holding(controller) {
+    return !!drag && (!controller || drag.controller === controller);
+  }
+
   function setHaptics(fn) {
     onHaptic = fn || null;
   }
@@ -436,11 +482,35 @@ export function createCanoe(scene, targets, cave, assets, water) {
     grab,
     tryOar,
     release,
+    holding,
     hover,
     anyOar,
     oarGrips,
     setAboard,
   };
+}
+
+function boatFrame(dx, dz, yaw) {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  return {
+    lat: dx * cos - dz * sin,
+    along: dx * sin + dz * cos,
+  };
+}
+
+function ringXZ(anchor, yaw, pos) {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  return {
+    x: pos.x + anchor.x * cos + anchor.z * sin,
+    z: pos.z - anchor.x * sin + anchor.z * cos,
+  };
+}
+
+function soften(value, dead) {
+  if (Math.abs(value) <= dead) return 0;
+  return value - Math.sign(value) * dead;
 }
 
 function makeGripHand() {
