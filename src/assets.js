@@ -1,37 +1,53 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 
 export const proxyMaterial = new THREE.MeshBasicMaterial({ visible: false });
 
 const url = (path) => new URL(path, document.baseURI).href;
 
-function estimateKtx2Bytes(buffer, start) {
-  const view = new DataView(buffer, start);
-  const width = view.getUint32(20, true);
-  const height = view.getUint32(24, true);
-  const scheme = view.getUint32(44, true);
-  const bytesPerPixel = scheme === 1 ? 0.5 : 1;
-  return width * height * bytesPerPixel * (4 / 3);
+const FEATURE_FOR = {
+  rock_cliff: 'rock',
+  rock_floor: 'rock',
+  sea_boulder: 'searocks',
+  pines: 'trees',
+  sky_backdrop: 'sky',
+  sky_env: 'sky',
+};
+
+const BYTES_PER_PIXEL = new Map([
+  [THREE.RGB_ETC2_Format, 0.5],
+  [THREE.RGB_S3TC_DXT1_Format, 0.5],
+  [THREE.RGBA_ETC2_EAC_Format, 1],
+  [THREE.RGBA_ASTC_4x4_Format, 1],
+  [THREE.RGBA_BPTC_Format, 1],
+  [THREE.RGBA_S3TC_DXT5_Format, 1],
+]);
+
+function textureByteSize(texture) {
+  const image = texture?.image;
+  const width = image?.width || 0;
+  const height = image?.height || 0;
+  if (!width || !height) return 0;
+  let bytesPerPixel = BYTES_PER_PIXEL.get(texture.format);
+  if (bytesPerPixel == null) bytesPerPixel = texture.type === THREE.HalfFloatType ? 8 : 4;
+  const mipChain = texture.mipmaps?.length > 1 || texture.generateMipmaps ? 4 / 3 : 1;
+  return width * height * bytesPerPixel * mipChain;
 }
 
-function estimateGlbTextureBytes(buffer) {
-  const view = new DataView(buffer);
-  if (view.getUint32(0, true) !== 0x46546c67) return 0;
-  const jsonLength = view.getUint32(12, true);
-  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 20, jsonLength)));
-  const binStart = 20 + jsonLength + 8;
-  let total = 0;
-  for (const image of json.images || []) {
-    if (image.bufferView == null) continue;
-    const viewDef = json.bufferViews[image.bufferView];
-    const start = binStart + (viewDef.byteOffset || 0);
-    const magic = new Uint8Array(buffer, start, 12);
-    const ktx2 = magic[0] === 0xab && magic[1] === 0x4b && magic[2] === 0x54 && magic[3] === 0x58;
-    if (ktx2) total += estimateKtx2Bytes(buffer, start);
-  }
-  return total;
+function collectTextures(root, into) {
+  root.traverse((child) => {
+    if (!child.isMesh) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const material of materials) {
+      if (!material) continue;
+      for (const value of Object.values(material)) {
+        if (value?.isTexture) into.add(value);
+      }
+    }
+  });
 }
 
 function prepareTemplate(root) {
@@ -73,7 +89,8 @@ function fitInstance(root, opts) {
 }
 
 export function createAssetManager(renderer) {
-  const enabled = new URLSearchParams(location.search).get('models') !== '0';
+  const params = new URLSearchParams(location.search);
+  const enabled = params.get('models') !== '0';
   const manager = new THREE.LoadingManager();
   const draco = new DRACOLoader(manager);
   draco.setDecoderPath(url('decoders/draco/'));
@@ -83,14 +100,33 @@ export function createAssetManager(renderer) {
   const loader = new GLTFLoader(manager);
   loader.setDRACOLoader(draco);
   loader.setKTX2Loader(ktx2);
+  const hdrLoader = new HDRLoader(manager).setDataType(THREE.HalfFloatType);
 
   const templates = new Map();
+  const envTextures = new Map();
   const unavailable = new Set();
-  const textureBytes = new Map();
+  const counted = new Set();
   let manifest = null;
+  let textureBytes = 0;
+
+  function feature(name) {
+    return enabled && params.get(name) !== '0';
+  }
+
+  function shouldLoad(id) {
+    if (!enabled || unavailable.has(id)) return false;
+    const name = FEATURE_FOR[id];
+    return !name || feature(name);
+  }
+
+  function account(texture, pmrem) {
+    if (!texture || counted.has(texture.uuid)) return;
+    counted.add(texture.uuid);
+    textureBytes += pmrem ? 384 * 512 * 8 : textureByteSize(texture);
+  }
 
   async function loadOne(id) {
-    if (!enabled || unavailable.has(id) || templates.has(id)) return templates.get(id) || null;
+    if (templates.has(id)) return templates.get(id);
     const spec = manifest?.models?.[id];
     if (!spec?.url) {
       console.warn(`Model "${id}" is not in the manifest.`);
@@ -99,13 +135,13 @@ export function createAssetManager(renderer) {
     }
     try {
       const fileUrl = url(spec.url);
-      const buffer = await fetch(fileUrl).then((response) => {
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        return response.arrayBuffer();
-      });
-      textureBytes.set(id, estimateGlbTextureBytes(buffer.slice(0)));
-      const gltf = await loader.parseAsync(buffer, fileUrl);
+      const response = await fetch(fileUrl);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const gltf = await loader.parseAsync(await response.arrayBuffer(), fileUrl);
       prepareTemplate(gltf.scene);
+      const textures = new Set();
+      collectTextures(gltf.scene, textures);
+      for (const texture of textures) account(texture);
       templates.set(id, gltf);
       return gltf;
     } catch (error) {
@@ -115,8 +151,42 @@ export function createAssetManager(renderer) {
     }
   }
 
+  async function loadEnv(id) {
+    if (envTextures.has(id)) return envTextures.get(id);
+    const spec = manifest?.env?.[id];
+    if (!spec?.url) {
+      console.warn(`Env "${id}" is not in the manifest.`);
+      unavailable.add(id);
+      return null;
+    }
+    try {
+      const fileUrl = url(spec.url);
+      const texture = spec.url.endsWith('.hdr')
+        ? await hdrLoader.loadAsync(fileUrl)
+        : await ktx2.loadAsync(fileUrl);
+      envTextures.set(id, texture);
+      account(texture, spec.url.endsWith('.hdr'));
+      return texture;
+    } catch (error) {
+      console.warn(`Env "${id}" failed to load.`, error);
+      unavailable.add(id);
+      return null;
+    }
+  }
+
+  function firstMaterial(id) {
+    const gltf = templates.get(id);
+    if (!gltf) return null;
+    let found = null;
+    gltf.scene.traverse((child) => {
+      if (!found && child.isMesh && child.material) found = child.material;
+    });
+    return Array.isArray(found) ? found[0] : found;
+  }
+
   return {
     enabled,
+    feature,
     get manifest() {
       return manifest;
     },
@@ -133,17 +203,34 @@ export function createAssetManager(renderer) {
         return null;
       }
     },
-    async preload(modelIds, onProgress) {
-      const ids = enabled ? modelIds : [];
-      for (let i = 0; i < ids.length; i += 1) {
-        await loadOne(ids[i]);
-        onProgress?.({ loaded: i + 1, total: ids.length, id: ids[i] });
+    async preload(ids, onProgress) {
+      const queue = (enabled ? ids : []).filter((id) => shouldLoad(id));
+      for (let i = 0; i < queue.length; i += 1) {
+        const id = queue[i];
+        if (manifest?.env?.[id]) await loadEnv(id);
+        else await loadOne(id);
+        onProgress?.({ loaded: i + 1, total: queue.length, id });
       }
-      onProgress?.({ loaded: ids.length, total: ids.length });
+      onProgress?.({ loaded: queue.length, total: queue.length });
+    },
+    gltf(id) {
+      if (!shouldLoad(id)) return null;
+      return templates.get(id) || null;
+    },
+    material(id) {
+      if (!shouldLoad(id)) return null;
+      return firstMaterial(id);
+    },
+    texture(id) {
+      if (!shouldLoad(id)) return null;
+      return envTextures.get(id) || null;
+    },
+    hdr(id) {
+      return this.texture(id);
     },
     instance(modelId, opts = {}) {
       const gltf = templates.get(modelId);
-      if (!enabled || !gltf || unavailable.has(modelId)) return null;
+      if (!shouldLoad(modelId) || !gltf) return null;
       const root = gltf.scene.clone(true);
       fitInstance(root, opts);
       root.traverse((child) => {
@@ -155,10 +242,8 @@ export function createAssetManager(renderer) {
       return root;
     },
     stats() {
-      let bytes = 0;
-      for (const value of textureBytes.values()) bytes += value;
       return {
-        textureBytes: bytes,
+        textureBytes,
         models: templates.size,
         unavailable: [...unavailable],
       };
