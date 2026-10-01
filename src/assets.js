@@ -15,6 +15,11 @@ const FEATURE_FOR = {
   pines: 'trees',
   sky_backdrop: 'sky',
   sky_env: 'sky',
+  finds: 'finds',
+  ladder_kit: 'props4',
+  table: 'props4',
+  fire_pit: 'props4',
+  paint_can: 'props4',
 };
 
 const BYTES_PER_PIXEL = new Map([

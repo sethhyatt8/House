@@ -5,6 +5,8 @@ import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
+import { addLadderVisuals, createFollower, p4Node } from './props4.js';
+import { applyWorldUv } from './uv.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -462,7 +464,7 @@ function pebbleGeometry(seed) {
   return geometry;
 }
 
-function createFinds(scene, targets, rockMap) {
+function createFinds(scene, targets, rockMap, assets) {
   const pebbleMap = rockMap.clone();
   pebbleMap.repeat.set(1, 1);
   pebbleMap.offset.set(0.15, 0.2);
@@ -501,6 +503,10 @@ function createFinds(scene, targets, rockMap) {
     [0.28, 0.85, 0.038, 1.2],
     [-1.25, 0.35, 0.07, 2.0],
   ];
+  const useFinds = !!(assets?.feature('finds') && assets.gltf('finds'));
+  const pebbleBodies = [[], [], [], []];
+  const shellMeshes = [];
+  const starMeshes = [];
   stones.forEach(([x, z, size, spin], index) => {
     const stone = new THREE.Group();
     const body = new THREE.Mesh(pebbles[index % pebbles.length], index % 2 === 0 ? pebbleMat : pebbleDark);
@@ -516,6 +522,13 @@ function createFinds(scene, targets, rockMap) {
     stone.userData = { type: 'prop', label: 'stone', role: 'loose', floorY };
     scene.add(stone);
     targets.push(stone);
+    if (useFinds) {
+      body.material = proxyMaterial;
+      body.castShadow = false;
+      body.receiveShadow = false;
+      hit.material = proxyMaterial;
+      pebbleBodies[index % 4].push(body);
+    }
   });
   const pieces = [
     ['shell', shellGeo, shellMat, 0.9, -0.85, 1, 0.4],
@@ -537,7 +550,33 @@ function createFinds(scene, targets, rockMap) {
     mesh.userData = { type: 'prop', label, role: 'loose', floorY: 0 };
     scene.add(mesh);
     targets.push(mesh);
+    if (!useFinds) continue;
+    mesh.material = proxyMaterial;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    if (label === 'shell') shellMeshes.push(mesh);
+    else starMeshes.push(mesh);
   }
+  if (!useFinds) return { update() {} };
+  const followers = [0, 1, 2, 3].map((variant) => createFollower(
+    scene,
+    p4Node(assets, 'finds', `pebble_${variant}`),
+    pebbleBodies[variant],
+  ));
+  followers.push(createFollower(
+    scene,
+    p4Node(assets, 'finds', 'shell'),
+    shellMeshes,
+    new THREE.Matrix4().makeTranslation(0, 0, -0.0319),
+  ));
+  followers.push(createFollower(
+    scene,
+    p4Node(assets, 'finds', 'starfish'),
+    starMeshes,
+    undefined,
+    starMeshes.map((mesh) => (mesh.geometry === starGeo ? 0xffffff : 0xffc9a8)),
+  ));
+  return { update() { followers.forEach((follower) => follower.update()); } };
 }
 
 function tubeGeometry(profile, power, rings = 28, segs = 20) {
@@ -2082,8 +2121,11 @@ function createBite(scene, source, assets) {
   };
 }
 
-function createAnimalCase(scene, targets, sword, white, cave) {
+function createAnimalCase(scene, targets, sword, white, cave, assets) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x5c4638, roughness: 0.86 });
+  const roughWood = assets?.feature('props4') ? assets.material('rough_wood') : null;
+  const caseWood = roughWood ? roughWood.clone() : null;
+  if (caseWood) caseWood.color.set(0x8a6a56);
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0xe7eef0,
     roughness: 0.06,
@@ -2114,6 +2156,10 @@ function createAnimalCase(scene, targets, sword, white, cave) {
     base.castShadow = true;
     base.receiveShadow = true;
     group.add(base);
+    if (caseWood) {
+      base.material = caseWood;
+      applyWorldUv(base, 0.5);
+    }
     const pane = (w, h, d, px, py, pz) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glassMat);
       mesh.position.set(px, py, pz);
@@ -2779,29 +2825,6 @@ function createCanoe(scene, targets, cave, assets) {
   return { group, ends, oars, seat, hull, update, shove, stroke, floating, seatPoint, center };
 }
 
-export function applyWorldUv(mesh, tile) {
-  mesh.updateWorldMatrix(true, false);
-  const g = mesh.geometry;
-  const pos = g.attributes.position;
-  const nor = g.attributes.normal;
-  const uv = g.attributes.uv;
-  const m = mesh.matrixWorld;
-  const nm = new THREE.Matrix3().getNormalMatrix(m);
-  const p = new THREE.Vector3();
-  const n = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i += 1) {
-    p.fromBufferAttribute(pos, i).applyMatrix4(m);
-    n.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize();
-    const ax = Math.abs(n.x);
-    const ay = Math.abs(n.y);
-    const az = Math.abs(n.z);
-    if (ax >= ay && ax >= az) uv.setXY(i, (n.x > 0 ? -p.z : p.z) / tile, p.y / tile);
-    else if (ay >= az) uv.setXY(i, p.x / tile, (n.y > 0 ? -p.z : p.z) / tile);
-    else uv.setXY(i, (n.z > 0 ? p.x : -p.x) / tile, p.y / tile);
-  }
-  uv.needsUpdate = true;
-}
-
 function tintRock(material) {
   if (!material) return;
   const tint = Number(new URLSearchParams(location.search).get('rocktint'));
@@ -2950,6 +2973,7 @@ function createCliff(scene, targets, assets) {
   recess.position.set(0.05, (pierTop + pierBot) / 2, 0);
   ladder.add(recess);
   const rungs = [];
+  const rungMeshes = [];
   const rungYs = [];
   for (let y = shaftTop - 0.42; y >= WATER_Y + 1.05; y -= 0.46) rungYs.push(y);
   rungYs.forEach((y) => {
@@ -2964,6 +2988,7 @@ function createCliff(scene, targets, assets) {
     rung.receiveShadow = true;
     rung.userData = { type: 'rung', ladder, index: rungs.length };
     ladder.add(rung);
+    rungMeshes.push(rung);
     rungs.push(y);
   });
   ladder.userData = {
@@ -3021,6 +3046,23 @@ function createCliff(scene, targets, assets) {
       object.material = floorRock ? rockFloor : rockCliff;
     });
     stoneMap.dispose();
+  }
+  if (assets?.feature('props4')) {
+    const w = rungW * 0.78;
+    const y0 = rungYs[rungYs.length - 1] - 0.4;
+    const y1 = rungYs[0] + 0.42;
+    const dressed = addLadderVisuals(
+      ladder,
+      assets,
+      [-1, 1].map((side) => ({ x: -0.2, y0, y1, z: side * (w / 2 + 0.025), w: 0.06, d: 0.05 })),
+      rungYs.map((y) => ({ x: -0.2, y, sx: 0.09, sy: 0.035, sz: w })),
+    );
+    if (dressed) {
+      rungMeshes.forEach((rung) => {
+        rung.material = proxyMaterial;
+        rung.castShadow = false;
+      });
+    }
   }
 
   const lip = new THREE.Mesh(
@@ -3231,6 +3273,7 @@ function createCliff(scene, targets, assets) {
     z0: doorZ0,
     z1: doorZ1,
     mouthH: 2.15,
+    assets,
   });
   cave.tunnel = gallery.tunnel;
   cave.room = gallery.room;
@@ -3309,20 +3352,23 @@ function createRoomCard(scene) {
   return { mesh, setRoomCode };
 }
 
-function createLadder(scene, targets, x, z, roofY) {
+function createLadder(scene, targets, x, z, roofY, assets) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d5342, roughness: 0.88 });
   const group = new THREE.Group();
   group.position.set(x, 0, z);
   const top = roofY + 0.28;
   const railH = top - 0.08;
   const railGeo = new THREE.BoxGeometry(0.05, railH, 0.045);
+  const railMeshes = [];
   [-0.18, 0.18].forEach((side) => {
     const rail = new THREE.Mesh(railGeo, wood);
     rail.position.set(0.04, 0.08 + railH / 2, side);
     rail.castShadow = true;
     group.add(rail);
+    railMeshes.push(rail);
   });
   const rungs = [];
+  const rungMeshes = [];
   const rungGeo = new THREE.BoxGeometry(0.06, 0.035, 0.4);
   const padGeo = new THREE.BoxGeometry(0.08, 0.05, 0.42);
   const padMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
@@ -3336,11 +3382,30 @@ function createLadder(scene, targets, x, z, roofY) {
     pad.position.set(0, 0, 0);
     pad.userData = rung.userData;
     rung.add(pad);
+    rungMeshes.push(rung);
     rungs.push(y);
   }
   group.userData = { rungs, roofY };
   scene.add(group);
   targets.push(group);
+  if (assets?.feature('props4') && addLadderVisuals(
+    group,
+    assets,
+    [-0.18, 0.18].map((z) => ({ x: 0.04, y0: 0.08, y1: 0.08 + railH, z, w: 0.05, d: 0.045 })),
+    rungs.map((y) => ({ x: 0.02, y, sx: 0.06, sy: 0.035, sz: 0.4 })),
+  )) {
+    for (const mesh of [...railMeshes, ...rungMeshes]) {
+      mesh.material = proxyMaterial;
+      mesh.castShadow = false;
+    }
+    rungMeshes.forEach((rung) => {
+      rung.children.forEach((pad) => {
+        if (!pad.isMesh) return;
+        pad.material = proxyMaterial;
+        pad.castShadow = false;
+      });
+    });
+  }
 }
 
 function createCrateYard(scene, targets, rockMap, assets) {
@@ -3717,7 +3782,7 @@ export function createWorld({ assets } = {}) {
     roomZ0: -roomZ,
     roomZ1: roomZ,
   };
-  createLadder(scene, targets, coverFrom - 0.14, -0.65, roofTop);
+  createLadder(scene, targets, coverFrom - 0.14, -0.65, roofTop, assets);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(roomSpan, roomZ * 2),
@@ -3811,6 +3876,28 @@ export function createWorld({ assets } = {}) {
     table.add(leg);
     legs.push(leg);
   }
+  const tableTop = assets?.feature('props4') ? p4Node(assets, 'table', 'table_top') : null;
+  const tableLeg = assets?.feature('props4') ? p4Node(assets, 'table', 'table_leg') : null;
+  if (tableTop && tableLeg) {
+    const topVis = tableTop.clone();
+    topVis.raycast = () => {};
+    topVis.scale.set(topW, 0.045, topD);
+    topVis.castShadow = true;
+    topVis.receiveShadow = true;
+    top.add(topVis);
+    top.material = proxyMaterial;
+    top.castShadow = false;
+    top.receiveShadow = false;
+    legs.forEach((leg) => {
+      const visual = tableLeg.clone();
+      visual.raycast = () => {};
+      visual.scale.set(0.06, 0.7, 0.06);
+      visual.castShadow = true;
+      leg.add(visual);
+      leg.material = proxyMaterial;
+      leg.castShadow = false;
+    });
+  }
   function layoutTable(scale) {
     const w = plateW * scale + 0.16;
     const d = plateD * scale + 0.16;
@@ -3844,12 +3931,12 @@ export function createWorld({ assets } = {}) {
     const kind = targets[i].userData?.type;
     if (kind === 'ui' || kind === 'plate') targets.splice(i, 1);
   }
-  createFinds(scene, targets, rockMap);
+  const finds = createFinds(scene, targets, rockMap, assets);
   const sharks = createSharks(scene, cliff.splash, assets);
   const angels = createAngels(scene, assets);
   const birds = createBirds(scene, assets);
   const bite = createBite(scene, sharks.white, assets);
-  createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave);
+  createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
@@ -3878,6 +3965,7 @@ export function createWorld({ assets } = {}) {
       puddles.update(dt);
       canoe.update(dt);
       gear.update(dt);
+      finds.update();
     },
     gear,
     yard,

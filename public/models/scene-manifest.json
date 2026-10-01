@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Phase 1 draft. Positions are copied from the current procedural code (world.js / gear.js). 'fit' tells the asset manager how to scale a model from its bounding box, so no hand-computed scale factors are needed. Units: metres, radians, three.js Y-up. Phase 2 adds env, rock materials, sea boulders, and pines.",
+  "notes": "Phase 1 draft. Positions are copied from the current procedural code (world.js / gear.js). 'fit' tells the asset manager how to scale a model from its bounding box, so no hand-computed scale factors are needed. Units: metres, radians, three.js Y-up. Phase 2 adds env, rock materials, sea boulders, and pines. Phase 4 reuses — rough_wood: phase 3 material: createAnimalCase base, clone tinted 0x8a6a56, applyWorldUv(base, 0.5) | rock_cliff: phase 2: gallery shell boxes (dark 0x14110e), clone tinted 0x4a423a, applyWorldUv(box, 2.42) | rock_floor: phase 2: gallery floor boxes (0x1a1612) tinted 0x5a5048 with tile 2.0; gear.js puzzle plinth untinted with tile 2.0",
   "models": {
     "crate": {
       "url": "models/props/wooden_crate_02.glb",
@@ -585,6 +585,235 @@
         0,
         0.5
       ]
+    },
+    "finds": {
+      "url": "models/finds/finds.glb",
+      "kind": "kit",
+      "nodes": [
+        "pebble_0",
+        "pebble_1",
+        "pebble_2",
+        "pebble_3",
+        "shell",
+        "starfish"
+      ],
+      "source": {
+        "pebble_0..3": "https://polyhaven.com/a/namaqualand_stones_01",
+        "shell": "https://polyhaven.com/a/lambis_shell",
+        "starfish": "https://poly.pizza/m/6H-0K9IEr56"
+      },
+      "author": {
+        "pebbles": "Greg Zaal, Jenelle van Heerden (Poly Haven)",
+        "shell": "Kuutti Siitonen (Poly Haven)",
+        "starfish": "Poly by Google"
+      },
+      "license": {
+        "pebbles": "CC0",
+        "shell": "CC0",
+        "starfish": "CC-BY 3.0 (credit required, see CREDITS-phase4.md)"
+      },
+      "tris": 2024,
+      "bytes": 251780,
+      "texVramMB": 0.306,
+      "nodeTris": {
+        "pebble_0": 290,
+        "pebble_1": 108,
+        "pebble_2": 236,
+        "pebble_3": 132,
+        "shell": 998,
+        "starfish": 260
+      },
+      "nodeBox": {
+        "pebble_n": "unit stone: x in [-1,1], y about +-0.49..0.67, z about +-0.53..1, centred. Same frame as pebbleGeometry(seed): instance matrix = stone body.matrixWorld (inherits body.scale (size, size*0.72, size*0.9)).",
+        "shell": {
+          "min": [
+            -0.065,
+            0,
+            -0.0349
+          ],
+          "max": [
+            0.065,
+            0.0431,
+            0.0349
+          ]
+        },
+        "starfish": {
+          "min": [
+            -0.1332,
+            0,
+            -0.135
+          ],
+          "max": [
+            0.1332,
+            0.0409,
+            0.135
+          ]
+        }
+      },
+      "params": {
+        "pebbleVariant": "stone index % 4 (same as the procedural variant)",
+        "shellLocalOffset": [
+          0,
+          0,
+          -0.0319
+        ],
+        "shellNote": "offset = centre of the procedural shellGeometry bbox in xz (measured: x -0.0653..0.0653, z -0.0859..0.0221); GLB base sits at y 0 like the proxy",
+        "starfishInstanceColor": "first starfish geometry 0xffffff, the other one 0xffc9a8",
+        "instancing": "1 InstancedMesh per node (4 pebbles each, 4 shells, 4 starfish); per frame matrix = proxy.matrixWorld (pebbles: body.matrixWorld) x local; scale 0 when the proxy or an ancestor is invisible or detached (stowed/held in bag)"
+      }
+    },
+    "ladder_kit": {
+      "url": "models/props4/ladder_kit.glb",
+      "kind": "kit",
+      "nodes": [
+        "ladder_rail",
+        "ladder_rung"
+      ],
+      "source": "https://polyhaven.com/a/wooden_ladder",
+      "author": "Miroslav Turura (Poly Haven)",
+      "license": "CC0",
+      "tris": 120,
+      "bytes": 374464,
+      "texVramMB": 0.525,
+      "nodeTris": {
+        "ladder_rail": 12,
+        "ladder_rung": 108
+      },
+      "nodeBox": {
+        "ladder_rail": {
+          "min": [
+            -0.5,
+            0,
+            -0.5
+          ],
+          "max": [
+            0.5,
+            1,
+            0.5
+          ]
+        },
+        "ladder_rung": {
+          "size": [
+            0.09,
+            0.02,
+            0.44
+          ],
+          "centred": true
+        }
+      },
+      "params": {
+        "railSegments": "the source is a step ladder, so this is a kit: rail = unit beam UV-mapped to 1 m of the rail strip in the atlas. Use n = ceil(length / 0.96) segments, each scaled (w, length/n, d) and stacked from y0; never stretch one segment over the full rail",
+        "roofLadder": "createLadder: rails at (0.04, 0.08 + i*L, +-0.18) scale (0.05, L, 0.045), L = railH/n; rungs at (0.02, rung.position.y, 0) scale (0.06/0.09, 0.035/0.02, 0.4/0.44)",
+        "cliffLadder": "createCliff ladder: stone rungs Box(0.18, 0.07, rungW*0.78) hidden; wood rungs at (-0.2, y, 0) scale (1, 0.035/0.02, rungW*0.78/0.44); rails x -0.2, z +-(rungW*0.78/2 + 0.025), scale (0.06, L, 0.05), from lowest rung y - 0.4 to highest rung y + 0.42. Stone courses and recess stay visible",
+        "measured": {
+          "roof": {
+            "railH": 3.46,
+            "railSegments": 8,
+            "rungs": 10
+          },
+          "cliff": {
+            "rungW*0.78": 0.647,
+            "y0": -7.22,
+            "y1": -0.42,
+            "railSegments": 16,
+            "rungs": 14
+          }
+        }
+      }
+    },
+    "table": {
+      "url": "models/props4/table.glb",
+      "kind": "kit",
+      "nodes": [
+        "table_top",
+        "table_leg"
+      ],
+      "source": "https://polyhaven.com/a/wooden_table_02",
+      "author": "Serhii Khromov (Poly Haven)",
+      "license": "CC0",
+      "tris": 106,
+      "bytes": 252732,
+      "texVramMB": 0.525,
+      "nodeTris": {
+        "table_top": 76,
+        "table_leg": 30
+      },
+      "nodeBox": {
+        "table_top": {
+          "min": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "max": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        "table_leg": {
+          "min": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "max": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      },
+      "params": {
+        "use": "unit cubes. table_top = child of the procedural top with scale (topW, 0.045, topD); table_leg = child of each leg with scale (0.06, 0.7, 0.06). layoutTable(scale) keeps scaling/moving the proxies, so the visuals follow. The baseplate (plate, gridGroup, buildRoot) is untouched: grid alignment is exact by construction."
+      }
+    },
+    "fire_pit": {
+      "url": "models/props4/fire_pit.glb",
+      "kind": "prop",
+      "source": "https://polyhaven.com/a/stone_fire_pit",
+      "author": "Sebastian Platen (Poly Haven)",
+      "license": "CC0",
+      "tris": 1165,
+      "bytes": 419436,
+      "texVramMB": 0.525,
+      "bboxSize": [
+        0.8,
+        0.214,
+        0.792
+      ],
+      "originNote": "x/z centred, base at y 0",
+      "params": {
+        "use": "child of the gallery 'fire' group at (0,0,0); logs, flames and fireLight unchanged"
+      }
+    },
+    "paint_can": {
+      "url": "models/props4/paint_can.glb",
+      "kind": "kit",
+      "nodes": [
+        "paintcan_body",
+        "paintcan_paint"
+      ],
+      "source": "https://poly.pizza/m/9pyBQ8e4tSy",
+      "author": "Jarlan Perez",
+      "license": "CC-BY 3.0 (credit required, see CREDITS-phase4.md)",
+      "tris": 524,
+      "bytes": 3600,
+      "texVramMB": 0,
+      "nodeTris": {
+        "paintcan_body": 466,
+        "paintcan_paint": 58
+      },
+      "bboxSize": [
+        0.172,
+        0.15,
+        0.157
+      ],
+      "originNote": "centred (y -0.075..0.075) = same frame as the bucket group (body CylinderGeometry(0.085, 0.075, 0.15) centred)",
+      "params": {
+        "use": "2 InstancedMeshes (body: vertex colours; paint: white material, instanceColor = the bucket's PAINTS colour) at each bucket group's matrixWorld; hide the cylinder body (proxyMaterial); move the coat CircleGeometry to y 0.046 (paint surface, radius ~0.07)",
+        "coatY": 0.046
+      }
     }
   },
   "placements": [
@@ -869,6 +1098,15 @@
       "bag",
       "crab",
       "rough_wood"
+    ],
+    "finds": [
+      "finds"
+    ],
+    "props4": [
+      "ladder_kit",
+      "table",
+      "fire_pit",
+      "paint_can"
     ]
   }
 }
