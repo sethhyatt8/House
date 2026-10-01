@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyPlacements } from './assets.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createGallery } from './gallery.js';
@@ -3021,11 +3022,12 @@ function createCrateYard(scene, targets, rockMap) {
   slab.receiveShadow = true;
   scene.add(slab);
   const rim = new THREE.MeshStandardMaterial({ color: 0x7c756c, roughness: 1 });
-  [[yard.x0 + 0.55, yard.z1 - 0.7, 0.48], [yard.x1 - 0.6, yard.z1 - 0.85, 0.4], [yard.x1 - 0.5, 3.35, 0.32]].forEach(([x, z, radius]) => {
+  [[yard.x0 + 0.55, yard.z1 - 0.7, 0.48], [yard.x1 - 0.6, yard.z1 - 0.85, 0.4], [yard.x1 - 0.5, 3.35, 0.32]].forEach(([x, z, radius], index) => {
     const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 1), rim);
     boulder.position.set(x, radius * 0.42, z);
     boulder.castShadow = true;
     boulder.receiveShadow = true;
+    boulder.userData = { placeId: `yard-boulder-${index}` };
     scene.add(boulder);
   });
 
@@ -3185,7 +3187,7 @@ function createForest(scene) {
   });
 }
 
-export function createWorld() {
+export function createWorld({ assets } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
   scene.fog = new THREE.Fog(0x10182c, 18, 210);
@@ -3250,14 +3252,14 @@ export function createWorld() {
   floor.receiveShadow = true;
   scene.add(floor);
   const boulderMat = new THREE.MeshStandardMaterial({ map: rockMap, color: 0x9a9186, roughness: 1 });
-  [[1.35, -0.35, 0.34, 0.7], [0.15, 1.55, 0.22, 1.4], [2.05, -1.7, 0.28, 0.4]].forEach(([x, z, radius, spin]) => {
+  [[1.35, -0.35, 0.34, 0.7], [0.15, 1.55, 0.22, 1.4], [2.05, -1.7, 0.28, 0.4]].forEach(([x, z, radius, spin], index) => {
     const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 1), boulderMat);
     const floorY = radius * 0.42;
     boulder.position.set(x, floorY, z);
     boulder.rotation.set(spin, spin * 0.6, spin * 0.2);
     boulder.castShadow = true;
     boulder.receiveShadow = true;
-    boulder.userData = { type: 'prop', label: 'stone', role: 'loose', floorY };
+    boulder.userData = { type: 'prop', label: 'stone', role: 'loose', floorY, placeId: `room-boulder-${index}` };
     scene.add(boulder);
     targets.push(boulder);
   });
@@ -3372,6 +3374,7 @@ export function createWorld() {
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave);
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery);
   const { yard, crates } = createCrateYard(scene, targets, rockMap);
+  applyPlacements(scene, assets, assets?.manifest, { targets });
   createForest(scene);
 
   return {
