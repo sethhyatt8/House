@@ -663,10 +663,12 @@ function groundUnder(x, z, feetY) {
   if (overRoof && feetY >= roof.y - 0.25) return standHeight(x, z, feetY, roof.y);
   const cave = world.cave;
   if (cave && feetY < -1 && x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return cave.floor;
+  const pad = cave?.pad;
+  if (pad && feetY < -1 && x >= pad.x0 && x <= pad.x1 && z >= pad.z0 && z <= pad.z1) return cave.floor;
   if (cave?.tunnel && feetY < -1 && x >= cave.tunnel.x0 && x <= cave.tunnel.x1 && z >= cave.tunnel.z0 && z <= cave.tunnel.z1) return cave.floor;
   if (cave?.room && feetY < -1 && x >= cave.room.x0 && x <= cave.room.x1 && z >= cave.room.z0 && z <= cave.room.z1) return cave.floor;
   const shaft = world.shaft;
-  if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.85 && Math.abs(z - shaft.z) < 0.7) return shaft.floor;
+  if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.42 && Math.abs(z - shaft.z) < 0.5) return shaft.floor;
   const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
   if (overFloor) return standHeight(x, z, feetY, 0);
   const yard = world.yard;
@@ -2594,6 +2596,8 @@ function overCave(x, z) {
   const cave = world.cave;
   if (!cave) return false;
   if (x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return true;
+  const pad = cave.pad;
+  if (pad && x >= pad.x0 && x <= pad.x1 && z >= pad.z0 && z <= pad.z1) return true;
   const tunnel = cave.tunnel;
   if (tunnel && x >= tunnel.x0 && x <= tunnel.x1 && z >= tunnel.z0 && z <= tunnel.z1) return true;
   const room = cave.room;

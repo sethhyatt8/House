@@ -2449,7 +2449,7 @@ function createCanoe(scene, targets, cave) {
     group.add(oar);
     oars.push(oar);
   });
-  group.position.set(cave.boatX, cave.floor + 0.12, cave.z);
+  group.position.set(cave.boatX, cave.floor + 0.12, cave.z + 2.45);
   scene.add(group);
   targets.push(group);
 
@@ -2574,7 +2574,10 @@ function createCliff(scene, targets) {
   mass(caveBack, caveBack + 0.7, yBot, caveTop, doorZ1, caveZ1);
   mass(caveBack, caveBack + 0.7, doorTop, caveTop, doorZ0, doorZ1);
   mass(caveBack, caveBack + 0.7, yBot, doorSill, doorZ0, doorZ1);
-  mass(-3.6, caveBack, yBot, WATER_Y + 0.02, caveZ0, caveZ1);
+  const lipX = -1.65;
+  const padX0 = -2.55;
+  mass(lipX, caveBack, yBot, WATER_Y + 0.02, caveZ0, caveZ1);
+  mass(padX0, lipX, yBot, WATER_Y + 0.02, shaftZ0, shaftZ1);
   slab(-12, caveZ0, yBot, yTop);
   slab(caveZ1, 12, yBot, yTop);
   slab(caveZ0, caveZ1, yBot, caveBot);
@@ -2591,13 +2594,21 @@ function createCliff(scene, targets) {
 
   const caveMid = shaftMid;
   const beachTop = WATER_Y + 0.08;
+  const beachFar = 3.95;
   const beach = new THREE.Mesh(
-    new THREE.BoxGeometry(7.6, 0.28, caveZ1 - caveZ0 - 0.5),
+    new THREE.BoxGeometry(beachFar - lipX, 0.28, caveZ1 - caveZ0 - 0.5),
     rock,
   );
-  beach.position.set(0.15, beachTop - 0.14, caveMid);
+  beach.position.set((beachFar + lipX) / 2, beachTop - 0.14, caveMid);
   beach.receiveShadow = true;
   scene.add(beach);
+  const pad = new THREE.Mesh(
+    new THREE.BoxGeometry(lipX - padX0, 0.28, shaftZ1 - shaftZ0),
+    rock,
+  );
+  pad.position.set((padX0 + lipX) / 2, beachTop - 0.14, caveMid);
+  pad.receiveShadow = true;
+  scene.add(pad);
   const shoal = new THREE.Mesh(
     new THREE.BoxGeometry(3.4, 0.16, caveZ1 - caveZ0),
     new THREE.MeshStandardMaterial({ color: 0x8a8176, roughness: 1 }),
@@ -2646,14 +2657,15 @@ function createCliff(scene, targets) {
   targets.push(ladder);
   const cave = {
     floor: beachTop,
-    x0: -3.45,
+    x0: lipX,
     x1: 4.05,
+    pad: { x0: padX0, x1: lipX, z0: shaftZ0, z1: shaftZ1 },
     z0: caveZ0 + 0.3,
     z1: caveZ1 - 0.3,
     z: caveMid,
     standX: -1.15,
     standZ: caveMid,
-    boatX: -1.7,
+    boatX: -1.05,
     wetX: -3.15,
     lane: 2.8,
   };
