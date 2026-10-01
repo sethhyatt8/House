@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { applyPlacements } from './assets.js';
+import { applyPlacements, proxyMaterial } from './assets.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createGallery } from './gallery.js';
@@ -3005,7 +3005,7 @@ function createLadder(scene, targets, x, z, roofY) {
   targets.push(group);
 }
 
-function createCrateYard(scene, targets, rockMap) {
+function createCrateYard(scene, targets, rockMap, assets) {
   const map = rockMap.clone();
   map.wrapS = THREE.RepeatWrapping;
   map.wrapT = THREE.RepeatWrapping;
@@ -3049,18 +3049,51 @@ function createCrateYard(scene, targets, rockMap) {
   }));
   const bandMat = new THREE.MeshStandardMaterial({ color: 0x3e2918, roughness: 0.9 });
   const crates = [];
+  let nativeCrate = null;
+  let crateYaw = 0;
+
+  function crateFoot(h, w, d) {
+    if (!assets?.enabled) return { w, h, d, model: false };
+    if (nativeCrate === false) return { w, h, d, model: false };
+    if (!nativeCrate) {
+      const probe = assets.instance('crate', { fit: { uniform: 1 } });
+      if (!probe) {
+        nativeCrate = false;
+        return { w, h, d, model: false };
+      }
+      probe.updateWorldMatrix(true, true);
+      nativeCrate = new THREE.Box3().setFromObject(probe).getSize(new THREE.Vector3());
+      crateYaw = nativeCrate.x > nativeCrate.z ? Math.PI / 2 : 0;
+    }
+    const scale = h / (nativeCrate.y || 1);
+    const across = Math.min(nativeCrate.x, nativeCrate.z) * scale;
+    const along = Math.max(nativeCrate.x, nativeCrate.z) * scale;
+    return { w: across, h, d: along, model: true };
+  }
 
   function addCrate(x, z, w, h, d, layer) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woods[crates.length % woods.length]);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    const band = new THREE.Mesh(new THREE.BoxGeometry(w * 0.1, h * 1.02, d * 1.02), bandMat);
-    band.position.x = w * 0.18;
-    mesh.add(band);
-    const band2 = band.clone();
-    band2.position.x = -w * 0.22;
-    mesh.add(band2);
+    const visual = assets?.enabled ? assets.instance('crate', { fit: { height: h }, anchor: 'center' }) : null;
+    if (visual) visual.rotation.y = crateYaw;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      visual ? proxyMaterial : woods[crates.length % woods.length],
+    );
+    if (visual) {
+      mesh.add(visual);
+    } else {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const band = new THREE.Mesh(new THREE.BoxGeometry(w * 0.1, h * 1.02, d * 1.02), bandMat);
+      band.position.x = w * 0.18;
+      mesh.add(band);
+      const band2 = band.clone();
+      band2.position.x = -w * 0.22;
+      mesh.add(band2);
+    }
     mesh.position.set(x, h / 2 + layer * h, z);
+    if (visual && (x - w / 2 < yard.x0 || x + w / 2 > yard.x1 || z - d / 2 < yard.z0 || z + d / 2 > yard.z1)) {
+      console.warn('Crate sits outside the yard.', { x, z, w, d });
+    }
     mesh.userData = {
       type: 'prop',
       label: 'crate',
@@ -3093,14 +3126,47 @@ function createCrateYard(scene, targets, rockMap) {
     }
   }
 
-  pile(-0.85, 3.55, 3, 2, 2, 0.52, 0.46, 0.48);
-  pile(1.35, 4.7, 3, 2, 2, 0.48, 0.42, 0.46);
-  pile(-0.7, 6.15, 2, 3, 2, 0.5, 0.44, 0.46);
-  pile(1.15, 7.55, 3, 2, 2, 0.46, 0.42, 0.5);
-  pile(-0.4, 8.85, 2, 2, 1, 0.55, 0.4, 0.48);
-  [[0.55, 3.15, 0.5, 0.42, 0.48], [1.85, 3.4, 0.62, 0.4, 0.46], [-1.15, 4.85, 0.44, 0.5, 0.44], [2.35, 6.4, 0.5, 0.38, 0.52]].forEach(([x, z, w, h, d]) => {
-    addCrate(x, z, w, h, d, 0);
-  });
+  function placeProcedural() {
+    pile(-0.85, 3.55, 3, 2, 2, 0.52, 0.46, 0.48);
+    pile(1.35, 4.7, 3, 2, 2, 0.48, 0.42, 0.46);
+    pile(-0.7, 6.15, 2, 3, 2, 0.5, 0.44, 0.46);
+    pile(1.15, 7.55, 3, 2, 2, 0.46, 0.42, 0.5);
+    pile(-0.4, 8.85, 2, 2, 1, 0.55, 0.4, 0.48);
+    [[0.55, 3.15, 0.5, 0.42, 0.48], [1.85, 3.4, 0.62, 0.4, 0.46], [-1.15, 4.85, 0.44, 0.5, 0.44], [2.35, 6.4, 0.5, 0.38, 0.52]].forEach(([x, z, w, h, d]) => {
+      addCrate(x, z, w, h, d, 0);
+    });
+  }
+
+  function placeWithModels() {
+    const placePile = (side, near, cols, rows, layers, h) => {
+      const foot = crateFoot(h, h, h);
+      const stepX = foot.w + 0.04;
+      const stepZ = foot.d + 0.04;
+      const x = side === 'right'
+        ? yard.x1 - 0.08 - foot.w / 2 - (cols - 1) * stepX
+        : yard.x0 + 0.08 + foot.w / 2;
+      const z = near + foot.d / 2;
+      pile(x, z, cols, rows, layers, foot.w, foot.h, foot.d);
+      return z + (rows - 1) * stepZ + foot.d / 2;
+    };
+    const placeLoose = (x, near, h) => {
+      const foot = crateFoot(h, h, h);
+      const z = near + foot.d / 2;
+      addCrate(x, z, foot.w, foot.h, foot.d, 0);
+      return z + foot.d / 2;
+    };
+    const leftA = placePile('left', yard.z0 + 0.06, 3, 2, 2, 0.46);
+    const leftB = placePile('left', leftA + 0.16, 3, 2, 2, 0.42);
+    placePile('left', leftB + 0.16, 2, 2, 1, 0.40);
+    const rightA = placePile('right', yard.z0 + 0.06, 3, 2, 2, 0.42);
+    placePile('right', rightA + 0.16, 2, 3, 2, 0.44);
+    let near = yard.z0 + 0.08;
+    const mid = (yard.x0 + yard.x1) * 0.5;
+    for (const h of [0.42, 0.40, 0.50, 0.38]) near = placeLoose(mid, near, h) + 0.14;
+  }
+
+  if (crateFoot(0.46, 0.52, 0.48).model) placeWithModels();
+  else placeProcedural();
   return { yard, crates };
 }
 
@@ -3373,7 +3439,7 @@ export function createWorld({ assets } = {}) {
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave);
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery);
-  const { yard, crates } = createCrateYard(scene, targets, rockMap);
+  const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
   createForest(scene);
 
