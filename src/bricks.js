@@ -251,7 +251,8 @@ export function createBrick(shape, color, options = {}) {
 export function setBrickRaycast(brick, enabled) {
   const raycast = enabled ? THREE.Mesh.prototype.raycast : () => {};
   brick.traverse((child) => {
-    if (child.isMesh) child.raycast = raycast;
+    if (!child.isMesh) return;
+    child.raycast = child.userData.visualOnly ? () => {} : raycast;
   });
 }
 

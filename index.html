@@ -81,9 +81,49 @@
         min-height: 1.2em;
         opacity: 0.86;
       }
+      #watch-panel {
+        z-index: 6;
+      }
+      #loading {
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(22, 24, 28, 0.92);
+        color: #f7f2ea;
+      }
+      #loading[hidden] {
+        display: none;
+      }
+      #loading .panel {
+        width: min(280px, calc(100vw - 48px));
+      }
+      #loading .label {
+        margin-bottom: 10px;
+        font-weight: 650;
+      }
+      #loading .track {
+        height: 8px;
+        border-radius: 6px;
+        background: #2a3038;
+        overflow: hidden;
+      }
+      #loading-bar {
+        width: 0%;
+        height: 100%;
+        background: #1f7a45;
+      }
     </style>
   </head>
   <body>
+    <div id="loading">
+      <div class="panel">
+        <div class="label">Loading</div>
+        <div class="track"><div id="loading-bar"></div></div>
+      </div>
+    </div>
     <div id="watch-panel">
       <div id="room-line"><span id="room-label">Room</span> <strong id="room-code">----</strong></div>
       <form id="watch-form">

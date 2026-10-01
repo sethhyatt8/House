@@ -7,6 +7,7 @@ import { cellsFromGrid, generateModel, lookVerdict, sameLook } from './challenge
 import { colorById, GRID_X, GRID_Z, HEIGHT, heightById, LAYER, MAX_PEDESTALS, partLabel, PEG_MAX, PEG_MIN, shapeById, STUD, STUD_H } from './config.js';
 import { brickLocalPosition, canPlaceAssembly, columnTop, connectedBricks, createGrid, findAssemblySnap, findSnap, footprintOf, occupy, release, rotatePieceRecords } from './grid.js';
 import { hostRoomCode, openRoom, watchCodeFromUrl } from './watch.js';
+import { createAssetManager } from './assets.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 
 const statusEl = document.getElementById('status');
@@ -19,14 +20,22 @@ const roomLabelEl = document.getElementById('room-label');
 const watchForm = document.getElementById('watch-form');
 const watchInput = document.getElementById('watch-code');
 const watchNote = document.getElementById('watch-note');
-const watchParam = new URLSearchParams(location.search).get('watch');
+const pageParams = new URLSearchParams(location.search);
+const watchParam = pageParams.get('watch');
 const watching = watchParam != null;
 const roomCode = watching ? watchCodeFromUrl() : hostRoomCode();
 
-const world = createWorld();
-const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
-world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike });
-const grid = createGrid();
+watchForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const code = watchInput.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 4);
+  if (code.length < 4) {
+    watchNote.textContent = 'Room codes are 4 letters.';
+    return;
+  }
+  const next = new URL(location.href);
+  next.searchParams.set('watch', code);
+  location.href = next.toString();
+});
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -34,9 +43,13 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMapping = pageParams.get('tone') === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.xr.enabled = true;
+const xrScale = Number(pageParams.get('xrscale'));
+renderer.xr.setFramebufferScaleFactor(Number.isFinite(xrScale) && xrScale > 0 ? xrScale : 1.3);
+const fovParam = pageParams.get('fov');
+renderer.xr.setFoveation(fovParam == null || fovParam === '' ? 1 : Number(fovParam));
 renderer.xr.setReferenceSpaceType('local-floor');
 renderer.localClippingEnabled = true;
 const envScene = new THREE.Scene();
@@ -49,8 +62,23 @@ const envGlow = new THREE.Mesh(new THREE.SphereGeometry(1.1, 16, 12), new THREE.
 envGlow.position.set(1.2, 3.4, 1.6);
 envScene.add(envGlow);
 const pmrem = new THREE.PMREMGenerator(renderer);
-world.scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+const envTexture = pmrem.fromScene(envScene, 0.04).texture;
 pmrem.dispose();
+
+const loadingEl = document.getElementById('loading');
+const loadingBar = document.getElementById('loading-bar');
+const assets = createAssetManager(renderer);
+await assets.loadManifest('models/scene-manifest.json');
+await assets.preload(['crate', 'boulder', 'hatchet'], ({ loaded, total }) => {
+  if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
+});
+if (loadingEl) loadingEl.hidden = true;
+
+const world = createWorld({ assets });
+world.scene.environment = envTexture;
+world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike });
+const grid = createGrid();
+const { scene, camera, buildRoot, gridGroup, targets, machine, roof } = world;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(XRButton.createButton(renderer, {
   optionalFeatures: ['local-floor', 'bounded-floor'],
@@ -808,18 +836,6 @@ if (watching) {
   paintSelection();
   startChallenge(true);
 }
-watchForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const code = watchInput.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 4);
-  if (code.length < 4) {
-    watchNote.textContent = 'Room codes are 4 letters.';
-    return;
-  }
-  const url = new URL(location.href);
-  url.searchParams.set('watch', code);
-  location.href = url.toString();
-});
-
 renderer.xr.addEventListener('sessionstart', () => {
   xrBaseSpace = renderer.xr.getReferenceSpace();
   xrOffset.set(0, 0, 0);
