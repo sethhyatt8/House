@@ -3338,7 +3338,9 @@ export function createWorld({ assets } = {}) {
   const key = new THREE.DirectionalLight(0xd5e2ff, 1.15);
   key.position.set(-7, 9, 2);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  const shadowParam = Number(new URLSearchParams(location.search).get('shadow'));
+  const shadowSize = Number.isFinite(shadowParam) && shadowParam > 0 ? shadowParam : 2048;
+  key.shadow.mapSize.set(shadowSize, shadowSize);
   key.shadow.radius = 2;
   key.shadow.camera.near = 0.4;
   key.shadow.camera.far = 8;
@@ -3438,7 +3440,7 @@ export function createWorld({ assets } = {}) {
   const birds = createBirds(scene);
   const bite = createBite(scene, sharks.white);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave);
-  const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery);
+  const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
   createForest(scene);
@@ -3482,6 +3484,7 @@ export function createWorld({ assets } = {}) {
     takeStrike: bite.takeStrike,
     biteFocus: bite.focus,
     roof,
+    keyLight: key,
   };
 }
 

@@ -836,6 +836,20 @@ if (watching) {
   paintSelection();
   startChallenge(true);
 }
+function applyShadowSize() {
+  const light = world.keyLight;
+  if (!light) return;
+  const param = pageParams.get('shadow');
+  const forced = param != null && param !== '' ? Number(param) : 0;
+  const size = Number.isFinite(forced) && forced > 0 ? forced : (renderer.xr.isPresenting ? 1024 : 2048);
+  if (light.shadow.mapSize.x === size) return;
+  light.shadow.mapSize.set(size, size);
+  if (light.shadow.map) {
+    light.shadow.map.dispose();
+    light.shadow.map = null;
+  }
+}
+
 renderer.xr.addEventListener('sessionstart', () => {
   xrBaseSpace = renderer.xr.getReferenceSpace();
   xrOffset.set(0, 0, 0);
@@ -844,6 +858,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   hudEl.style.display = 'none';
   if (scalePanel) scalePanel.style.display = 'none';
   controls.enabled = false;
+  applyShadowSize();
 });
 renderer.xr.addEventListener('sessionend', () => {
   xrBaseSpace = null;
@@ -854,6 +869,7 @@ renderer.xr.addEventListener('sessionend', () => {
   hudEl.style.display = watching ? '' : 'none';
   if (!watching && scalePanel) scalePanel.style.display = '';
   controls.enabled = true;
+  applyShadowSize();
 });
 
 const controllerFactory = new XRControllerModelFactory();
@@ -3160,6 +3176,38 @@ function startRelay() {
 
 let xrFrame = null;
 
+const perfEl = document.getElementById('perf');
+const showPerf = pageParams.get('stats') === '1';
+if (showPerf && perfEl) perfEl.hidden = false;
+let perfStamp = 0;
+let perfWarned = 0;
+
+function notePerf(time) {
+  if (!showPerf || !perfEl) return;
+  if (time - perfStamp < 500) return;
+  perfStamp = time;
+  const renderInfo = renderer.info.render;
+  const memory = renderer.info.memory;
+  const vram = assets.stats().textureBytes;
+  const over = renderInfo.calls > 150 || renderInfo.triangles > 500000 || vram > 150 * 1024 * 1024;
+  perfEl.style.color = over ? '#ffb4a8' : '#f7f2ea';
+  perfEl.textContent = [
+    `calls ${renderInfo.calls}`,
+    `tris ${renderInfo.triangles}`,
+    `geometries ${memory.geometries}`,
+    `textures ${memory.textures}`,
+    `vram ${(vram / (1024 * 1024)).toFixed(1)} MB`,
+  ].join('\n');
+  if (renderer.xr.isPresenting && over && time - perfWarned > 5000) {
+    perfWarned = time;
+    console.warn('XR frame is over the phase 1 budget.', {
+      calls: renderInfo.calls,
+      triangles: renderInfo.triangles,
+      textureBytes: vram,
+    });
+  }
+}
+
 function frame(time, frame) {
   xrFrame = frame ?? null;
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -3232,6 +3280,7 @@ function frame(time, frame) {
     }
   }
   renderer.render(scene, camera);
+  notePerf(time);
 }
 
 startRelay();

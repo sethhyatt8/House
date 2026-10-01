@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { proxyMaterial } from './assets.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const CAPACITY = 100;
@@ -58,7 +59,7 @@ function carryable(object) {
   return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush';
 }
 
-export function createGear(scene, camera, targets, roof, cave, gallery) {
+export function createGear(scene, camera, targets, roof, cave, gallery, assets) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d4c32, roughness: 0.78 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb7b8b4, roughness: 0.42, metalness: 0.55 });
   const leather = new THREE.MeshStandardMaterial({ color: 0x5a3824, roughness: 0.86 });
@@ -83,6 +84,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
   let owned = false;
   let menuOpen = false;
   let bladeReady = false;
+  let bladeLogged = false;
   let onPickup = null;
   let onChop = null;
   let onLoose = null;
@@ -144,7 +146,54 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
   thumb.rotation.z = 0.9;
   grip.add(thumb);
   hatchet.add(grip);
-  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade, grip };
+  const hatchetModel = assets?.enabled
+    ? assets.instance('hatchet', { fit: { uniform: 1 } })
+    : null;
+  if (hatchetModel) {
+    hatchetModel.rotation.y = Math.PI / 2;
+    hatchet.add(hatchetModel);
+    for (const part of [handle, head, blade]) {
+      part.material = proxyMaterial;
+      part.castShadow = false;
+      part.receiveShadow = false;
+    }
+    hatchet.updateWorldMatrix(true, true);
+    const bladeCenter = new THREE.Vector3();
+    const sample = new THREE.Vector3();
+    const samples = [];
+    let minX = Infinity;
+    let maxX = -Infinity;
+    hatchetModel.traverse((child) => {
+      const attr = child.geometry?.attributes?.position;
+      if (!child.isMesh || !attr) return;
+      child.updateWorldMatrix(true, false);
+      for (let i = 0; i < attr.count; i += 1) {
+        sample.fromBufferAttribute(attr, i);
+        child.localToWorld(sample);
+        hatchet.worldToLocal(sample);
+        samples.push(sample.x, sample.y, sample.z);
+        if (sample.x < minX) minX = sample.x;
+        if (sample.x > maxX) maxX = sample.x;
+      }
+    });
+    const cutoff = minX + (maxX - minX) * 0.65;
+    let sx = 0;
+    let sy = 0;
+    let sz = 0;
+    let count = 0;
+    for (let i = 0; i < samples.length; i += 3) {
+      if (samples[i] < cutoff) continue;
+      sx += samples[i];
+      sy += samples[i + 1];
+      sz += samples[i + 2];
+      count += 1;
+    }
+    if (count) blade.position.set(sx / count, sy / count, sz / count);
+    const modelBox = new THREE.Box3().setFromObject(hatchetModel);
+    blade.getWorldPosition(bladeCenter);
+    console.info('[hatchet] blade marker', blade.position.toArray(), 'inside model', modelBox.containsPoint(bladeCenter));
+  }
+  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: 0.04, blade, grip, hatchetModel };
   holdPose(hatchet, [0, -0.012, 0.06], [-Math.PI / 2, 0.08, -0.45]);
   scene.add(hatchet);
   enlist(hatchet);
@@ -1108,6 +1157,11 @@ export function createGear(scene, camera, targets, roof, cave, gallery) {
     else {
       hatchet.updateWorldMatrix(true, true);
       blade.getWorldPosition(bladeNow);
+      if (!bladeLogged && hatchet.userData.hatchetModel) {
+        bladeLogged = true;
+        const modelBox = new THREE.Box3().setFromObject(hatchet.userData.hatchetModel);
+        console.info('[hatchet] held blade', bladeNow.toArray(), 'model bbox', modelBox.min.toArray(), modelBox.max.toArray(), 'inside', modelBox.containsPoint(bladeNow));
+      }
       if (bladeReady && dt > 0) {
         const speed = bladeNow.distanceTo(bladePrev) / dt;
         if (speed > 2.1) swingHit(bladePrev, bladeNow);
