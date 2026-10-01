@@ -231,12 +231,18 @@ export function createGallery(scene, spec) {
     return null;
   }
 
-  function stamp(wall, x, y, color) {
-    const radius = Math.max(7, (0.022 / wall.width) * wall.canvas.width);
-    const ink = wall.ctx.createRadialGradient(x, y, radius * 0.2, x, y, radius);
+function stamp(wall, x, y, color, radiusPx, alpha) {
+  const radius = radiusPx == null ? Math.max(7, (0.022 / wall.width) * wall.canvas.width) : radiusPx;
+  const ink = wall.ctx.createRadialGradient(x, y, radius * 0.2, x, y, radius);
+  if (alpha == null) {
     ink.addColorStop(0, rgba(color, 0.96));
     ink.addColorStop(0.72, rgba(color, 0.84));
     ink.addColorStop(1, rgba(color, 0));
+  } else {
+    ink.addColorStop(0, rgba(color, alpha));
+    ink.addColorStop(0.72, rgba(color, alpha * 0.85));
+    ink.addColorStop(1, rgba(color, 0));
+  }
     wall.ctx.fillStyle = ink;
     wall.ctx.beginPath();
     wall.ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -275,6 +281,68 @@ export function createGallery(scene, spec) {
     }
     if (marked) saveTimer = 0.8;
     return marked;
+  }
+
+  const sprayRay = new THREE.Vector3();
+  const sprayOrigin = new THREE.Vector3();
+  const sprayDir = new THREE.Vector3();
+  const wallInverse = new THREE.Matrix4();
+
+  function spray(origin, dir, color, opts) {
+    if (!lit || !color) return [];
+    const cone = opts.cone;
+    const reach = opts.reach;
+    const flow = opts.flow;
+    const dt = opts.dt;
+    const count = Math.ceil(90 * flow * dt);
+    const aim = sprayDir.copy(dir).normalize();
+    const helper = Math.abs(aim.y) > 0.92 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(aim, helper).normalize();
+    const up = new THREE.Vector3().crossVectors(right, aim).normalize();
+    const distances = [];
+    const touched = new Set();
+    for (let i = 0; i < count; i += 1) {
+      const angle = Math.sqrt(Math.random()) * cone;
+      const spin = Math.random() * Math.PI * 2;
+      sprayRay.copy(aim)
+        .addScaledVector(right, Math.cos(spin) * Math.sin(angle))
+        .addScaledVector(up, Math.sin(spin) * Math.sin(angle))
+        .normalize();
+      let best = null;
+      let bestT = Infinity;
+      for (const wall of walls) {
+        wallInverse.copy(wall.mesh.matrixWorld).invert();
+        sprayOrigin.copy(origin).applyMatrix4(wallInverse);
+        const localDir = sprayRay.clone().transformDirection(wallInverse);
+        if (Math.abs(localDir.z) < 1e-6) continue;
+        const t = -sprayOrigin.z / localDir.z;
+        if (!(t > 0 && t <= reach * 1.6)) continue;
+        const x = sprayOrigin.x + localDir.x * t;
+        const y = sprayOrigin.y + localDir.y * t;
+        if (Math.abs(x) > wall.width / 2 || Math.abs(y) > wall.height / 2) continue;
+        if (t < bestT) {
+          bestT = t;
+          best = { wall, x, y, t };
+        }
+      }
+      distances.push(best ? best.t : reach * 1.6);
+      if (!best) continue;
+      const px = (best.x / best.wall.width + 0.5) * best.wall.canvas.width;
+      const py = (0.5 - best.y / best.wall.height) * best.wall.canvas.height;
+      const radiusPx = THREE.MathUtils.clamp(
+        ((0.004 + 0.012 * best.t * Math.tan(cone)) / best.wall.width) * best.wall.canvas.width,
+        1.5,
+        14,
+      );
+      const alpha = THREE.MathUtils.clamp(0.55 * flow / (1 + (best.t / reach) ** 2), 0.05, 0.6);
+      stamp(best.wall, px, py, color, radiusPx, alpha);
+      touched.add(best.wall);
+    }
+    touched.forEach((wall) => {
+      wall.texture.needsUpdate = true;
+    });
+    if (touched.size) saveTimer = 0.8;
+    return distances;
   }
 
   function save() {
@@ -329,6 +397,12 @@ export function createGallery(scene, spec) {
     tunnel: { x0: spec.mouthX - 0.15, x1: roomX0 + 0.25, z0: spec.z0 + 0.08, z1: spec.z1 - 0.08 },
     room: { x0: roomX0 - 0.1, x1: roomX1 - 0.28, z0: roomZ0 + 0.28, z1: roomZ1 - 0.28 },
     brushAt: { x: roomX0 + 0.55, y: floorY + 0.02, z: roomZ0 + 0.85 },
+    sprayAt: ['#c4322a', '#2a5fbf', '#e2c04a', '#1a1a1a'].map((color, index) => ({
+      x: roomX0 + 0.9 + index * 0.32,
+      y: floorY,
+      z: roomZ1 - 0.45,
+      color,
+    })),
     contains(x, z) {
       const tunnel = x >= spec.mouthX - 0.3 && x <= roomX0 + 0.4 && z >= spec.z0 - 0.2 && z <= spec.z1 + 0.2;
       const room = x >= roomX0 - 0.4 && x <= roomX1 + 0.4 && z >= roomZ0 - 0.4 && z <= roomZ1 + 0.4;
@@ -337,6 +411,7 @@ export function createGallery(scene, spec) {
     nearFire,
     dip,
     paint,
+    spray,
     update,
   };
 }

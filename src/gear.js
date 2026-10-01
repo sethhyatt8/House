@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { proxyMaterial } from './assets.js';
 import { legacy } from './flags.js';
+import { createSprayCan, createSprayFx, createSprayShared, sprayDirections } from './spray.js';
 import { applyWorldUv } from './uv.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -59,7 +60,7 @@ function paintAxe() {
 
 function carryable(object) {
   const gear = object?.userData?.gear;
-  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush';
+  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush' || gear === 'spray';
 }
 
 export function createGear(scene, camera, targets, roof, cave, gallery, assets) {
@@ -93,6 +94,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   let onLoose = null;
   let onStrike = null;
   let onDip = null;
+  let onSprayStart = null;
+  let onSprayLevel = null;
+  let onSprayStop = null;
+  let onRattle = null;
   let onHaptic = null;
   let drawHand = null;
   let drawTickSent = false;
@@ -402,6 +407,36 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     scene.add(brush);
     if (paintCoat && brushModel) fitPaintCoat(brush, paintCoat);
     enlist(brush);
+  }
+
+  const sprayCans = [];
+  const spraying = new Set();
+  let sprayFx = null;
+  if (gallery && !legacy('spray') && gallery.sprayAt) {
+    const shared = createSprayShared();
+    sprayFx = createSprayFx(scene);
+    gallery.sprayAt.forEach((spot) => {
+      const can = createSprayCan(spot.color, shared);
+      can.position.set(spot.x, spot.y, spot.z);
+      can.userData.floorY = spot.y;
+      const icon = document.createElement('canvas');
+      icon.width = 64;
+      icon.height = 64;
+      const ctx = icon.getContext('2d');
+      ctx.fillStyle = '#241c16';
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = spot.color;
+      ctx.fillRect(22, 14, 20, 36);
+      ctx.fillStyle = '#e6e8ea';
+      ctx.fillRect(26, 8, 12, 8);
+      const map = new THREE.CanvasTexture(icon);
+      map.colorSpace = THREE.SRGBColorSpace;
+      can.userData.iconMat = new THREE.MeshBasicMaterial({ map });
+      holdPose(can, [0, -0.11, 0.02], [0, 0, 0]);
+      scene.add(can);
+      enlist(can);
+      sprayCans.push(can);
+    });
   }
 
   const bowWood = wood.clone();
@@ -870,6 +905,11 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     pocket.add(axeIcon);
     pocket.userData.tileIcon = tileIcon;
     pocket.userData.axeIcon = axeIcon;
+    const sprayIcon = new THREE.Mesh(iconGeo, pocketMat);
+    sprayIcon.position.z = 0.01;
+    sprayIcon.visible = false;
+    pocket.add(sprayIcon);
+    pocket.userData.sprayIcon = sprayIcon;
     menu.add(pocket);
     pocketMeshes.push(pocket);
   }
@@ -993,7 +1033,9 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       pocket.material.color.set(item ? 0x8d7358 : 0x2c241c);
       pocket.userData.tileIcon.visible = item?.userData.gear === 'tile';
       pocket.userData.axeIcon.visible = item?.userData.gear === 'hatchet';
+      pocket.userData.sprayIcon.visible = item?.userData.gear === 'spray';
       if (item?.userData.gear === 'tile') pocket.userData.tileIcon.material = item.userData.faceMat;
+      if (item?.userData.gear === 'spray') pocket.userData.sprayIcon.material = item.userData.iconMat;
     });
   }
 
@@ -1094,6 +1136,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     item.position.copy(item.userData.holdPos);
     item.rotation.copy(item.userData.holdRot);
     item.userData.carried = true;
+    if (item.userData.gear === 'spray' && !item.userData.rattled) {
+      item.userData.rattled = true;
+      onRattle?.();
+    }
     if (item.userData.grip) item.userData.grip.visible = true;
     item.userData.inBag = false;
     unlist(item);
@@ -1350,6 +1396,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
 
   function use(controller) {
     const item = vrHands.get(controller);
+    if (item?.userData.gear === 'spray') return true;
     if (!item || item.userData.gear !== 'tile') return false;
     const slot = pointedSlot(controller);
     if (!slot) return false;
@@ -1430,6 +1477,68 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
         }
       }
     }
+    const sprayActive = new Set();
+    for (const [hand, item] of vrHands) {
+      if (item.userData.gear !== 'spray' || !sprayFx || !gallery?.spray) continue;
+      const pad = hand.userData.inputSource?.gamepad;
+      const flow = pad?.buttons?.[0]?.value ?? (hand.userData.triggerDown ? 1 : 0);
+      const stickX = pad?.axes?.[2] || 0;
+      const stickY = pad?.axes?.[3] || 0;
+      const data = item.userData;
+      let steered = false;
+      if (Math.abs(stickY) > 0.15) {
+        data.cone = THREE.MathUtils.clamp(data.cone + stickY * 0.6 * dt, 0.035, 0.35);
+        steered = true;
+      }
+      if (Math.abs(stickX) > 0.15) {
+        data.reach = THREE.MathUtils.clamp(data.reach + stickX * 1.5 * dt, 0.4, 2.5);
+        steered = true;
+      }
+      if (steered) data.guideLeft = 0.6;
+      data.guideLeft = Math.max(0, (data.guideLeft || 0) - dt);
+      data.guide.visible = data.guideLeft > 0;
+      if (data.guide.visible) {
+        data.guide.scale.set(Math.tan(data.cone) * data.reach, data.reach, Math.tan(data.cone) * data.reach);
+        data.guide.position.z = -data.reach / 2;
+      }
+      const key = hand.uuid;
+      if (flow > 0.02) {
+        sprayActive.add(hand);
+        if (!spraying.has(hand)) {
+          spraying.add(hand);
+          onSprayStart?.(key, flow);
+        }
+        onSprayLevel?.(key, flow, data.cone);
+        data.nozzle.getWorldPosition(tmp);
+        tmp2.set(0, 0, -1).applyQuaternion(data.nozzle.getWorldQuaternion(new THREE.Quaternion()));
+        const distances = gallery.spray(tmp, tmp2, data.color, {
+          cone: data.cone,
+          reach: data.reach,
+          flow,
+          dt,
+        });
+        const burst = Math.max(1, Math.round(140 * flow * dt));
+        sprayDirections(tmp2, data.cone, burst).forEach((sample, index) => {
+          const hit = distances[index % Math.max(1, distances.length)] ?? data.reach * 1.6;
+          const speed = 5 + Math.random() * 2;
+          sprayFx.emit(tmp, sample, data.color, speed, Math.min(hit, data.reach * 1.6) / speed, false);
+        });
+        if (Math.random() < 8 * flow * dt) {
+          sprayFx.emit(tmp, tmp2, data.color, 1.5, 0.4, true);
+        }
+        const now = performance.now();
+        if (now - (data.sprayPulseAt || 0) >= 60) {
+          data.sprayPulseAt = now;
+          onHaptic?.(hand, 0.08 + 0.12 * flow, 25);
+        }
+      }
+    }
+    for (const hand of [...spraying]) {
+      if (sprayActive.has(hand)) continue;
+      spraying.delete(hand);
+      onSprayStop?.(hand.uuid);
+    }
+    if (sprayFx) sprayFx.update(dt);
     const want = chest.userData.want || 0;
     chest.userData.open = THREE.MathUtils.damp(chest.userData.open, want, 4, dt);
     lid.rotation.x = -chest.userData.open * 1.35;
@@ -1512,6 +1621,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       onLoose = sounds?.loose || null;
       onStrike = sounds?.strike || null;
       onDip = sounds?.dip || null;
+      onSprayStart = sounds?.sprayStart || null;
+      onSprayLevel = sounds?.sprayLevel || null;
+      onSprayStop = sounds?.sprayStop || null;
+      onRattle = sounds?.rattle || null;
     },
     setHaptics(fn) {
       onHaptic = fn || null;

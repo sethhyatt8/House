@@ -90,7 +90,17 @@ if (envHdr) {
   pmrem.dispose();
 }
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
-world.gear.setSounds({ pickup: playPickup, chop: playChop, loose: playLoose, strike: playStrike, dip: playDip });
+world.gear.setSounds({
+  pickup: playPickup,
+  chop: playChop,
+  loose: playLoose,
+  strike: playStrike,
+  dip: playDip,
+  sprayStart: playSprayStart,
+  sprayLevel: setSprayLevel,
+  sprayStop: playSprayStop,
+  rattle: playRattle,
+});
 world.gear.setHaptics(pulseController);
 world.canoe.setHaptics(pulseController);
 const grid = createGrid();
@@ -1072,6 +1082,90 @@ function playDip(color, same) {
   bp.connect(envGain(ctx, t, 0.07 * vol, 0.006, 0.14));
   slosh.start(t);
   slosh.stop(t + 0.16);
+}
+
+const sprayVoices = new Map();
+let sprayNoise = null;
+
+function sprayNoiseBuffer(ctx) {
+  if (sprayNoise) return sprayNoise;
+  const len = Math.floor(ctx.sampleRate * 2);
+  sprayNoise = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = sprayNoise.getChannelData(0);
+  for (let i = 0; i < len; i += 1) data[i] = Math.random() * 2 - 1;
+  return sprayNoise;
+}
+
+function playSprayStart(key, flow) {
+  playSprayStop(key);
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const source = ctx.createBufferSource();
+  source.buffer = sprayNoiseBuffer(ctx);
+  source.loop = true;
+  const highpass = ctx.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = 3200;
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = 6500;
+  band.Q.value = 0.7;
+  const gain = ctx.createGain();
+  const level = 0.05 + 0.05 * flow;
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(level * 1.6, t + 0.02);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, level), t + 0.04);
+  source.connect(highpass);
+  highpass.connect(band);
+  band.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(t);
+  sprayVoices.set(key, { source, gain, band });
+}
+
+function setSprayLevel(key, flow, cone) {
+  const voice = sprayVoices.get(key);
+  if (!voice) return;
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const level = Math.max(0.0001, 0.05 + 0.05 * flow);
+  voice.gain.gain.setTargetAtTime(level, t, 0.02);
+  const span = (cone - 0.035) / (0.35 - 0.035);
+  voice.band.frequency.setTargetAtTime(8000 + (4500 - 8000) * THREE.MathUtils.clamp(span, 0, 1), t, 0.04);
+}
+
+function playSprayStop(key) {
+  const voice = sprayVoices.get(key);
+  if (!voice) return;
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const current = Math.max(0.0001, voice.gain.gain.value || 0.0001);
+  voice.gain.gain.cancelScheduledValues(t);
+  voice.gain.gain.setValueAtTime(current, t);
+  voice.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+  voice.source.stop(t + 0.08);
+  sprayVoices.delete(key);
+}
+
+function playRattle() {
+  const ctx = audio();
+  const t = ctx.currentTime;
+  for (let i = 0; i < 3; i += 1) {
+    const len = Math.floor(ctx.sampleRate * 0.03);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let s = 0; s < len; s += 1) data[s] = (Math.random() * 2 - 1) * (1 - s / len);
+    const source = ctx.createBufferSource();
+    source.buffer = buf;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 2500;
+    band.Q.value = 2;
+    source.connect(band);
+    band.connect(envGain(ctx, t + i * 0.06, 0.12, 0.002, 0.04));
+    source.start(t + i * 0.06);
+    source.stop(t + i * 0.06 + 0.04);
+  }
 }
 
 function playStrike() {
