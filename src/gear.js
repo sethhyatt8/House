@@ -8,6 +8,21 @@ import { START_CELL } from './cell.js';
 import { applyWorldUv } from './uv.js';
 import { createIconBaker } from './icons.js';
 
+// Bow draw -> arrow speed (m/s). power = pull distance in metres, 0.16 (minimum to loose) .. 0.58 (full draw).
+// Up to 60% draw (0.348 m) this is exactly the old line 8 + power * 18 (10.88 .. 14.26 m/s); above it an
+// ease-in term adds up to 6.5 m/s, so full draw is 24.94 m/s instead of 18.44 (+35%). ?bowcurve=old = old line.
+const BOW_OLD = new URLSearchParams(location.search).get('bowcurve') === 'old';
+const BOW_MAX = 0.58;
+const BOW_KNEE = BOW_MAX * 0.6;
+const BOW_BOOST = 6.5;
+export function arrowSpeed(power) {
+  const q = Math.min(Math.max(power, 0), BOW_MAX);
+  const base = 8 + q * 18;
+  if (BOW_OLD || q <= BOW_KNEE) return base;
+  const u = (q - BOW_KNEE) / (BOW_MAX - BOW_KNEE);
+  return base + BOW_BOOST * u * u;
+}
+
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const CAPACITY = 100;
 
@@ -622,7 +637,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     arrowAim.copy(to).sub(from);
     if (arrowAim.lengthSq() < 1e-6) arrowAim.set(0, 0, -1);
     arrowAim.normalize();
-    const speed = 8 + Math.min(power, 0.58) * 18;
+    const speed = arrowSpeed(power);
     arrow.visible = true;
     arrow.userData.vel = arrowAim.clone().multiplyScalar(speed);
     arrow.userData.life = 4.2;
