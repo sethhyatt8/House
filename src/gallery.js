@@ -438,6 +438,7 @@ function stamp(wall, x, y, color, radiusPx, alpha) {
       return tunnel || room;
     },
     nearFire,
+    firePoint: () => (lit ? firePoint : null),   // sound pass: crackle loop at the lit campfire
     dip,
     paint,
     spray,

@@ -371,6 +371,32 @@
         1.85
       ]
     },
+    "canoe_cedar": {
+      "url": "models/props/canoe_cedar.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/7lcrTaY7sE_",
+      "author": "Poly by Google",
+      "license": "CC-BY 3.0",
+      "params": {
+        "parent": "createCanoe() group when paddling (default; ?rowing=old keeps canoe.glb). Same frame as canoe: length along Z 3.7 m, beam 0.86 m, keel y -0.09",
+        "build": "Blender 4.2: canoe mesh from 'Canoe and paddles', transforms applied, scaled non-uniformly to 0.86 x 0.459 x 3.7 m"
+      },
+      "tris": 1196,
+      "bytes": 67168
+    },
+    "paddle": {
+      "url": "models/props/paddle.glb",
+      "kind": "static",
+      "source": "https://poly.pizza/m/7lcrTaY7sE_",
+      "author": "Poly by Google",
+      "license": "CC-BY 3.0",
+      "params": {
+        "use": "hand paddle (one per hand). Origin = the hand's grip point; shaft along -Y (top +0.12, blade tip -0.73), blade width along X (0.26 m), blade face normal = local Z",
+        "build": "paddle mesh from 'Canoe and paddles', PCA-aligned, scaled to 0.85 m long (blade x1.25 wider)"
+      },
+      "tris": 104,
+      "bytes": 15008
+    },
     "chest": {
       "url": "models/props/chest.glb",
       "kind": "static",
@@ -1300,7 +1326,9 @@
     ],
     "boats": [
       "shipwreck",
-      "canoe"
+      "canoe",
+      "canoe_cedar",
+      "paddle"
     ],
     "gear": [
       "chest",

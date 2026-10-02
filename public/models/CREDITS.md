@@ -32,3 +32,15 @@ Changes made for House (Blender 4.2.3 + gltf-transform + KTX-Software 4.4.2, scr
 - Processing: downscaled to 512x512, encoded with KTX-Software 4.4.2:
   `ktx create --format R8G8B8_UNORM --assign-tf linear --encode uastc --uastc-quality 2 --uastc-rdo --uastc-rdo-l 0.5 --zstd 18 --generate-mipmap --normalize`
 - Linear (non-colour) data, 10 mip levels. Used by src/water.js as two scrolling detail-normal layers.
+
+## Feedback pass (canoe, paddles, HD croc)
+
+| File | Asset | Author | License | Source |
+|---|---|---|---|---|
+| models/props/canoe_cedar.glb | "Canoe and paddles" (canoe mesh) | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/7lcrTaY7sE_ |
+| models/props/paddle.glb | "Canoe and paddles" (paddle mesh) | Poly by Google | CC-BY 3.0 | https://poly.pizza/m/7lcrTaY7sE_ |
+| models/enemies/croc_hd.glb | "Crocodile" (same source as croc.glb) | br-n518 | CC0 1.0 | https://opengameart.org/content/crocodile-0 |
+
+- canoe_cedar: Blender 4.2, transforms applied, scaled to 0.86 x 0.459 x 3.7 m (same frame as canoe.glb), texture 512 KTX2 (ETC1S), quantized.
+- paddle: PCA-aligned so the shaft is -Y from the grip point (origin), 0.85 m long, blade widened x1.25, texture 256 KTX2, quantized.
+- croc_hd: croc.glb's rig and clips unchanged; Catmull-Clark subdivision level 1 applied (918 -> 3,940 tris, lip and teeth edges creased), new baked 1024 textures (procedural scutes/osteoderms, countershading, crevice AO, original teeth/mouth/eyes kept), KTX2 + Draco. Only loads with `?crocmodel=hd`.

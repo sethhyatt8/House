@@ -13,6 +13,7 @@ import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
+import { createSfx } from './sfx.js';
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -66,7 +67,7 @@ const lazyBoot = pageParams.get('zones') !== '0';
 if (lazyBoot) assets.deferMaterials(['rock_cliff', 'rock_floor']);
 await assets.preload([
   'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
-  'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe',
+  'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe', 'canoe_cedar', 'paddle',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
   'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals',
 ].filter((id) => !lazyBoot || !DEFERRED.includes(id)), ({ loaded, total }) => {
@@ -100,11 +101,24 @@ if (envHdr) {
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
 world.bakeWater(renderer);
 world.gear.bakeIcons?.(renderer);
+// Sound pass: samples first (public/audio, see sfx.js), the procedural sounds stay as the fallback / ?sfx=0.
+const sfx = createSfx(() => audio());
+const SEA_POINT = new THREE.Vector3(-30, WATER_Y, 0);
+sfx.fetchAll();
+const rawSplash = world.splash;
+world.splash = (x, z, burst) => {
+  rawSplash(x, z, burst);
+  sfx.play(burst ? 'splash_big' : ['splash_small1', 'splash_small2'], { at: { x, y: WATER_Y, z }, gain: burst ? 0.9 : 0.55, ref: 2 });
+};
+world.canoe.setSplash?.((kind, p, strength) => {
+  if (kind === 'catch') sfx.play(['paddle1', 'paddle2', 'paddle3'], { at: p, gain: 0.35 + 0.55 * strength, ref: 1.5 }) || playPaddleSynth(strength);
+  else sfx.play(['drip1', 'drip2'], { at: p, gain: 0.3, jitter: 0.2 });
+});
 world.gear.setSounds({
-  pickup: playPickup,
-  chop: playChop,
-  loose: playLoose,
-  strike: playStrike,
+  pickup: () => sfx.play('cloth', { gain: 0.55 }) || playPickup(),
+  chop: (broken) => (broken ? sfx.play('hit_plank', { gain: 0.9 }) && sfx.play('chop', { gain: 0.7 }) : sfx.play('chop', { gain: 0.8 })) || playChop(broken),
+  loose: () => (sfx.play('bow_release', { gain: 0.8 }) ? (sfx.play('arrow_whoosh', { gain: 0.25 }), true) : playLoose()),
+  strike: () => sfx.play(['hit_wood', 'hit_wood2'], { gain: 0.75 }) || playStrike(),
   dip: playDip,
   sprayStart: playSprayStart,
   sprayLevel: setSprayLevel,
@@ -211,6 +225,24 @@ addTeleportSpot({
   status: 'In the canoe.',
 });
 
+// Underground spots (feedback pass): there is no stick locomotion, and the paint tunnel is 7 m long, so the cave,
+// the tunnel and the paint room get their own spots. A (teleportNext) cycles the spots of the level you're on.
+const caveSpots = [];
+if (world.cave?.tunnel && world.cave?.room) {
+  const cave = world.cave;
+  const tz = (cave.tunnel.z0 + cave.tunnel.z1) / 2;
+  const roomX = (cave.room.x0 + cave.room.x1) / 2;
+  const roomZ = (cave.room.z0 + cave.room.z1) / 2;
+  [
+    { x: cave.standX + 0.5, z: cave.standZ, look: new THREE.Vector3(cave.standX - 3, cave.floor + 1.0, cave.standZ), status: 'Cave floor, by the water.' },
+    { x: cave.tunnel.x0 - 0.45, z: tz, look: new THREE.Vector3(cave.tunnel.x1, cave.floor + 1.2, tz), status: 'Mouth of the tunnel.' },
+    { x: roomX, z: roomZ, look: new THREE.Vector3(cave.room.x1, cave.floor + 1.1, roomZ), status: 'In the paint room.' },
+  ].forEach((spot) => {
+    caveSpots.push(teleportSpots.length);
+    addTeleportSpot({ ...spot, floor: cave.floor, underground: true, eye: new THREE.Vector3(spot.x, cave.floor + 1.55, spot.z) });
+  });
+}
+
 function doorStanding() {
   return world.gear.doorBoards?.some((board) => !board.userData.dead);
 }
@@ -251,7 +283,8 @@ function teleportTo(index) {
 }
 
 function teleportNext() {
-  const order = [1, 3, 0, 2, 4];
+  const feet = renderer.xr.isPresenting ? xrOffset.y : camera.position.y - 1.55;
+  const order = feet < -1 && caveSpots.length ? caveSpots : [1, 3, 0, 2, 4];
   const at = order.indexOf(teleportIndex);
   teleportTo(order[(at + 1) % order.length]);
 }
@@ -820,6 +853,8 @@ function groundUnder(x, z, feetY) {
   const pad = cave?.pad;
   if (pad && feetY < -1 && x >= pad.x0 && x <= pad.x1 && z >= pad.z0 && z <= pad.z1) return cave.floor;
   if (cave?.tunnel && feetY < -1 && x >= cave.tunnel.x0 && x <= cave.tunnel.x1 && z >= cave.tunnel.z0 && z <= cave.tunnel.z1) return cave.floor;
+  // the 0.2 m seam between the cave box (x1 4.05) and the tunnel box (x0 4.25) used to read as open water
+  if (cave?.tunnel && feetY < -1 && x >= cave.x1 - 0.05 && x <= cave.tunnel.x0 + 0.05 && z >= cave.tunnel.z0 && z <= cave.tunnel.z1) return cave.floor;
   if (cave?.room && feetY < -1 && x >= cave.room.x0 && x <= cave.room.x1 && z >= cave.room.z0 && z <= cave.room.z1) return cave.floor;
   const shaft = world.shaft;
   if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.42 && Math.abs(z - shaft.z) < 0.5) return shaft.floor;
@@ -1052,6 +1087,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   cellPhase = 0;
   enableCellView();
   try { audio(); } catch { /* the roar starts once the headset session is running */ }
+  sfx.start();
   gazeLock = null;
   hudEl.style.display = 'none';
   if (scalePanel) scalePanel.style.display = 'none';
@@ -1217,7 +1253,10 @@ function setStatus(text) {
 let audioCtx = null;
 
 function audio() {
-  if (!audioCtx) audioCtx = new AudioContext();
+  if (!audioCtx) {
+    audioCtx = new AudioContext();
+    queueMicrotask(() => sfx.start());
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
 }
@@ -1328,6 +1367,25 @@ function envGain(ctx, start, peak, attack, release) {
   gain.gain.exponentialRampToValueAtTime(0.0001, start + attack + release);
   gain.connect(ctx.destination);
   return gain;
+}
+
+function playPaddleSynth(strength = 0.6) { // fallback paddle catch: short low-passed noise 'glug'
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const len = Math.floor(ctx.sampleRate * 0.22);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i += 1) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(1400, t);
+  lp.frequency.exponentialRampToValueAtTime(380, t + 0.2);
+  src.connect(lp);
+  lp.connect(envGain(ctx, t, 0.08 + 0.18 * strength, 0.01, 0.2));
+  src.start(t);
+  return true;
 }
 
 function playChop(broken) {
@@ -2857,7 +2915,9 @@ function boardCanoe() {
   aboard = true;
   boatGrip = null;
   if (climb) leaveClimb();
-  setStatus('In the canoe. Grip an oar and pull back to row.');
+  setStatus(world.canoe.paddleMode
+    ? 'In the canoe. Squeeze a grip to take a paddle in each hand. Dip the blade and pull back to paddle.'
+    : 'In the canoe. Grip an oar and pull back to row.');
 }
 
 const lastSeat = new THREE.Vector3();
@@ -3841,6 +3901,12 @@ function frame(time, frame) {
   world.challenge.update(dt);
   world.canoe.setAboard?.(aboard);
   world.update(dt);
+  sfx.update(dt, {
+    camera: renderer.xr.isPresenting ? renderer.xr.getCamera() : camera,
+    zone: world.zones?.current ?? null,
+    firePoint: world.gallery?.firePoint?.() ?? null,
+    seaPoint: SEA_POINT,
+  });
   if (croc) {
     if (watching) croc.root.visible = false;
     else if (!biteHold && (!world.zones?.enabled || world.zones.isAwake('cave') || world.zones.isAwake('sea'))) croc.update(dt, crocPlayer());
@@ -3878,7 +3944,7 @@ function frame(time, frame) {
       pollTeleport(controller);
       pollRotate(controller);
       pollBag(controller);
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !oarGrip && aboard) {
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !oarGrip && aboard && !world.gear.isHolding(controller)) {
         gripOar(controller);
       }
       if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !world.gear.isHolding(controller)) {
