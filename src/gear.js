@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { proxyMaterial } from './assets.js';
+import { torchFlame, fireEnabled } from './fire.js';
 import { legacy } from './flags.js';
 import { createSprayCan, createSprayFx, createSprayShared, sprayDirections } from './spray.js';
 import { START_CELL } from './cell.js';
@@ -261,6 +262,14 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   );
   halo.position.y = 0.5;
   torch.add(halo);
+  const torchFire = fireEnabled(assets) ? torchFlame() : null;
+  if (torchFire) {
+    flame.material = proxyMaterial;
+    core.visible = false;
+    halo.visible = false;
+    torch.add(torchFire.mesh);
+    torchFire.mesh.userData.noIcon = true;
+  }
   const torchLight = new THREE.PointLight(0xffa24a, 8, 12, 2);
   torchLight.position.y = 0.52;
   torch.add(torchLight);
@@ -1419,6 +1428,12 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     return true;
   }
 
+  const torchHead = new THREE.Vector3();
+  const torchPrev = new THREE.Vector3();
+  const torchVel = new THREE.Vector3();
+  const torchLean = new THREE.Vector3();
+  let torchSeen = false;
+
   function update(dt) {
     const carried = hatchet.userData.carried;
     if (!carried) bladeReady = false;
@@ -1437,7 +1452,20 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       bladePrev.copy(bladeNow);
       bladeReady = true;
     }
-    if (torch.visible && torch.userData.light) {
+    if (!torch.visible) torchSeen = false;
+    if (torch.visible && torch.userData.light && torchFire) {
+      flame.getWorldPosition(torchHead);
+      if (torchSeen && dt > 0) {
+        torchVel.subVectors(torchHead, torchPrev).divideScalar(dt);
+        torchLean.lerp(torchVel.multiplyScalar(-0.18).clampLength(0, 0.6), Math.min(1, dt * 8));
+        torchLean.y = 0;
+      }
+      torchPrev.copy(torchHead);
+      torchSeen = true;
+      torchFire.setLean(torchLean);
+      torchFire.update(dt);
+      torch.userData.light.intensity = 8 * torchFire.flicker;
+    } else if (torch.visible && torch.userData.light) {
       const wobble = 0.82 + Math.sin(performance.now() * 0.017) * 0.1 + Math.sin(performance.now() * 0.043) * 0.06;
       torch.userData.light.intensity = 8 * wobble;
       const flare = 0.92 + wobble * 0.1;

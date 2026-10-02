@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { proxyMaterial } from './assets.js';
+import { campfire, fireEnabled } from './fire.js';
 import { applyWorldUv } from './uv.js';
 
 const PAINTS = ['#c4322a', '#e07a1f', '#e2c04a', '#2f8a45', '#2a5fbf', '#6a3d9a', '#1a1a1a', '#f7f4ee'];
@@ -144,6 +145,16 @@ export function createGallery(scene, spec) {
   heart.position.y = 0.24;
   flames.add(heart);
   fire.add(flames);
+  const fireFx = fireEnabled(spec.assets) ? campfire({ lit: false }) : null;
+  if (fireFx) {
+    flame.visible = false;
+    heart.visible = false;
+    flames.add(fireFx.mesh);
+    logMat.color.set(0x0d0906);
+    logMat.roughness = 1;
+    logMat.emissive.set(0xff4a12);
+    logMat.emissiveIntensity = 0;
+  }
   const fireLight = new THREE.PointLight(0xff8a3a, 0, 6.5, 2);
   fireLight.position.y = 0.45;
   fire.add(fireLight);
@@ -213,6 +224,7 @@ export function createGallery(scene, spec) {
     if (lit) return;
     lit = true;
     flames.visible = true;
+    fireFx?.ignite();
     walls.forEach((wall) => {
       wall.mesh.visible = true;
     });
@@ -383,10 +395,18 @@ function stamp(wall, x, y, color, radiusPx, alpha) {
 
   function update(dt) {
     if (!lit) return;
-    const wobble = 0.84 + Math.sin(performance.now() * 0.013) * 0.1 + Math.sin(performance.now() * 0.037) * 0.06;
-    fireLight.intensity = 18 * wobble;
-    const flare = 0.9 + wobble * 0.15;
-    flame.scale.set(flare, 0.86 + wobble * 0.2, flare);
+    if (fireFx) {
+      fireFx.update(dt);
+      const t = fireFx.uniforms.uTime.value;
+      fireLight.intensity = 20 * fireFx.flicker;
+      fireLight.position.set(Math.sin(t * 3.1) * 0.03, 0.8 + fireFx.uniforms.uFlick.value * 0.03, Math.cos(t * 2.3) * 0.03);
+      logMat.emissiveIntensity = (0.03 + 0.015 * fireFx.uniforms.uFlick.value) * fireFx.fade;
+    } else {
+      const wobble = 0.84 + Math.sin(performance.now() * 0.013) * 0.1 + Math.sin(performance.now() * 0.037) * 0.06;
+      fireLight.intensity = 18 * wobble;
+      const flare = 0.9 + wobble * 0.15;
+      flame.scale.set(flare, 0.86 + wobble * 0.2, flare);
+    }
     if (saveTimer > 0) {
       saveTimer -= dt;
       if (saveTimer <= 0) save();
