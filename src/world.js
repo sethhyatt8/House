@@ -3651,7 +3651,7 @@ function createForest(scene, assets) {
   addGround(-1.55, 3.7, -far, -4.1);
 
   const spots = [];
-  const blocked = (x, z) => x < 6.4 && z > -5 && z < 12.6;
+  const blocked = (x, z) => (x < 6.4 && z > -5 && z < 12.6) || (x < 6.9 && z > -0.8 && z < 1.1);
   let band = 0;
   const scatter = (x0, x1, z0, z1, step, chance, height) => {
     for (let x = x0; x <= x1; x += step) {
@@ -3780,29 +3780,223 @@ function createForest(scene, assets) {
   });
 }
 
-function addBlackPit(scene, back) {
-  const voidMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-  const x0 = 4.72;
-  const x1 = 5.42;
-  const z0 = back.z0 - 0.55;
-  const z1 = back.z1 + 0.55;
-  const top = 2.25;
-  const t = 0.08;
-  const add = (w, h, d, x, y, z) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), voidMat);
+function addLift(scene, back, targets) {
+  const stone = new THREE.MeshStandardMaterial({ color: 0x2a241c, roughness: 1 });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x6e5340, roughness: 0.86 });
+  const iron = new THREE.MeshStandardMaterial({
+    color: 0x6a727a,
+    metalness: 0.92,
+    roughness: 0.38,
+    emissive: 0xa8b0b8,
+    emissiveIntensity: 0.35,
+  });
+  const stops = [0, -3.6, -7.2, -10.8, -14.4];
+  const shaft = { x0: 5.18, x1: 6.58, z0: -0.52, z1: 0.76 };
+  const carBox = { x0: 5.2, x1: 6.4, z0: -0.4, z1: 0.64 };
+  const t = 0.1;
+  const crown = 2.35;
+  const pit = stops[stops.length - 1] - 0.2;
+  const floors = [];
+  const mid = (a, b) => (a + b) / 2;
+  const add = (mat, w, h, d, x, y, z) => {
+    if (w <= 0.02 || h <= 0.02 || d <= 0.02) return null;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     mesh.position.set(x, y, z);
+    mesh.layers.set(1);
     mesh.castShadow = false;
-    mesh.receiveShadow = false;
+    mesh.receiveShadow = true;
     scene.add(mesh);
+    return mesh;
   };
-  add(x1 - x0, t, z1 - z0, (x0 + x1) / 2, t / 2, (z0 + z1) / 2);
-  add(x1 - x0, t, z1 - z0, (x0 + x1) / 2, top - t / 2, (z0 + z1) / 2);
-  add(x1 - x0, top, t, (x0 + x1) / 2, top / 2, z0 + t / 2);
-  add(x1 - x0, top, t, (x0 + x1) / 2, top / 2, z1 - t / 2);
-  add(t, top, z1 - z0, x1 - t / 2, top / 2, (z0 + z1) / 2);
+  const wallZ = (z, x0, x1, y0, y1) => add(stone, x1 - x0, y1 - y0, t, mid(x0, x1), mid(y0, y1), z);
+  const wallX = (x, z0, z1, y0, y1) => add(stone, t, y1 - y0, z1 - z0, x, mid(y0, y1), mid(z0, z1));
+  wallX(shaft.x0 - t / 2, shaft.z0, back.z0, 0, crown);
+  wallX(shaft.x0 - t / 2, back.z1, shaft.z1, 0, crown);
+  wallX(shaft.x0 - t / 2, back.z0, back.z1, 2.02, crown);
+  wallX(shaft.x0 - t / 2, shaft.z0, shaft.z1, pit, 0);
+  const levels = stops.slice(1).sort((a, b) => a - b);
+  const east = shaft.x1 + t / 2;
+  wallX(east, shaft.z0, shaft.z1, pit, levels[0]);
+  levels.forEach((y, index) => {
+    const above = index === levels.length - 1 ? crown : levels[index + 1];
+    wallX(east, shaft.z0, shaft.z1, y + 2.08, above);
+  });
+  wallZ(shaft.z0 - t / 2, shaft.x0, shaft.x1, pit, crown);
+  wallZ(shaft.z1 + t / 2, shaft.x0, shaft.x1, pit, crown);
+  add(stone, shaft.x1 - shaft.x0, t, shaft.z1 - shaft.z0, mid(shaft.x0, shaft.x1), crown - t / 2, mid(shaft.z0, shaft.z1));
+  add(stone, shaft.x1 - shaft.x0, 0.16, shaft.z1 - shaft.z0, mid(shaft.x0, shaft.x1), -0.1, mid(shaft.z0, shaft.z1));
+
+  const roomH = 2.2;
+  const vestibule = { x0: shaft.x1, x1: 7.9, z0: shaft.z0, z1: shaft.z1 };
+  const doorX0 = 6.95;
+  const doorX1 = 7.75;
+  stops.slice(1).forEach((y) => {
+    const shells = [
+      vestibule,
+      { x0: 6.75, x1: 9.2, z0: vestibule.z1, z1: vestibule.z1 + 2.35 },
+      { x0: 6.75, x1: 9.2, z0: vestibule.z0 - 2.35, z1: vestibule.z0 },
+    ];
+    shells.forEach((room, index) => {
+      floors.push({ x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y });
+      add(stone, room.x1 - room.x0, 0.08, room.z1 - room.z0, mid(room.x0, room.x1), y - 0.04, mid(room.z0, room.z1));
+      add(stone, room.x1 - room.x0, 0.08, room.z1 - room.z0, mid(room.x0, room.x1), y + roomH - 0.04, mid(room.z0, room.z1));
+      wallX(room.x1 + t / 2, room.z0, room.z1, y, y + roomH);
+      if (index === 0) wallX(room.x0 - t / 2, room.z0, room.z1, y + 2.08, y + roomH);
+      else wallX(room.x0 - t / 2, room.z0, room.z1, y, y + roomH);
+      if (index === 0) {
+        wallZ(room.z0 - t / 2, room.x0, doorX0, y, y + roomH);
+        wallZ(room.z0 - t / 2, doorX1, room.x1, y, y + roomH);
+        wallZ(room.z0 - t / 2, doorX0, doorX1, y + 2.02, y + roomH);
+        wallZ(room.z1 + t / 2, room.x0, doorX0, y, y + roomH);
+        wallZ(room.z1 + t / 2, doorX1, room.x1, y, y + roomH);
+        wallZ(room.z1 + t / 2, doorX0, doorX1, y + 2.02, y + roomH);
+      } else if (index === 1) {
+        wallZ(room.z1 + t / 2, room.x0, room.x1, y, y + roomH);
+      } else {
+        wallZ(room.z0 - t / 2, room.x0, room.x1, y, y + roomH);
+      }
+      add(timber, 0.05, 0.16, Math.min(1.15, (room.z1 - room.z0) * 0.55), room.x1 - 0.12, y + 1.15, mid(room.z0, room.z1));
+    });
+    const light = new THREE.PointLight(0xffc9a0, 14, 5.5, 2);
+    light.layers.set(1);
+    light.position.set(mid(vestibule.x0, vestibule.x1), y + 1.35, mid(vestibule.z0, vestibule.z1));
+    scene.add(light);
+  });
+
+  const car = new THREE.Group();
+  scene.add(car);
+  const deck = new THREE.Mesh(
+    new THREE.BoxGeometry(carBox.x1 - carBox.x0, 0.06, carBox.z1 - carBox.z0),
+    iron,
+  );
+  deck.position.set(mid(carBox.x0, carBox.x1), 0.03, mid(carBox.z0, carBox.z1));
+  deck.layers.set(1);
+  car.add(deck);
+  [[carBox.x0, carBox.z0], [carBox.x0, carBox.z1], [carBox.x1, carBox.z0], [carBox.x1, carBox.z1]].forEach(([x, z]) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.08, 0.05), iron);
+    mesh.position.set(x, 1.04, z);
+    mesh.layers.set(1);
+    car.add(mesh);
+  });
+  const header = new THREE.Mesh(
+    new THREE.BoxGeometry(carBox.x1 - carBox.x0, 0.06, carBox.z1 - carBox.z0),
+    iron,
+  );
+  header.position.set(mid(carBox.x0, carBox.x1), 2.08, mid(carBox.z0, carBox.z1));
+  header.layers.set(1);
+  car.add(header);
+  const hinge = new THREE.Group();
+  hinge.position.set(back.gateX, 0, back.z0);
+  car.add(hinge);
+  addLockedGate(hinge, back);
+  const glow = new THREE.PointLight(0xffc9a0, 8, 3.4, 2);
+  glow.layers.set(1);
+  glow.position.set(mid(carBox.x0, carBox.x1), 1.4, mid(carBox.z0, carBox.z1));
+  car.add(glow);
+  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.36, 0.06), iron);
+  lever.position.set(carBox.x0 + 0.14, 1.1, carBox.z1 - 0.1);
+  lever.layers.set(1);
+  lever.userData.type = 'lift';
+  lever.userData.role = 'go';
+  car.add(lever);
+  targets.push(lever);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.06), iron);
+  handle.position.set(4.58, 1.12, -0.55);
+  handle.layers.set(1);
+  handle.userData.type = 'lift';
+  handle.userData.role = 'open';
+  scene.add(handle);
+  targets.push(handle);
+
+  const lift = {
+    floorY: 0,
+    doorOpen: 0,
+    phase: 'idle',
+    dir: 1,
+    target: 0,
+    pendingMove: false,
+    moving: false,
+    shaft,
+    carBox,
+    floors,
+    openDoor() {
+      if (this.phase !== 'idle' || Math.abs(this.floorY) > 0.08 || this.doorOpen > 0.5) return;
+      this.phase = 'opening';
+    },
+    go(inside) {
+      if (this.phase !== 'idle' || !inside) return;
+      if (this.doorOpen > 0.5) {
+        this.pendingMove = true;
+        this.phase = 'closing';
+        return;
+      }
+      this.arm();
+    },
+    arm() {
+      let index = 0;
+      let best = Infinity;
+      stops.forEach((stop, i) => {
+        const dist = Math.abs(stop - this.floorY);
+        if (dist < best) {
+          best = dist;
+          index = i;
+        }
+      });
+      let next = index + this.dir;
+      if (next < 0 || next >= stops.length) {
+        this.dir *= -1;
+        next = index + this.dir;
+      }
+      this.target = stops[next];
+      this.phase = 'moving';
+      this.moving = true;
+    },
+    update(dt) {
+      if (this.phase === 'opening' || this.phase === 'closing') {
+        const step = dt / 0.85;
+        this.doorOpen = this.phase === 'opening'
+          ? Math.min(1, this.doorOpen + step)
+          : Math.max(0, this.doorOpen - step);
+        hinge.rotation.y = 1.5 * this.doorOpen;
+        if (this.phase === 'opening' && this.doorOpen >= 1) this.phase = 'idle';
+        if (this.phase === 'closing' && this.doorOpen <= 0) {
+          this.phase = 'idle';
+          if (this.pendingMove) {
+            this.pendingMove = false;
+            this.arm();
+          }
+        }
+        return 0;
+      }
+      if (this.phase !== 'moving') return 0;
+      const step = Math.sign(this.target - this.floorY) * Math.min(1.05 * dt, Math.abs(this.target - this.floorY));
+      this.floorY += step;
+      car.position.y = this.floorY;
+      if (Math.abs(this.floorY - this.target) <= 0.001) {
+        this.floorY = this.target;
+        car.position.y = this.floorY;
+        this.moving = false;
+        this.phase = Math.abs(this.floorY) < 0.05 ? 'opening' : 'idle';
+      }
+      return step;
+    },
+    floorAt(x, z, feetY) {
+      if (x >= shaft.x0 && x <= shaft.x1 && z >= shaft.z0 && z <= shaft.z1) {
+        if (Math.abs(feetY - this.floorY) < 1.4) return this.floorY;
+      }
+      let best = null;
+      for (const room of floors) {
+        if (x < room.x0 || x > room.x1 || z < room.z0 || z > room.z1) continue;
+        if (feetY < room.y - 0.45 || feetY > room.y + 2.3) continue;
+        if (best == null || room.y > best) best = room.y;
+      }
+      return best;
+    },
+  };
+  return lift;
 }
 
-function addLockedGate(scene, back) {
+function addLockedGate(parent, back) {
   const iron = new THREE.MeshStandardMaterial({
     color: 0x6a727a,
     metalness: 0.92,
@@ -3843,8 +4037,9 @@ function addLockedGate(scene, back) {
   shackle.position.set(-0.03, 1.05, 0);
   shackle.layers.set(1);
   gate.add(shackle);
-  gate.position.set(back.gateX, 0, midZ);
-  scene.add(gate);
+  gate.position.set(0, 0, midZ - back.z0);
+  parent.add(gate);
+  return gate;
 }
 
 export function createWorld({ assets } = {}) {
@@ -3952,8 +4147,7 @@ export function createWorld({ assets } = {}) {
   addCell(liner, cellTop, linerSouth, backLinerX, cellTop / 2, cellZ0 + linerSouth / 2);
   addCell(liner, cellTop, linerNorth, backLinerX, cellTop / 2, back.z1 + linerNorth / 2);
   addCell(liner, Math.max(0.02, cellTop - back.h), back.z1 - back.z0, backLinerX, back.h + Math.max(0.02, cellTop - back.h) / 2, (back.z0 + back.z1) / 2);
-  addBlackPit(scene, back);
-  addLockedGate(scene, back);
+  const lift = addLift(scene, back, targets);
   addCell(liner, cellTop, door.z0 - cellZ0, cellX0 + liner / 2, cellTop / 2, (cellZ0 + door.z0) / 2);
   addCell(liner, cellTop, cellZ1 - door.z1, cellX0 + liner / 2, cellTop / 2, (door.z1 + cellZ1) / 2);
   addCell(liner, cellTop - door.h, door.z1 - door.z0, cellX0 + liner / 2, door.h + (cellTop - door.h) / 2, (door.z0 + door.z1) / 2);
@@ -4207,6 +4401,7 @@ export function createWorld({ assets } = {}) {
     biteFocus: bite.focus,
     roof,
     keyLight: key,
+    lift,
   };
 }
 

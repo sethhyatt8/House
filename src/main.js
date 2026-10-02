@@ -815,6 +815,8 @@ function groundUnder(x, z, feetY) {
   const cell = START_CELL.floor;
   const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
   if (overFloor || inCell) return standHeight(x, z, feetY, 0);
+  const liftFloor = world.lift?.floorAt(x, z, feetY);
+  if (liftFloor != null) return liftFloor;
   const yard = world.yard;
   if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
     return standHeight(x, z, feetY, yard.y);
@@ -862,6 +864,65 @@ function landShift(ground, feetY, head) {
   shiftPlayer(fromShaft ? cave.standX - head.x : 0, ground - feetY, fromShaft ? cave.standZ - head.z : 0);
 }
 
+let ridingLift = false;
+
+function headSample() {
+  if (renderer.xr.isPresenting && xrFrame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (pose) return pose.transform.position;
+  }
+  return camera.position;
+}
+
+function inLiftCar() {
+  const lift = world.lift;
+  if (!lift) return false;
+  const head = headSample();
+  const box = lift.carBox;
+  return head.x >= box.x0 && head.x <= box.x1
+    && head.z >= box.z0 && head.z <= box.z1
+    && Math.abs(xrOffset.y - lift.floorY) < 0.85;
+}
+
+function guardLiftDoor() {
+  const lift = world.lift;
+  if (!lift || lift.doorOpen > 0.65 || Math.abs(lift.floorY) > 0.2) return;
+  if (!renderer.xr.isPresenting || !xrFrame) return;
+  const head = headSample();
+  if (head.x > 5.12) return;
+  const push = pushOutOf(head.x, head.z, { x0: 4.9, x1: 5.3, z0: -0.36, z1: 0.6 }, 0.18);
+  if (!push) return;
+  if (push.dx > 0) shiftPlayer(4.9 - 0.18 - head.x, 0, 0);
+  else shiftPlayer(push.dx, 0, push.dz);
+}
+
+function updateLift(dt) {
+  const lift = world.lift;
+  if (!lift) return;
+  const inside = inLiftCar();
+  if (inside) ridingLift = true;
+  const dy = lift.update(dt);
+  if (dy && ridingLift && renderer.xr.isPresenting) {
+    shiftPlayer(0, dy, 0);
+    fallVy = 0;
+    if (lift.moving) {
+      const head = headSample();
+      const box = lift.carBox;
+      const margin = 0.2;
+      let pushX = 0;
+      let pushZ = 0;
+      if (head.x < box.x0 + margin) pushX = box.x0 + margin - head.x;
+      if (head.x > box.x1 - margin) pushX = box.x1 - margin - head.x;
+      if (head.z < box.z0 + margin) pushZ = box.z0 + margin - head.z;
+      if (head.z > box.z1 - margin) pushZ = box.z1 - margin - head.z;
+      if (pushX || pushZ) shiftPlayer(pushX, 0, pushZ);
+    }
+  }
+  if (!lift.moving && !inside) ridingLift = false;
+  guardLiftDoor();
+}
+
 function updatePlayerFall(dt) {
   if (watching || biteHold || aboard || !renderer.xr.isPresenting || !xrFrame) return;
   if (climb?.hand || boatGrip) {
@@ -904,6 +965,7 @@ function updatePlayerFall(dt) {
 }
 
 const raycaster = new THREE.Raycaster();
+raycaster.layers.enable(1);
 const buildPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -world.tableTop);
 const pointer = new THREE.Vector2();
 const clock = new THREE.Clock();
@@ -2873,6 +2935,12 @@ function onXrTrigger(controller) {
     return;
   }
   const hit = hitFromController(controller);
+  if (hit?.owner?.userData.type === 'lift') {
+    if (hit.owner.userData.role === 'open') world.lift.openDoor();
+    else world.lift.go(inLiftCar());
+    pulseController(controller, 0.4, 30);
+    return;
+  }
   if (hit?.owner?.userData.action === 'peg') {
     controller.userData.pegDrag = true;
     setPegFromHit(hit);
@@ -3623,6 +3691,7 @@ function frame(time, frame) {
     if (renderer.xr.isPresenting && climb.hand) pullXrClimb();
     if (!renderer.xr.isPresenting) applyClimbView();
   }
+  updateLift(dt);
   updatePlayerFall(dt);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
     pollGazeLock();
