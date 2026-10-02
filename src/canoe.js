@@ -467,6 +467,14 @@ export function createCanoe(scene, targets, cave, assets, water) {
     onHaptic = fn || null;
   }
 
+  function knock(dir, strength = 1) {
+    if (!dir) return;
+    const len = Math.hypot(dir.x, dir.z) || 1;
+    sim.vx += (dir.x / len) * 0.8 * strength;
+    sim.vz += (dir.z / len) * 0.8 * strength;
+    sim.yawRate += (Math.random() - 0.5) * 0.6 * strength;
+  }
+
   return {
     group,
     ends,
@@ -481,6 +489,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     seatPoint,
     center,
     setHaptics,
+    knock,
     grab,
     tryOar,
     release,

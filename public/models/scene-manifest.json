@@ -814,7 +814,170 @@
         "use": "2 InstancedMeshes (body: vertex colours; paint: white material, instanceColor = the bucket's PAINTS colour) at each bucket group's matrixWorld; hide the cylinder body (proxyMaterial); move the coat CircleGeometry to y 0.046 (paint surface, radius ~0.07)",
         "coatY": 0.046
       }
+    },
+    "croc": {
+      "url": "models/enemies/croc.glb",
+      "kind": "skinned",
+      "source": "https://opengameart.org/content/crocodile-0",
+      "author": "br-n518",
+      "license": "CC0",
+      "bboxMin": [
+        -0.636,
+        -0.024,
+        -2.313
+      ],
+      "bboxMax": [
+        0.636,
+        0.306,
+        1.092
+      ],
+      "clips": {
+        "Attack": 0.625,
+        "Death": 0.667,
+        "Grab": 0.5,
+        "Hurt": 0.417,
+        "Idle": 1.292,
+        "Lurk": 2,
+        "Swim": 1,
+        "Threat": 0.5,
+        "Walk": 0.667
+      },
+      "joints": 27,
+      "meshes": [
+        "Croc"
+      ],
+      "params": {
+        "faces": "+Z, metres (3.405 m long). Root at the belly, feet at y -0.024, snout tip z 1.092, tail tip z -2.313 (bind pose).",
+        "eyes": [
+          [
+            0.056,
+            0.179,
+            0.789
+          ],
+          [
+            -0.056,
+            0.179,
+            0.789
+          ]
+        ],
+        "bones": {
+          "head": [
+            0,
+            0.142,
+            0.558
+          ],
+          "jaw": [
+            0,
+            0.108,
+            0.559
+          ]
+        },
+        "mouthAhead": 0.95,
+        "zones": {
+          "eye": {
+            "bone": "head",
+            "center": [
+              0,
+              0.205,
+              0.775
+            ],
+            "r": 0.085
+          },
+          "skull": {
+            "bone": "head",
+            "center": [
+              0,
+              0.13,
+              0.62
+            ],
+            "r": 0.13
+          },
+          "snout": {
+            "bone": "head",
+            "center": [
+              0,
+              0.085,
+              0.94
+            ],
+            "r": 0.11
+          },
+          "jaw": {
+            "bone": "jaw",
+            "center": [
+              0,
+              0.03,
+              0.86
+            ],
+            "r": 0.09
+          },
+          "body": [
+            {
+              "bone": "spine1",
+              "center": [
+                0,
+                0.16,
+                0.15
+              ],
+              "r": 0.25
+            },
+            {
+              "bone": "spine2",
+              "center": [
+                0,
+                0.16,
+                -0.4
+              ],
+              "r": 0.24
+            }
+          ],
+          "tail": [
+            {
+              "bone": "tail1",
+              "center": [
+                0,
+                0.14,
+                -0.85
+              ],
+              "r": 0.17
+            },
+            {
+              "bone": "tail2",
+              "center": [
+                0,
+                0.12,
+                -1.4
+              ],
+              "r": 0.12
+            },
+            {
+              "bone": "tail3",
+              "center": [
+                0,
+                0.1,
+                -1.9
+              ],
+              "r": 0.08
+            }
+          ]
+        },
+        "rideHeights": {
+          "deep": -0.75,
+          "lurk": -0.3,
+          "lurkPitch": -0.18,
+          "stalk": -0.22,
+          "stalkPitch": -0.07,
+          "dead": -0.16,
+          "note": "root y relative to WATER_Y. Lurk measured in r180 with createWorld(): eyes at -7.925, highest vertex -7.89 (WATER_Y -8)."
+        },
+        "attackTiming": "Attack clip: jaw fully open at ~0.31 s (jaw tip y 0.059, head tip y 0.634 at t=0.3125). Threat clip: rear and gape over 0.5 s, then clamp (jaw ~30 deg).",
+        "authoredClips": "Idle/Walk/Attack/Death are the author's (IK baked to FK). Swim, Lurk, Threat, Hurt, Grab were authored for House in Blender 4.2 (FK, tail S-wave / legs tucked). The death roll is a code roll of the root around +Z using the Grab pose."
+      },
+      "note": "1 SkinnedMesh on a 27-joint skeleton. Draco + KTX2 (baseColor/ORM ETC1S, normal UASTC), all 1024. Roughness lives in the G channel of croc_orm, metalness 0. Clone with SkeletonUtils.clone(), never Object3D.clone().",
+      "tris": 918,
+      "bytes": 1103432,
+      "texVramMB": 2.8
     }
+
   },
   "placements": [
     {
@@ -1107,6 +1270,7 @@
       "table",
       "fire_pit",
       "paint_can"
-    ]
+    ],
+    "croc": ["croc"]
   }
 }

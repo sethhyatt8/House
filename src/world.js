@@ -5,6 +5,7 @@ import { createCanoe as createPhysicalCanoe } from './canoe.js';
 import { legacy } from './flags.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
+import { createCroc } from './croc.js';
 import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
 import { addLadderVisuals, createFollower, p4Node } from './props4.js';
@@ -4353,7 +4354,9 @@ export function createWorld({ assets } = {}) {
   const birds = createBirds(scene, assets);
   const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
+  const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
+  if (croc) gear.setCroc(croc);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
   createForest(scene, assets);
@@ -4387,6 +4390,7 @@ export function createWorld({ assets } = {}) {
     yard,
     crates,
     canoe,
+    croc,
     cave: cliff.cave,
     shaft: cliff.shaft,
     gallery: cliff.gallery,

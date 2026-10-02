@@ -90,6 +90,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   let owned = false;
   let menuOpen = false;
   let bladeReady = false;
+  let croc = null;
   let bladeLogged = false;
   let onPickup = null;
   let onChop = null;
@@ -816,6 +817,16 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       const hits = arrowRay.intersectObjects(arrowSolids(), true);
       for (const hit of hits) {
         if (hit.distance > arrowRay.far) break;
+        const zone = hit.object.userData?.crocZone;
+        if (zone) {
+          const result = croc ? croc.hit(zone, hit.point, 'arrow') : null;
+          if (!result) continue;
+          arrow.position.copy(hit.point).addScaledVector(arrowAim, -0.6);
+          hit.object.attach(arrow);
+          arrow.userData.stuckFish = true;
+          arrow.userData.stuck = true;
+          break;
+        }
         const found = arrowHit(hit);
         if (!found || found === 'skip') continue;
         if (found !== hit && !arrow.userData.hurt) {
@@ -1447,7 +1458,10 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       }
       if (bladeReady && dt > 0) {
         const speed = bladeNow.distanceTo(bladePrev) / dt;
-        if (speed > 2.1) swingHit(bladePrev, bladeNow);
+        if (speed > 2.1) {
+          swingHit(bladePrev, bladeNow);
+          croc?.chop(bladePrev, bladeNow);
+        }
       }
       bladePrev.copy(bladeNow);
       bladeReady = true;
@@ -1639,6 +1653,11 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   }
 
   return {
+    setCroc(next) { croc = next; arrowMask = null; },
+    handHolding(name) {
+      for (const [who, item] of vrHands) if (item?.userData?.gear === name) return who;
+      return null;
+    },
     update,
     ownsBag: () => owned,
     toggleMenu,

@@ -11,6 +11,7 @@ import { createAssetManager } from './assets.js';
 import { legacy } from './flags.js';
 import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
+import { createPlayerHealth } from './health.js';
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -63,7 +64,7 @@ await assets.preload([
   'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env',
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
-  'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can',
+  'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc',
 ], ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
 });
@@ -528,6 +529,10 @@ function pulseController(controller, intensity = 0.7, ms = 50) {
   const pad = controller?.userData?.inputSource?.gamepad;
   const haptic = pad?.hapticActuators?.[0] || pad?.vibrationActuator;
   if (haptic?.pulse) haptic.pulse(intensity, ms);
+}
+
+function pulseBoth(intensity, ms) {
+  for (const c of controllers) pulseController(c, intensity, ms);
 }
 
 function attachClimb(controller, hit) {
@@ -1060,6 +1065,74 @@ renderer.xr.addEventListener('sessionend', () => {
 const controllerFactory = new XRControllerModelFactory();
 const controllers = [0, 1].map((index) => setupController(index));
 
+const croc = world.croc ?? null;
+const crocDebug = pageParams.get('crocdebug') === '1';
+const health = croc && !watching ? createPlayerHealth({
+  scene: world.scene,
+  camera,
+  onDown: playerDown,
+  onHeartbeat: (low) => { playHeartbeat(low); pulseBoth(0.15, 40); },
+}) : null;
+const crocPlayerState = { x: 0, z: 0, feetY: 0, onBeach: false, inWater: false, aboard: false, canoe: null };
+const crocHead = new THREE.Vector3();
+
+function crocPlayer() {
+  const p = crocPlayerState;
+  const cave = world.cave;
+  if (renderer.xr.isPresenting) {
+    const ref = xrFrame && renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    if (!pose) return null;
+    crocHead.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+    p.feetY = xrOffset.y;
+  } else {
+    crocHead.copy(camera.position);
+    p.feetY = crocHead.y - 1.6;
+  }
+  p.x = crocHead.x;
+  p.z = crocHead.z;
+  const low = p.feetY < cave.floor + 0.6;
+  const inZ = p.z >= cave.z0 && p.z <= cave.z1;
+  const pad = cave.pad;
+  const onPad = !!pad && p.x >= pad.x0 && p.x <= pad.x1 && p.z >= pad.z0 && p.z <= pad.z1;
+  p.aboard = aboard && world.canoe.floating();
+  p.canoe = p.aboard ? world.canoe.center : null;
+  p.onBeach = !p.aboard && low && ((inZ && p.x >= cave.x0 - 0.05 && p.x <= cave.x1) || onPad);
+  p.inWater = !p.aboard && !p.onBeach && low && inZ && p.x < cave.x0 && p.feetY > WATER_Y - 1.2;
+  return p;
+}
+
+function hurtPlayer(amount, opts) {
+  if (!health || (!renderer.xr.isPresenting && !crocDebug)) return 0;
+  return health.damage(amount, opts);
+}
+
+function playerDown() {
+  if (biteHold) return;
+  teleportTo(1);
+  croc?.reset();
+}
+
+if (croc) {
+  croc.on('reveal', (e) => playCrocGrowl(e.position, 0.55));
+  croc.on('return', () => playCrocGrowl(croc.root.position, 1));
+  croc.on('windup', (e) => { playCrocHiss(e.position, croc._s.enraged ? 0.65 : 0.9); pulseBoth(0.25, 60); });
+  croc.on('snap', (e) => playCrocSnap(e.position));
+  croc.on('bite', (e) => { if (hurtPlayer(e.damage) > 0) { playBite(); pulseBoth(1, 200); } });
+  croc.on('grabTick', (e) => { hurtPlayer(e.damage, { ignoreInvuln: true }); pulseBoth(0.8, 120); });
+  croc.on('release', () => pulseBoth(0.3, 60));
+  croc.on('ram', (e) => { hurtPlayer(e.damage); playCrocSnap(croc.root.position); pulseBoth(0.9, 160); world.canoe.knock?.(e.dir, 1); });
+  croc.on('hurt', (e) => {
+    playCrocHit(e.point, e.crit);
+    const hand = world.gear.handHolding(e.source === 'hatchet' ? 'hatchet' : 'bow');
+    if (e.source === 'hatchet') pulseController(hand, e.crit ? 1 : 0.8, e.crit ? 110 : 70);
+    else pulseController(hand, e.crit ? 0.8 : 0.45, e.crit ? 80 : 45);
+  });
+  croc.on('retreat', () => playCrocGrowl(croc.root.position, 0.8, 0.8));
+  croc.on('death', (e) => { playCrocDeath(e.position); pulseBoth(0.6, 300); });
+  croc.on('reward', () => playClear());
+}
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -1467,6 +1540,88 @@ function playPickup() {
     osc.start(start);
     osc.stop(start + 0.32);
   });
+}
+
+const crocTmp = new THREE.Vector3();
+function crocOut(ctx, position) {
+  const out = ctx.createGain();
+  const pan = ctx.createStereoPanner();
+  let p = 0;
+  let g = 1;
+  if (position) {
+    crocTmp.copy(position).applyMatrix4(camera.matrixWorldInverse);
+    const d = crocTmp.length();
+    p = THREE.MathUtils.clamp(crocTmp.x / Math.max(0.5, d), -1, 1);
+    g = 1 / (1 + Math.max(0, d - 1) * 0.35);
+  }
+  pan.pan.value = p;
+  out.gain.value = g;
+  out.connect(pan);
+  pan.connect(ctx.destination);
+  return out;
+}
+function crocEnv(ctx, out, start, peak, attack, release) {
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(peak, start + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + attack + release);
+  gain.connect(out);
+  return gain;
+}
+function crocNoise(ctx, secs) {
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * secs), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  return src;
+}
+function playCrocGrowl(position, level = 1, secs = 1.1) {
+  const ctx = audio(); const t = ctx.currentTime; const out = crocOut(ctx, position);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220;
+  const env = crocEnv(ctx, out, t, 0.32 * level, 0.12, secs);
+  const trem = ctx.createGain(); trem.gain.value = 0.6;
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 9; const depth = ctx.createGain(); depth.gain.value = 0.4;
+  lfo.connect(depth); depth.connect(trem.gain);
+  [48, 51.5].forEach((f) => { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 0.85, t + secs); o.connect(lp); o.start(t); o.stop(t + secs + 0.15); });
+  lp.connect(trem); trem.connect(env); lfo.start(t); lfo.stop(t + secs + 0.15);
+}
+function playCrocHiss(position, secs = 0.9) {
+  const ctx = audio(); const t = ctx.currentTime; const out = crocOut(ctx, position);
+  const src = crocNoise(ctx, secs + 0.1);
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2200;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 4500; bp.Q.value = 0.8;
+  src.connect(hp); hp.connect(bp); bp.connect(crocEnv(ctx, out, t, 0.22, secs * 0.85, 0.12));
+  src.start(t); src.stop(t + secs + 0.1);
+  playCrocGrowl(position, 0.6, secs);
+}
+function playCrocSnap(position) {
+  const ctx = audio(); const t = ctx.currentTime; const out = crocOut(ctx, position);
+  const click = crocNoise(ctx, 0.05); const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3000; bp.Q.value = 1.2;
+  click.connect(bp); bp.connect(crocEnv(ctx, out, t, 0.5, 0.002, 0.05)); click.start(t); click.stop(t + 0.05);
+  const o = ctx.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.08);
+  o.connect(crocEnv(ctx, out, t, 0.18, 0.004, 0.08)); o.start(t); o.stop(t + 0.1);
+  const slosh = crocNoise(ctx, 0.4); const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600;
+  slosh.connect(lp); lp.connect(crocEnv(ctx, out, t + 0.02, 0.25, 0.03, 0.33)); slosh.start(t + 0.02); slosh.stop(t + 0.42);
+}
+function playCrocHit(position, crit) {
+  const ctx = audio(); const t = ctx.currentTime; const out = crocOut(ctx, position);
+  const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.15);
+  o.connect(crocEnv(ctx, out, t, 0.35, 0.004, 0.15)); o.start(t); o.stop(t + 0.18);
+  const n = crocNoise(ctx, 0.12); const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1200;
+  n.connect(lp); lp.connect(crocEnv(ctx, out, t, 0.2, 0.003, 0.1)); n.start(t); n.stop(t + 0.12);
+  if (crit) { const c = ctx.createOscillator(); c.type = 'triangle'; c.frequency.setValueAtTime(900, t); c.frequency.exponentialRampToValueAtTime(400, t + 0.06); c.connect(crocEnv(ctx, out, t, 0.16, 0.002, 0.06)); c.start(t); c.stop(t + 0.08); }
+}
+function playCrocDeath(position) {
+  playCrocGrowl(position, 1.1, 1.6);
+  const ctx = audio(); const t = ctx.currentTime; const out = crocOut(ctx, position);
+  const n = crocNoise(ctx, 0.9); const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1400, t); lp.frequency.exponentialRampToValueAtTime(300, t + 0.8);
+  n.connect(lp); lp.connect(crocEnv(ctx, out, t + 0.25, 0.3, 0.05, 0.8)); n.start(t + 0.25); n.stop(t + 1.15);
+}
+function playHeartbeat(level = 1) {
+  const ctx = audio(); const t = ctx.currentTime;
+  [0, 0.16].forEach((dt, i) => { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(62, t + dt); o.frequency.exponentialRampToValueAtTime(40, t + dt + 0.09);
+    o.connect(envGain(ctx, t + dt, (i ? 0.16 : 0.22) * (0.6 + 0.4 * level), 0.006, 0.09)); o.start(t + dt); o.stop(t + dt + 0.12); });
 }
 
 function playBite() {
@@ -3672,6 +3827,11 @@ function frame(time, frame) {
   world.challenge.update(dt);
   world.canoe.setAboard?.(aboard);
   world.update(dt);
+  if (croc) {
+    if (watching) croc.root.visible = false;
+    else if (!biteHold) croc.update(dt, crocPlayer());
+    health?.update(dt);
+  }
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
   pullOar();
