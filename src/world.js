@@ -3140,7 +3140,7 @@ function createCliff(scene, targets, assets) {
   const playDepth = 64;
   const waterFar = -520;
   const waterDepth = 720;
-  const legacy = legacyWater();
+  const useLegacySheets = legacyWater();
   let waterMat = null;
   const addSheet = (x0, x1, segX, segZ) => {
     const geo = new THREE.PlaneGeometry(x1 - x0, waterDepth, segX, segZ);
@@ -3150,7 +3150,7 @@ function createCliff(scene, targets, assets) {
     mesh.userData.water = true;
     scene.add(mesh);
   };
-  if (legacy) {
+  if (useLegacySheets) {
   waterMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: true,
@@ -3246,7 +3246,7 @@ function createCliff(scene, targets, assets) {
   addSheet(playFar, waterNear, 48, 64);
   addSheet(waterFar, playFar, 12, 10);
   }
-  const ocean = legacy ? null : createOcean({
+  const ocean = useLegacySheets ? null : createOcean({
     scene,
     waterY: WATER_Y,
     nearX: lipX,
