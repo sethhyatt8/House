@@ -887,7 +887,7 @@ function hideAll(root) {
   });
 }
 
-function createSharks(scene, splash, assets, water) {
+function createSharks(scene, splash, assets, water, { floorY = null } = {}) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
   const darkMat = new THREE.MeshStandardMaterial({
@@ -1291,7 +1291,18 @@ function createSharks(scene, splash, assets, water) {
     addSocketEye(-1);
     return fish;
   };
-  const SWORD_SIZE = new URLSearchParams(location.search).get('swordsize') === 'old' ? 1 : 0.5;
+  // Swordfish size multiplier on the original routes: 0.2 = 1.3 / 1.1 / 0.9 m nose-to-tail (bill included), next to
+  // 6.7-8 m white sharks. ?swordsize=old (1.0), ?swordsize=half (0.5, the NEXT size) or ?swordsize=<number>.
+  const swordParam = new URLSearchParams(location.search).get('swordsize');
+  const SWORD_SIZE = swordParam === 'old' ? 1 : swordParam === 'half' ? 0.5 : (Number(swordParam) > 0 ? Number(swordParam) : 0.2);
+  const SWORD_SINK = SWORD_SIZE < 0.5 ? 0.12 : 0; // small swordfish ride a little lower: the sail breaks the surface now and then
+  // White sharks cruise deep (dorsal tip at least SHARK_CLEAR m under the surface) and only come up now and then:
+  // rise 4 s, fin out 6 s, sink 5 s, every 40-75 s per shark. ?sharkdepth=old keeps them fin-out all the time.
+  const SHARK_DEEP = new URLSearchParams(location.search).get('sharkdepth') !== 'old';
+  const SHARK_CLEAR = 0.9;
+  const SHARK_RISE = 4;
+  const SHARK_HOLD = 6;
+  const SHARK_SINK = 5;
   const waterline = { sword: 0.16, white: 0.2 };
   const glbWaterline = { sword: 0.687, white: 0.344 };
   const routes = [
@@ -1316,6 +1327,13 @@ function createSharks(scene, splash, assets, water) {
       glb.swim.time = (index * 0.37) % glb.clip.duration;
     }
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
+    if (route.kind === 'white') {
+      route.nextUp = 18 + index * 23; // first surfacing staggered so two sharks are rarely up together
+      route.upAt = -1;
+      route.up = 0;
+      route.vy = 0;
+      route.ups = 0;
+    }
     route.finTip = glb ? (route.kind === 'white' ? 0.604 : 0.887) : (route.kind === 'white' ? 0.46 : 0.36);
     route.wasAbove = true;
     route.wake = 0;
@@ -1406,14 +1424,45 @@ function createSharks(scene, splash, assets, water) {
         const wave = Math.sin(time * 0.62 + route.phase);
         const bob = route.dive ? wave * route.dive - route.dive * 0.35 : Math.sin(time * 1.1 + route.phase) * 0.012;
         const line = pair.shark.userData.glb ? glbWaterline[route.kind] : waterline[route.kind];
-        const y = WATER_Y - route.scale * line + bob;
+        let y = WATER_Y - route.scale * line + bob - (route.kind === 'sword' ? SWORD_SINK : 0);
+        let sharkPitch = null;
+        if (route.kind === 'white' && SHARK_DEEP) {
+          // surfacing schedule: 0 = cruising deep, 1 = fin out (the old height)
+          if (route.upAt < 0 && time >= route.nextUp) route.upAt = time;
+          let up = 0;
+          if (route.upAt >= 0) {
+            const t = time - route.upAt;
+            const ease = (x) => x * x * (3 - 2 * x);
+            if (t < SHARK_RISE) up = ease(t / SHARK_RISE);
+            else if (t < SHARK_RISE + SHARK_HOLD) up = 1;
+            else if (t < SHARK_RISE + SHARK_HOLD + SHARK_SINK) up = 1 - ease((t - SHARK_RISE - SHARK_HOLD) / SHARK_SINK);
+            else {
+              route.upAt = -1;
+              route.ups += 1;
+              const r = Math.sin((index + 1) * 12.9898 + route.ups * 78.233) * 43758.5453;
+              route.nextUp = time + 40 + (r - Math.floor(r)) * 35;
+            }
+          }
+          const finTip = route.finTip ?? 0.6;
+          const deepY = WATER_Y - SHARK_CLEAR - route.scale * finTip;
+          let target = deepY + (y - deepY) * up;
+          // never through the reef shelf (or the sea rocks' mounds): belly stays ~0.25 m above the floor
+          if (floorY) target = Math.max(target, Math.min(y, floorY(place.x, place.z) + route.scale * 0.3 + 0.25));
+          const prevY = route.py ?? target;
+          const step = 0.9 * dt; // m/s vertical limit so floor changes don't pop
+          y = prevY + THREE.MathUtils.clamp(target - prevY, -step, step);
+          route.vy += ((dt > 0 ? (y - prevY) / dt : 0) - route.vy) * Math.min(1, dt * 4);
+          route.py = y;
+          route.up = up;
+          sharkPitch = THREE.MathUtils.clamp(-route.vy * 0.6, -0.3, 0.3);
+        }
         pair.shark.position.set(place.x, y, place.z);
         const angle = place.angle;
         const vx = -Math.sin(angle) * route.rx * Math.sign(route.speed);
         const vz = Math.cos(angle) * route.rz * Math.sign(route.speed);
         const yaw = Math.atan2(-vz, vx);
         const roll = Math.sin(time * 0.8 + route.phase) * 0.04;
-        const pitch = route.dive ? -Math.cos(time * 0.62 + route.phase) * 0.28 : 0;
+        const pitch = sharkPitch ?? (route.dive ? -Math.cos(time * 0.62 + route.phase) * 0.28 : 0);
         pair.shark.rotation.set(pitch, yaw, roll);
         const wag = route.kind === 'sword' ? 5.4 : 4.2;
         pair.shark.userData.tail.rotation.y = Math.sin(time * wag + route.phase) * 0.38;
@@ -4406,7 +4455,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     if (kind === 'ui' || kind === 'plate') targets.splice(i, 1);
   }
   const finds = createFinds(scene, targets, rockMap, assets);
-  const sharks = createSharks(scene, cliff.splash, assets, cliff.water);
+  const sharks = createSharks(scene, cliff.splash, assets, cliff.water, { floorY: reef?.floorY ?? null });
   const angels = createAngels(scene, assets);
   const birds = createBirds(scene, assets, cliff.water);
   const bite = createBite(scene, sharks.white, assets);
@@ -4446,6 +4495,7 @@ export function createWorld({ assets, renderer = null } = {}) {
         angels.update(dt);
         birds.update(dt);
       }
+      reef?.update?.(camera);
       bite.update(dt);
       cliff.update(dt);
       cliff.gallery.update(dt);
