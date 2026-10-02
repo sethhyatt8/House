@@ -8,7 +8,8 @@
     "dev": "vite --host",
     "prebuild": "node scripts/copy-decoders.mjs",
     "build": "vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "check:water": "node scripts/water-height-check.mjs"
   },
   "dependencies": {
     "mqtt": "^5.16.0",

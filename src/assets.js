@@ -15,6 +15,7 @@ const FEATURE_FOR = {
   pines: 'trees',
   sky_backdrop: 'sky',
   sky_env: 'sky',
+  water_normal: 'water',
   finds: 'finds',
   ladder_kit: 'props4',
   table: 'props4',

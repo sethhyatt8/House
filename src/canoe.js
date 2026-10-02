@@ -165,6 +165,8 @@ export function createCanoe(scene, targets, cave, assets, water) {
   const center = new THREE.Vector3();
   let onHaptic = null;
   let draft = 0.12;
+  let surf = 0;
+  let swellPitch = 0;
   let groundedFrac = 0;
   let hovered = null;
   const anchor = new THREE.Vector3();
@@ -316,14 +318,20 @@ export function createCanoe(scene, targets, cave, assets, water) {
     sim.inertia = aboard ? 90 : 30;
     const targetDraft = aboard ? 0.16 : 0.12;
     draft += (targetDraft - draft) * (1 - Math.exp(-dt / 0.4));
-    const bob = 0.012 * Math.sin(1.6 * clock) + 0.006 * Math.sin(2.7 * clock + 1);
-    const floatY = water.level + 0.09 - draft + bob;
+    let bob = 0.012 * Math.sin(1.6 * clock) + 0.006 * Math.sin(2.7 * clock + 1);
+    let floatY = water.level + 0.09 - draft + bob;
+    if (water.ocean?.heightAt) {
+      const target = water.ocean.heightAt(group.position.x, group.position.z);
+      surf += (target - surf) * (1 - Math.exp(-dt / 0.35));
+      bob *= 0.5;
+      floatY = water.level + 0.09 - draft + surf + bob;
+    }
     const samples = [-1.6, 0, 1.6].map((z) => {
       local.set(0, 0, z);
       group.localToWorld(local);
       const ground = water.ground?.(local.x, local.z);
       const height = Math.max(floatY, Number.isFinite(ground) ? ground + 0.09 : -Infinity);
-      return { z, height, grounded: Number.isFinite(ground) && ground + 0.09 >= floatY };
+      return { z, x: local.x, wz: local.z, height, grounded: Number.isFinite(ground) && ground + 0.09 >= floatY };
     });
     groundedFrac = samples.filter((sample) => sample.grounded).length / samples.length;
     sim.groundedFrac = groundedFrac;
@@ -331,6 +339,13 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const sternY = samples[2].height;
     group.position.y = (bowY + sternY) / 2;
     group.rotation.x = Math.atan2(bowY - sternY, 3.2);
+    if (water.ocean?.heightAt) {
+      const bowH = water.ocean.heightAt(samples[0].x, samples[0].wz);
+      const sternH = water.ocean.heightAt(samples[2].x, samples[2].wz);
+      const targetPitch = Math.atan2(bowH - sternH, 3.2);
+      swellPitch += (targetPitch - swellPitch) * (1 - Math.exp(-dt / 0.35));
+      group.rotation.x += swellPitch;
+    }
     group.rotation.z = 0.02 * Math.sin(1.1 * clock);
 
     const poseX = group.position.x;
@@ -349,9 +364,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const zLimit = 7;
     const zOff = group.position.z - cave.z;
     if (Math.abs(zOff) > zLimit) sim.vz -= Math.sign(zOff) * (Math.abs(zOff) - zLimit) * dt;
-    if (water.uniform) {
-      water.uniform.value.set(group.position.x, group.position.z, group.rotation.y, floating() ? 1 : 0);
-    }
+    water.setBoat?.(group.position.x, group.position.z, group.rotation.y, floating(), surf);
     center.copy(group.position);
     seat.getWorldPosition(seatPoint);
     massNow();

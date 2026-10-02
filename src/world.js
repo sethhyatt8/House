@@ -6,6 +6,7 @@ import { legacy } from './flags.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createCroc } from './croc.js';
+import { createOcean, legacyWater } from './water.js';
 import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
 import { addLadderVisuals, createFollower, p4Node } from './props4.js';
@@ -883,7 +884,7 @@ function hideAll(root) {
   });
 }
 
-function createSharks(scene, splash, assets) {
+function createSharks(scene, splash, assets, water) {
   const aboveWater = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WATER_Y);
   const belowWater = new THREE.Plane(new THREE.Vector3(0, -1, 0), WATER_Y);
   const darkMat = new THREE.MeshStandardMaterial({
@@ -1287,12 +1288,13 @@ function createSharks(scene, splash, assets) {
     addSocketEye(-1);
     return fish;
   };
+  const SWORD_SIZE = new URLSearchParams(location.search).get('swordsize') === 'old' ? 1 : 0.5;
   const waterline = { sword: 0.16, white: 0.2 };
   const glbWaterline = { sword: 0.687, white: 0.344 };
   const routes = [
-    { kind: 'sword', cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.42, phase: 0.3, scale: 2.15, dive: 0.7 },
-    { kind: 'sword', cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.52, phase: 1.6, scale: 1.7, dive: 0.55 },
-    { kind: 'sword', cx: -22, cz: 6.5, rx: 3.2, rz: 3.6, speed: 0.64, phase: 2.4, scale: 1.45, dive: 0.8 },
+    { kind: 'sword', cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.42, phase: 0.3, scale: 2.15 * SWORD_SIZE, dive: 0.7 * SWORD_SIZE },
+    { kind: 'sword', cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.52, phase: 1.6, scale: 1.7 * SWORD_SIZE, dive: 0.55 * SWORD_SIZE },
+    { kind: 'sword', cx: -22, cz: 6.5, rx: 3.2, rz: 3.6, speed: 0.64, phase: 2.4, scale: 1.45 * SWORD_SIZE, dive: 0.8 * SWORD_SIZE },
     { kind: 'white', cx: -41, cz: 5.5, rx: 5.2, rz: 4.2, speed: 0.24, phase: 0.9, scale: 2.65, dive: 0 },
     { kind: 'white', cx: -28, cz: -7.5, rx: 5.6, rz: 3.4, speed: -0.2, phase: 2.2, scale: 3.05, dive: 0 },
   ];
@@ -1366,7 +1368,7 @@ function createSharks(scene, splash, assets) {
         const route = routes[index];
         if (pair.shark.userData.dead) {
           const ease = 1 - Math.exp(-dt * 1.3);
-          const floatY = WATER_Y + route.scale * 0.02;
+          const floatY = WATER_Y + route.scale * 0.02 + (water ? water.heightAt(pair.shark.position.x, pair.shark.position.z) : 0);
           pair.shark.position.y += (floatY - pair.shark.position.y) * ease;
           pair.shark.rotation.x += -pair.shark.rotation.x * ease;
           pair.shark.rotation.z += (1.35 - pair.shark.rotation.z) * ease;
@@ -1417,7 +1419,8 @@ function createSharks(scene, splash, assets) {
         pair.shadow.rotation.copy(pair.shark.rotation);
         pair.shadow.userData.tail.rotation.y = pair.shark.userData.tail.rotation.y;
         const tipY = y + Math.cos(pitch) * route.scale * route.finTip;
-        const above = tipY - WATER_Y;
+        const surface = WATER_Y + (water ? water.heightAt(place.x, place.z) : 0);
+        const above = tipY - surface;
         if (route.seen && (above > 0) !== (route.wasAbove > 0)) splash(place.x, place.z, true);
         route.seen = true;
         route.wasAbove = above;
@@ -1674,7 +1677,7 @@ function createAngels(scene, assets) {
   };
 }
 
-function createBirds(scene, assets) {
+function createBirds(scene, assets, water) {
   const white = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
   const gray = new THREE.MeshStandardMaterial({ color: 0x7e8894, roughness: 0.68 });
   const tip = new THREE.MeshStandardMaterial({ color: 0x2c323a, roughness: 0.6 });
@@ -1820,7 +1823,7 @@ function createBirds(scene, assets) {
         bird.position.y += data.vy * dt;
         bird.position.z += (data.vz || 0) * dt;
         bird.rotation.z += (data.spin || 0) * dt;
-        const floatY = WATER_Y + 0.05;
+        const floatY = WATER_Y + 0.05 + (water ? water.heightAt(bird.position.x, bird.position.z) : 0);
         if (bird.position.y <= floatY) {
           bird.position.y = floatY;
           data.vy = 0;
@@ -2421,6 +2424,7 @@ function addSeaOutcrop(scene, material, x, z, scale, seed) {
     );
     group.add(mesh);
   });
+  group.userData.shore = true;
   scene.add(group);
 }
 
@@ -2576,6 +2580,7 @@ function createWreck(scene, assets) {
   );
   sand.rotation.x = -Math.PI / 2;
   sand.position.set(-44.6, WATER_Y - 0.28, 12);
+  sand.visible = legacyWater();
   scene.add(sand);
 }
 
@@ -2630,6 +2635,7 @@ function createSeaRocks(scene, assets) {
         index += 1;
       }
     }
+    rocks.userData.shore = true;
     scene.add(rocks);
     rocks.updateMatrixWorld(true);
     rocks.computeBoundingSphere();
@@ -2920,12 +2926,14 @@ function createCliff(scene, targets, assets) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(skin, y1 - y0, z1 - z0), mat);
     mesh.position.set(faceX + skin / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     mesh.receiveShadow = true;
+    mesh.userData.shore = true;
     scene.add(mesh);
   };
   const mass = (x0, x1, y0, y1, z0, z1) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), rock);
     mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     mesh.receiveShadow = true;
+    mesh.userData.shore = true;
     scene.add(mesh);
   };
   mass(innerX, caveBack + 0.7, yBot, yTop, -12, caveZ0);
@@ -2964,6 +2972,7 @@ function createCliff(scene, targets, assets) {
   );
   beach.position.set((beachFar + lipX) / 2, beachTop - 0.14, caveMid);
   beach.receiveShadow = true;
+  beach.userData.shore = true;
   scene.add(beach);
   const pad = new THREE.Mesh(
     new THREE.BoxGeometry(lipX - padX0, 0.28, shaftZ1 - shaftZ0),
@@ -2971,6 +2980,7 @@ function createCliff(scene, targets, assets) {
   );
   pad.position.set((padX0 + lipX) / 2, beachTop - 0.14, caveMid);
   pad.receiveShadow = true;
+  pad.userData.shore = true;
   scene.add(pad);
   const shoal = new THREE.Mesh(
     new THREE.BoxGeometry(3.4, 0.16, caveZ1 - caveZ0),
@@ -2978,6 +2988,7 @@ function createCliff(scene, targets, assets) {
   );
   shoal.position.set(legacy('canoe') ? -4.2 : -5.5, WATER_Y - 0.24, caveMid);
   if (!legacy('canoe')) shoal.scale.x = 2.2 / 3.4;
+  shoal.userData.shore = true;
   scene.add(shoal);
   const caveLamp = new THREE.PointLight(0xc9d6e2, 0.85, 16, 1.4);
   caveLamp.position.set(-2.4, -5.4, caveMid);
@@ -3051,6 +3062,7 @@ function createCliff(scene, targets, assets) {
     const slab = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.18, spanZ), shallowMat);
     slab.position.set((-4.4 + -2.25) / 2, shallowY - 0.09, cave.z);
     slab.receiveShadow = true;
+    slab.userData.shore = true;
     scene.add(slab);
     if (floorRock) applyWorldUv(slab, 2.0);
     const rampLen = Math.hypot(cave.x0 - -2.25, beachTop - shallowY);
@@ -3058,6 +3070,7 @@ function createCliff(scene, targets, assets) {
     ramp.position.set((cave.x0 + -2.25) / 2, (beachTop + shallowY) / 2, cave.z);
     ramp.rotation.z = Math.atan2(beachTop - shallowY, cave.x0 - -2.25);
     ramp.receiveShadow = true;
+    ramp.userData.shore = true;
     scene.add(ramp);
     if (floorRock) applyWorldUv(ramp, 2.0);
   }
@@ -3126,6 +3139,8 @@ function createCliff(scene, targets, assets) {
   const playDepth = 64;
   const waterFar = -520;
   const waterDepth = 720;
+  const legacy = legacyWater();
+  let waterMat = null;
   const addSheet = (x0, x1, segX, segZ) => {
     const geo = new THREE.PlaneGeometry(x1 - x0, waterDepth, segX, segZ);
     geo.rotateX(-Math.PI / 2);
@@ -3134,7 +3149,8 @@ function createCliff(scene, targets, assets) {
     mesh.userData.water = true;
     scene.add(mesh);
   };
-  const waterMat = new THREE.ShaderMaterial({
+  if (legacy) {
+  waterMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: true,
     fog: true,
@@ -3228,6 +3244,18 @@ function createCliff(scene, targets, assets) {
   });
   addSheet(playFar, waterNear, 48, 64);
   addSheet(waterFar, playFar, 12, 10);
+  }
+  const ocean = legacy ? null : createOcean({
+    scene,
+    waterY: WATER_Y,
+    nearX: lipX,
+    cliffX: CLIFF_X,
+    assets,
+    sky: skyTex,
+    moonDir: skyTex
+      ? new THREE.Vector3(-0.9701, 0.2385, 0.0441)
+      : moon.position.clone().sub(new THREE.Vector3(-0.05, 1.58, 1.22)),
+  });
 
   createSeaRocks(scene, assets);
   createWreck(scene, assets);
@@ -3269,7 +3297,7 @@ function createCliff(scene, targets, assets) {
     });
   }
 
-  const ringSlots = waterMat.uniforms.uRings.value;
+  const ringSlots = (ocean ? ocean.uniforms : waterMat.uniforms).uRings.value;
   let ringCursor = 0;
 
   function splash(x, z, burst = true) {
@@ -3306,7 +3334,8 @@ function createCliff(scene, targets, assets) {
   }
 
   function update(dt) {
-    waterMat.uniforms.uTime.value += dt;
+    if (ocean) ocean.update(dt);
+    else waterMat.uniforms.uTime.value += dt;
     ringSlots.forEach((slot) => {
       if (slot.w > 0) slot.z += dt;
     });
@@ -3342,7 +3371,12 @@ function createCliff(scene, targets, assets) {
   cave.tunnel = gallery.tunnel;
   cave.room = gallery.room;
 
-  return { update, splash, ripple, cave, shaft, gallery, waterMat };
+  function setBoat(x, z, yaw, active, surf = 0) {
+    if (ocean) ocean.setBoat(x, z, yaw, active, surf);
+    else waterMat.uniforms.uBoat.value.set(x, z, yaw, active ? 1 : 0);
+  }
+
+  return { update, splash, ripple, cave, shaft, gallery, waterMat, water: ocean, setBoat };
 }
 
 function plateTexture() {
@@ -4215,7 +4249,8 @@ export function createWorld({ assets } = {}) {
     ? createLegacyCanoe(scene, targets, cliff.cave, assets)
     : createPhysicalCanoe(scene, targets, cliff.cave, assets, {
       level: WATER_Y,
-      uniform: cliff.waterMat.uniforms.uBoat,
+      setBoat: cliff.setBoat,
+      ocean: cliff.water,
       ground(x, z) {
         const home = cliff.cave;
         if (x >= home.x0 && x <= home.x1 && z >= home.z0 && z <= home.z1) return home.floor;
@@ -4349,9 +4384,9 @@ export function createWorld({ assets } = {}) {
     if (kind === 'ui' || kind === 'plate') targets.splice(i, 1);
   }
   const finds = createFinds(scene, targets, rockMap, assets);
-  const sharks = createSharks(scene, cliff.splash, assets);
+  const sharks = createSharks(scene, cliff.splash, assets, cliff.water);
   const angels = createAngels(scene, assets);
-  const birds = createBirds(scene, assets);
+  const birds = createBirds(scene, assets, cliff.water);
   const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
@@ -4396,6 +4431,8 @@ export function createWorld({ assets } = {}) {
     gallery: cliff.gallery,
     splash: cliff.splash,
     ripple: cliff.ripple,
+    water: cliff.water,
+    bakeWater: (renderer) => cliff.water?.bake(renderer) ?? null,
     shallowFloor,
     startBite: bite.start,
     clearBite: bite.clear,

@@ -1231,6 +1231,14 @@
         512
       ]
     },
+    "water_normal": {
+      "url": "textures/water_001_normal_512.ktx2",
+      "source": "https://3dtextures.me/2017/12/28/water-001/",
+      "license": "CC0",
+      "size": [512, 512],
+      "encoding": "KTX2 UASTC + zstd, linear (no sRGB), 10 mip levels, normals re-normalised",
+      "use": "tangent-space detail normals for src/water.js: RepeatWrapping, sampled twice (3.7 m and 11.3 m tiles)"
+    },
     "fogSuggestion": {
       "current": "#10182c",
       "hdriHorizon6to15deg": "#212d37"

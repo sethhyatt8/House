@@ -61,7 +61,7 @@ const loadingBar = document.getElementById('loading-bar');
 const assets = createAssetManager(renderer);
 await assets.loadManifest('models/scene-manifest.json');
 await assets.preload([
-  'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env',
+  'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
   'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc',
@@ -93,6 +93,7 @@ if (envHdr) {
   pmrem.dispose();
 }
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
+world.bakeWater(renderer);
 world.gear.setSounds({
   pickup: playPickup,
   chop: playChop,

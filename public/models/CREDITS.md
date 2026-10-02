@@ -22,3 +22,13 @@ Changes made for House (Blender 4.2.3 + gltf-transform + KTX-Software 4.4.2, scr
 - Added new FK clips: Swim, Lurk, Threat, Hurt, Grab.
 - Recoloured the diffuse to a dark olive with mottling, a duller belly and yellow eyes. Turned the specular map into a roughness map (ORM green channel).
 - Textures resized to 1024 and compressed to KTX2 (ETC1S colour/ORM, UASTC normal). Mesh compressed with Draco.
+
+## Water
+
+## water_001_normal_512.ktx2
+- Source: "Water 001" by Katsukagi, 3D Textures — https://3dtextures.me/2017/12/28/water-001/
+- License: CC0 (public domain), per https://3dtextures.me/about/
+- Original: Water_001_NORM.jpg (1024x1024, OpenGL-style tangent-space normal map)
+- Processing: downscaled to 512x512, encoded with KTX-Software 4.4.2:
+  `ktx create --format R8G8B8_UNORM --assign-tf linear --encode uastc --uastc-quality 2 --uastc-rdo --uastc-rdo-l 0.5 --zstd 18 --generate-mipmap --normalize`
+- Linear (non-colour) data, 10 mip levels. Used by src/water.js as two scrolling detail-normal layers.
