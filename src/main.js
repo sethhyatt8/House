@@ -11,6 +11,7 @@ import { createAssetManager } from './assets.js';
 import { legacy } from './flags.js';
 import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
+import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
 
 const statusEl = document.getElementById('status');
@@ -60,17 +61,21 @@ const loadingEl = document.getElementById('loading');
 const loadingBar = document.getElementById('loading-bar');
 const assets = createAssetManager(renderer);
 await assets.loadManifest('models/scene-manifest.json');
+const DEFERRED = ['rock_cliff', 'rock_floor', 'boulder', 'lift_kit', 'chest', 'fire_pit', 'paint_can'];
+const lazyBoot = pageParams.get('zones') !== '0';
+if (lazyBoot) assets.deferMaterials(['rock_cliff', 'rock_floor']);
 await assets.preload([
   'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
   'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals',
-], ({ loaded, total }) => {
+].filter((id) => !lazyBoot || !DEFERRED.includes(id)), ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
 });
 if (loadingEl) loadingEl.hidden = true;
 
-const world = createWorld({ assets });
+const world = createWorld({ assets, renderer });
+assets.prefetch(DEFERRED);
 const envHdr = assets.feature('sky') ? assets.hdr('sky_env') : null;
 if (envHdr) {
   envHdr.mapping = THREE.EquirectangularReflectionMapping;
@@ -927,6 +932,7 @@ function updateLift(dt) {
     }
   }
   if (!lift.moving && !inside) ridingLift = false;
+  liftFeel.update(dt, ridingLift || inside, renderer.xr.isPresenting);
   guardLiftDoor();
 }
 
@@ -1066,6 +1072,7 @@ renderer.xr.addEventListener('sessionend', () => {
 
 const controllerFactory = new XRControllerModelFactory();
 const controllers = [0, 1].map((index) => setupController(index));
+const liftFeel = createLiftFeel({ lift: world.lift, scene, camera, audio, pulse: pulseController, controllers });
 
 const croc = world.croc ?? null;
 const crocDebug = pageParams.get('crocdebug') === '1';
@@ -3905,6 +3912,10 @@ function frame(time, frame) {
       watcherCount = relay.watcherCount();
       relay.send(captureSnapshot());
     }
+  }
+  if (world.zones?.enabled) {
+    const eye = headSample();
+    world.zones.update(eye, dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
   }
   renderer.render(scene, camera);
   notePerf(time);

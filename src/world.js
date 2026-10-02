@@ -12,6 +12,8 @@ import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAP
 import { addLadderVisuals, createFollower, p4Node } from './props4.js';
 import { START_CELL } from './cell.js';
 import { applyWorldUv } from './uv.js';
+import { createLift } from './lift.js';
+import { createZones } from './zones.js';
 import { createReef } from './reef.js';
 
 const TABLE_TOP = 0.76;
@@ -2993,6 +2995,7 @@ function createCliff(scene, targets, assets) {
   scene.add(shoal);
   const caveLamp = new THREE.PointLight(0xc9d6e2, 0.85, 16, 1.4);
   caveLamp.position.set(-2.4, -5.4, caveMid);
+  caveLamp.userData.zoneLamp = 'cave';
   scene.add(caveLamp);
 
   const rungW = shaftZ1 - shaftZ0 - 0.22;
@@ -3751,8 +3754,12 @@ function createForest(scene, assets) {
     if (counts.total !== 374) console.warn('Forest tree count is', counts.total, 'instead of 374.');
     const alphaToCoverage = new URLSearchParams(location.search).get('a2c') === '1';
     const dummy = new THREE.Object3D();
+    const whole = new URLSearchParams(location.search).get('forest') === 'whole';
+    const quadrant = (spot) => (whole ? 0 : (Math.floor(((Math.atan2(spot.z, spot.x - 3) + Math.PI * 2.25) % (Math.PI * 2)) / (Math.PI / 2)) % 4));
     for (const variant of Object.values(variants)) {
       if (!variant.list.length) continue;
+      const groups = [[], [], [], []];
+      variant.list.forEach((spot) => groups[quadrant(spot)].push(spot));
       variant.node.traverse((part) => {
         if (!part.isMesh) return;
         const mat = part.material;
@@ -3761,20 +3768,25 @@ function createForest(scene, assets) {
           if (alphaToCoverage) mat.alphaToCoverage = true;
         }
         if (/Bark/.test(mat.name)) mat.color.set(0x9a8c80);
-        const mesh = new THREE.InstancedMesh(part.geometry, mat, variant.list.length);
-        variant.list.forEach((spot, index) => {
-          dummy.position.set(spot.x, 0, spot.z);
-          dummy.rotation.set(0, spot.spin, 0);
-          dummy.scale.setScalar(spot.h / variant.h);
-          dummy.updateMatrix();
-          mesh.setMatrixAt(index, dummy.matrix);
-        });
-        mesh.userData.backdrop = true;
-        mesh.castShadow = false;
-        mesh.receiveShadow = false;
-        mesh.frustumCulled = false;
-        mesh.raycast = () => {};
-        scene.add(mesh);
+        for (const list of groups) {
+          if (!list.length) continue;
+          const mesh = new THREE.InstancedMesh(part.geometry, mat, list.length);
+          list.forEach((spot, index) => {
+            dummy.position.set(spot.x, 0, spot.z);
+            dummy.rotation.set(0, spot.spin, 0);
+            dummy.scale.setScalar(spot.h / variant.h);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(index, dummy.matrix);
+          });
+          mesh.instanceMatrix.needsUpdate = true;
+          mesh.computeBoundingSphere();
+          mesh.userData.backdrop = true;
+          mesh.castShadow = false;
+          mesh.receiveShadow = false;
+          mesh.frustumCulled = !whole;
+          mesh.raycast = () => {};
+          scene.add(mesh);
+        }
       });
     }
     return;
@@ -3816,7 +3828,7 @@ function createForest(scene, assets) {
   });
 }
 
-function addLift(scene, back, targets) {
+function addLegacyLift(scene, back, targets) {
   const stone = new THREE.MeshStandardMaterial({ color: 0x2a241c, roughness: 1 });
   const timber = new THREE.MeshStandardMaterial({ color: 0x6e5340, roughness: 0.86 });
   const iron = new THREE.MeshStandardMaterial({
@@ -4078,7 +4090,7 @@ function addLockedGate(parent, back) {
   return gate;
 }
 
-export function createWorld({ assets } = {}) {
+export function createWorld({ assets, renderer = null } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10182c);
   const fogParam = new URLSearchParams(location.search).get('fog');
@@ -4162,7 +4174,6 @@ export function createWorld({ assets } = {}) {
   const addCell = (w, h, d, x, y, z) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cellDark);
     mesh.position.set(x, y, z);
-    mesh.layers.set(1);
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -4183,7 +4194,16 @@ export function createWorld({ assets } = {}) {
   addCell(liner, cellTop, linerSouth, backLinerX, cellTop / 2, cellZ0 + linerSouth / 2);
   addCell(liner, cellTop, linerNorth, backLinerX, cellTop / 2, back.z1 + linerNorth / 2);
   addCell(liner, Math.max(0.02, cellTop - back.h), back.z1 - back.z0, backLinerX, back.h + Math.max(0.02, cellTop - back.h) / 2, (back.z0 + back.z1) / 2);
-  const lift = addLift(scene, back, targets);
+  const liftLegacy = new URLSearchParams(location.search).get('lift') === 'legacy';
+  const lift = liftLegacy
+    ? addLegacyLift(scene, back, targets)
+    : createLift(scene, back, targets, {
+      assets,
+      addGate: addLockedGate,
+      rockWall: assets?.feature('rock') ? assets.material('rock_cliff') : null,
+      rockFloor: assets?.feature('rock') ? assets.material('rock_floor') : null,
+      timber: assets?.feature('gear') || assets?.feature('props4') ? assets.material('rough_wood') : null,
+    });
   addCell(liner, cellTop, door.z0 - cellZ0, cellX0 + liner / 2, cellTop / 2, (cellZ0 + door.z0) / 2);
   addCell(liner, cellTop, cellZ1 - door.z1, cellX0 + liner / 2, cellTop / 2, (door.z1 + cellZ1) / 2);
   addCell(liner, cellTop - door.h, door.z1 - door.z0, cellX0 + liner / 2, door.h + (cellTop - door.h) / 2, (door.z0 + door.z1) / 2);
@@ -4195,7 +4215,7 @@ export function createWorld({ assets } = {}) {
   sill.receiveShadow = true;
   scene.add(sill);
   const gloom = new THREE.PointLight(0xffc9a0, 14, 1.35, 2);
-  gloom.layers.set(1);
+  gloom.userData.zoneLamp = 'cell';
   gloom.position.set(cellX0 + 0.22, 1.25, (door.z0 + door.z1) / 2);
   scene.add(gloom);
   const roofTop = 2.95 + 0.31;
@@ -4397,6 +4417,14 @@ export function createWorld({ assets } = {}) {
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
   createForest(scene, assets);
+  const zones = createZones({
+    scene,
+    targets,
+    lift: liftLegacy ? null : lift,
+    renderer,
+    assets,
+    isCellOpen: () => gear.doorBoards.some((board) => board.userData.dead || !board.parent),
+  });
 
   return {
     scene,
@@ -4412,13 +4440,16 @@ export function createWorld({ assets } = {}) {
     layoutTable,
     setRoomCode: roomCard.setRoomCode,
     update(dt) {
-      sharks.update(dt);
-      angels.update(dt);
-      birds.update(dt);
+      const seaAwake = zones.isAwake('sea') || zones.isAwake('outdoor');
+      if (seaAwake) {
+        sharks.update(dt);
+        angels.update(dt);
+        birds.update(dt);
+      }
       bite.update(dt);
       cliff.update(dt);
       cliff.gallery.update(dt);
-      puddles.update(dt);
+      if (zones.isAwake('outdoor') || zones.isAwake('cell')) puddles.update(dt);
       canoe.update(dt);
       gear.update(dt);
       finds.update();
@@ -4446,6 +4477,7 @@ export function createWorld({ assets } = {}) {
     roof,
     keyLight: key,
     lift,
+    zones,
   };
 }
 
