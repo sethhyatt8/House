@@ -3843,7 +3843,7 @@ function frame(time, frame) {
   world.update(dt);
   if (croc) {
     if (watching) croc.root.visible = false;
-    else if (!biteHold) croc.update(dt, crocPlayer());
+    else if (!biteHold && (!world.zones?.enabled || world.zones.isAwake('cave') || world.zones.isAwake('sea'))) croc.update(dt, crocPlayer());
     health?.update(dt);
   }
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
