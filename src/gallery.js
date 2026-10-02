@@ -160,14 +160,18 @@ export function createGallery(scene, spec) {
   fire.add(fireLight);
   scene.add(fire);
   if (props4) {
-    const pitSrc = spec.assets.gltf('fire_pit')?.scene.getObjectByName('fire_pit');
-    if (pitSrc) {
-      const pit = pitSrc.clone();
-      pit.raycast = () => {};
-      pit.castShadow = true;
-      pit.receiveShadow = true;
-      fire.add(pit);
-    }
+    const addPit = () => {
+      const pitSrc = spec.assets.gltf('fire_pit')?.scene.getObjectByName('fire_pit');
+      if (pitSrc) {
+        const pit = pitSrc.clone();
+        pit.raycast = () => {};
+        pit.castShadow = true;
+        pit.receiveShadow = true;
+        fire.add(pit);
+      }
+    };
+    if (spec.assets.whenReady) spec.assets.whenReady('fire_pit').then(addPit);
+    else addPit();
   }
   firePoint.set(midX, floorY + 0.34, midZ);
 
@@ -197,27 +201,32 @@ export function createGallery(scene, spec) {
     });
   });
   if (props4) {
-    const bodySrc = spec.assets.gltf('paint_can')?.scene.getObjectByName('paintcan_body');
-    const paintSrc = spec.assets.gltf('paint_can')?.scene.getObjectByName('paintcan_paint');
-    if (bodySrc && paintSrc) {
-      const bodyMesh = new THREE.InstancedMesh(bodySrc.geometry, bodySrc.material, PAINTS.length);
-      const paintMesh = new THREE.InstancedMesh(paintSrc.geometry, paintSrc.material, PAINTS.length);
-      bucketGroups.forEach(({ bucket, body, coat }, index) => {
-        body.material = proxyMaterial;
-        coat.position.y = 0.046;
-        bucket.updateWorldMatrix(true, false);
-        bodyMesh.setMatrixAt(index, bucket.matrixWorld);
-        paintMesh.setMatrixAt(index, bucket.matrixWorld);
-        paintMesh.setColorAt(index, new THREE.Color(PAINTS[index]));
-      });
-      for (const mesh of [bodyMesh, paintMesh]) {
-        mesh.raycast = () => {};
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.computeBoundingSphere();
-        scene.add(mesh);
+    const addCans = () => {
+      const bodySrc = spec.assets.gltf('paint_can')?.scene.getObjectByName('paintcan_body');
+      const paintSrc = spec.assets.gltf('paint_can')?.scene.getObjectByName('paintcan_paint');
+      if (bodySrc && paintSrc) {
+        const bodyMesh = new THREE.InstancedMesh(bodySrc.geometry, bodySrc.material, PAINTS.length);
+        const paintMesh = new THREE.InstancedMesh(paintSrc.geometry, paintSrc.material, PAINTS.length);
+        bucketGroups.forEach(({ bucket, body, coat }, index) => {
+          body.material = proxyMaterial;
+          coat.position.y = 0.046;
+          bucket.updateWorldMatrix(true, false);
+          bodyMesh.setMatrixAt(index, bucket.matrixWorld);
+          paintMesh.setMatrixAt(index, bucket.matrixWorld);
+          paintMesh.setColorAt(index, new THREE.Color(PAINTS[index]));
+        });
+        for (const mesh of [bodyMesh, paintMesh]) {
+          mesh.raycast = () => {};
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.computeBoundingSphere();
+          scene.add(mesh);
+          scene.userData.zones?.adopt?.(mesh);
+        }
       }
-    }
+    };
+    if (spec.assets.whenReady) spec.assets.whenReady('paint_can').then(addCans);
+    else addCans();
   }
 
   function light() {

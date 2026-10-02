@@ -1068,11 +1068,14 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   lid.castShadow = true;
   chest.add(lid);
   let chestLid = null;
-  if (gearModels && assets.gltf('chest')) {
+  const addChest = () => {
+    if (!gearModels || !assets.gltf('chest')) return;
     hideParts([chestBody, lid]);
     const chestVis = addModel(chest, 'chest');
     chestLid = chestVis?.getObjectByName('treasure_chest_lid') || null;
-  }
+  };
+  if (gearModels && assets.whenReady) assets.whenReady('chest').then(addChest);
+  else addChest();
   chest.userData = { open: 0 };
   scene.add(chest);
   for (const item of [hatchet, torch, brush, ...sprayCans]) {
