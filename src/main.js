@@ -1086,44 +1086,45 @@ function ensureRoar() {
   const master = ctx.createGain();
   master.gain.value = 0;
   master.connect(ctx.destination);
-  const sub = ctx.createOscillator();
-  sub.type = 'sine';
-  sub.frequency.value = 34;
-  const subGain = ctx.createGain();
-  subGain.gain.value = 0.45;
-  sub.connect(subGain);
-  subGain.connect(master);
-  sub.start();
-  const rumble = ctx.createOscillator();
-  rumble.type = 'sawtooth';
-  rumble.frequency.value = 52;
-  const low = ctx.createBiquadFilter();
-  low.type = 'lowpass';
-  low.frequency.value = 120;
-  const rumbleGain = ctx.createGain();
-  rumbleGain.gain.value = 0.14;
-  rumble.connect(low);
-  low.connect(rumbleGain);
-  rumbleGain.connect(master);
-  rumble.start();
   const seconds = 3;
   const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
   const data = noiseBuf.getChannelData(0);
-  for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+  let carry = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    carry = carry * 0.97 + (Math.random() * 2 - 1) * 0.03;
+    data[i] = Math.max(-1, Math.min(1, carry * 7));
+  }
   const noise = ctx.createBufferSource();
   noise.buffer = noiseBuf;
   noise.loop = true;
   const growl = ctx.createBiquadFilter();
   growl.type = 'bandpass';
-  growl.frequency.value = 160;
-  growl.Q.value = 3.2;
-  const noiseGain = ctx.createGain();
-  noiseGain.gain.value = 0;
+  growl.frequency.value = 180;
+  growl.Q.value = 5;
+  const growlGain = ctx.createGain();
+  growlGain.gain.value = 0;
   noise.connect(growl);
-  growl.connect(noiseGain);
-  noiseGain.connect(master);
+  growl.connect(growlGain);
+  growlGain.connect(master);
+  const rasp = ctx.createBiquadFilter();
+  rasp.type = 'bandpass';
+  rasp.frequency.value = 480;
+  rasp.Q.value = 1.6;
+  const raspGain = ctx.createGain();
+  raspGain.gain.value = 0;
+  noise.connect(rasp);
+  rasp.connect(raspGain);
+  raspGain.connect(master);
+  const chest = ctx.createOscillator();
+  chest.type = 'sine';
+  chest.frequency.value = 70;
+  const chestGain = ctx.createGain();
+  chestGain.gain.value = 0;
+  chest.connect(chestGain);
+  chestGain.connect(master);
+  chest.start();
   noise.start();
-  roar = { ctx, master, sub, rumble, growl, noiseGain };
+  roar = { ctx, master, growl, rasp, growlGain, raspGain, chest, chestGain, snarl: 0, wait: 1.6, dur: 2.2 };
   return roar;
 }
 
@@ -1143,15 +1144,37 @@ function updateRoar(dt) {
   if (!inside && !roar) return;
   const voice = ensureRoar();
   if (voice.ctx.state === 'suspended') voice.ctx.resume();
-  const now = voice.ctx.currentTime;
   const blend = 1 - Math.exp(-dt / 0.35);
-  voice.master.gain.value += ((inside ? 0.16 : 0) - voice.master.gain.value) * blend;
-  const breath = 0.5 + 0.5 * Math.sin(now * 0.55);
-  const swell = inside ? 0.08 + breath * breath * 0.28 : 0;
-  voice.noiseGain.gain.value += (swell - voice.noiseGain.gain.value) * blend;
-  voice.growl.frequency.value = 110 + breath * 90 + Math.sin(now * 0.17) * 30;
-  voice.rumble.frequency.value = 46 + Math.sin(now * 0.23) * 7;
-  voice.sub.frequency.value = 31 + Math.sin(now * 0.13) * 4;
+  voice.master.gain.value += ((inside ? 1 : 0) - voice.master.gain.value) * blend;
+  if (!inside) {
+    voice.snarl = 0;
+    voice.wait = Math.max(voice.wait, 1.4);
+  } else if (voice.snarl <= 0) {
+    voice.wait -= dt;
+    if (voice.wait <= 0) {
+      voice.snarl = 0.001;
+      voice.dur = 1.7 + Math.random() * 1.3;
+      voice.wait = 4 + Math.random() * 5;
+    }
+  }
+  let env = 0;
+  if (voice.snarl > 0) {
+    voice.snarl += dt;
+    const u = Math.min(1, voice.snarl / voice.dur);
+    const rise = 0.42;
+    env = u < rise ? u / rise : Math.max(0, 1 - (u - rise) / (1 - rise));
+    env *= env;
+    const rattle = 0.55 + 0.45 * Math.sin(voice.snarl * 120);
+    env *= 0.72 + 0.28 * rattle;
+    voice.growl.frequency.value = 240 - u * 130;
+    voice.rasp.frequency.value = 620 - u * 260;
+    voice.chest.frequency.value = 92 - u * 40;
+    if (u >= 1) voice.snarl = 0;
+  }
+  const glide = 1 - Math.exp(-dt / 0.06);
+  voice.growlGain.gain.value += (env * 0.32 - voice.growlGain.gain.value) * glide;
+  voice.raspGain.gain.value += (env * 0.1 - voice.raspGain.gain.value) * glide;
+  voice.chestGain.gain.value += (env * 0.08 - voice.chestGain.gain.value) * glide;
 }
 
 function envGain(ctx, start, peak, attack, release) {

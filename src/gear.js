@@ -167,7 +167,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     }
   });
   const grip = new THREE.Group();
-  grip.position.set(0, 0.055, 0);
+  grip.position.set(0, -0.04, 0);
   grip.visible = false;
   const skin = new THREE.MeshStandardMaterial({ color: 0xc9956b, roughness: 0.66 });
   const palm = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.042, 0.046), skin);
@@ -231,7 +231,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     console.info('[hatchet] blade marker', blade.position.toArray(), 'inside model', modelBox.containsPoint(bladeCenter));
   }
   hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: START_CELL.hatchet.y, blade, grip, hatchetModel };
-  holdPose(hatchet, [0, -0.05, 0], [0, Math.PI / 2, 0]);
+  holdPose(hatchet, [0, 0.04, 0], [0, Math.PI / 2, 0]);
   scene.add(hatchet);
   enlist(hatchet);
 
@@ -1560,14 +1560,17 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     chest.userData.open = THREE.MathUtils.damp(chest.userData.open, want, 4, dt);
     lid.rotation.x = -chest.userData.open * 1.35;
     if (chestLid) chestLid.rotation.x = lid.rotation.x;
-    for (const plank of falls) {
+    for (let i = falls.length - 1; i >= 0; i -= 1) {
+      const plank = falls[i];
       plank.userData.vy -= 9.2 * dt;
       plank.position.y += plank.userData.vy * dt;
-      plank.rotation.x += dt * 2.2;
-      if (plank.position.y < 0.05) {
-        plank.position.y = 0.05;
-        plank.userData.vy = 0;
+      if (plank.position.y > 0.05) {
+        plank.rotation.x += dt * 2.2;
+        continue;
       }
+      scene.remove(plank);
+      plank.geometry.dispose();
+      falls.splice(i, 1);
     }
     for (let i = chips.length - 1; i >= 0; i -= 1) {
       const chip = chips[i];
