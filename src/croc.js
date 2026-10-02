@@ -160,6 +160,66 @@ export function createCroc(scene, { assets, cave, waterY, targets, shallowFloor 
     return next;
   }
 
+  // --- procedural motion layer (?crocmotion=new) ----------------------------
+  // Additive on top of the clips, after mixer.update(): body/tail S-wave that grows with speed, the body curving into
+  // turns, head aim toward the player while stalking, a slow breathing heave and the odd jaw gape at close range.
+  // It never touches s.x/s.z/s.yaw, so the tracking behaviour is unchanged.
+  const MOTION = params.get('crocmotion') === 'new';
+  const animated = new Set();
+  for (const clip of gltf.animations) for (const tr of clip.tracks) if (tr.name.endsWith('.quaternion')) animated.add(tr.name.split('.')[0]);
+  const axisUp = {}; const axisSide = {};
+  {
+    const wq = new THREE.Quaternion();
+    for (const [name, b] of Object.entries(bones)) {
+      b.getWorldQuaternion(wq); wq.invert();
+      axisUp[name] = new THREE.Vector3(0, 1, 0).applyQuaternion(wq).normalize();
+      axisSide[name] = new THREE.Vector3(1, 0, 0).applyQuaternion(wq).normalize();
+    }
+  }
+  const mq = new THREE.Quaternion();
+  const SWAY = [['spine2', 0.35], ['tail1', 0.6], ['tail2', 0.85], ['tail3', 1.05], ['tail4', 1.25]];
+  const m = { phase: 0, lastX: null, lastZ: 0, lastYaw: 0, speed: 0, turn: 0, aim: 0, gape: 0, gapeT: 3, w: 0 };
+  function addRot(name, axis, angle) {
+    const b = bones[name];
+    if (!b || !animated.has(name) || Math.abs(angle) < 1e-5) return;
+    b.quaternion.multiply(mq.setFromAxisAngle(axis[name], angle));
+  }
+  function motion(dt, p) {
+    if (!dt) return;
+    if (m.lastX === null) { m.lastX = s.x; m.lastZ = s.z; m.lastYaw = s.yaw; }
+    const v = Math.hypot(s.x - m.lastX, s.z - m.lastZ) / dt;
+    let dy = s.yaw - m.lastYaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    m.lastX = s.x; m.lastZ = s.z; m.lastYaw = s.yaw;
+    m.speed = THREE.MathUtils.damp(m.speed, Math.min(v, 2.5), 4, dt);
+    m.turn = THREE.MathUtils.damp(m.turn, THREE.MathUtils.clamp(dy / dt, -2.5, 2.5), 5, dt);
+    const scripted = s.state === 'dead' || s.state === 'grab' || s.state === 'lunge' || s.state === 'windup' || s.state === 'ramWindup' || current === actions.Hurt;
+    m.w = THREE.MathUtils.damp(m.w, scripted ? 0 : 1, 6, dt);
+    if (m.w < 0.01) return;
+    m.phase += dt * (1.6 + m.speed * 3.2);
+    const amp = (0.05 + Math.min(m.speed, 1.6) * 0.1) * m.w;
+    const bend = -m.turn * 0.12 * m.w;                       // tail trails out of the turn
+    SWAY.forEach(([name, k], i) => addRot(name, axisUp, amp * k * Math.sin(m.phase - 0.8 * (i + 1)) + bend * k));
+    addRot('spine1', axisUp, -amp * 0.3 * Math.sin(m.phase) - bend * 0.4);
+    addRot('spine1', axisSide, 0.012 * Math.sin(s.clock * 1.3) * m.w); // breathing heave
+    // head aim: yaw toward the player relative to the body, clamped, smoothed
+    let aim = 0;
+    if (p && (s.state === 'stalk' || s.state === 'patrol' || s.state === 'approach' || s.state === 'backoff')) {
+      const want = Math.atan2(p.x - s.x, p.z - s.z);
+      let d = want - s.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+      aim = THREE.MathUtils.clamp(d, -0.55, 0.55);
+    }
+    m.aim = THREE.MathUtils.damp(m.aim, aim, 3, dt);
+    addRot('neck', axisUp, m.aim * 0.45 * m.w - amp * 0.2 * Math.sin(m.phase + 0.6));
+    addRot('head', axisUp, m.aim * 0.35 * m.w);
+    // jaw: a slow gape now and then when the player is close and the croc is just watching
+    const close = p && Math.hypot(p.x - s.x, p.z - s.z) < 4.5 && s.state === 'stalk';
+    m.gapeT -= dt;
+    if (m.gapeT <= 0) { m.gapeT = 4 + Math.random() * 5; if (close) m.gape = 1; }
+    m.gape = Math.max(0, m.gape - dt * 0.6);
+    const g = Math.sin(Math.PI * Math.min(1, 1 - m.gape)) * 0.16 * m.w;
+    addRot('jaw', axisSide, g);
+  }
+
   // --- state -------------------------------------------------------------
   const listeners = {};
   const emit = (type, data = {}) => (listeners[type] || []).forEach((fn) => fn({ type, croc: api, ...data }));
@@ -405,6 +465,7 @@ export function createCroc(scene, { assets, cave, waterY, targets, shallowFloor 
     if (s.flash > 0) { s.flash = Math.max(0, s.flash - dt); mat.emissive.setRGB(0.55 * s.flash / 0.15, 0.04 * s.flash / 0.15, 0.02 * s.flash / 0.15); }
     if (s.hurtT > 0) { s.hurtT -= dt; if (s.hurtT <= 0 && current === actions.Hurt && s.state !== 'dead') play(s.resume || 'Swim', 0.15); }
     mixer.update(dt);
+    if (MOTION) motion(dt, p);
     for (const r of rings) {
       if (r.age >= r.life) { r.m.visible = false; continue; }
       r.age += dt; const k = r.age / r.life;

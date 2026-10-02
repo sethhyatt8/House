@@ -161,8 +161,11 @@ export function createAssetManager(renderer) {
       return null;
     }
     try {
-      const fileUrl = url(spec.url);
-      const response = await fetch(fileUrl);
+      // feedback pass: ?crocmodel=hd tries the subdivided/rebaked croc (same rig + clips); falls back to croc.glb
+      const alt = id === 'croc' && new URLSearchParams(location.search).get('crocmodel') === 'hd' ? 'models/enemies/croc_hd.glb' : null;
+      let fileUrl = url(alt || spec.url);
+      let response = await fetch(fileUrl);
+      if (alt && !response.ok) { fileUrl = url(spec.url); response = await fetch(fileUrl); }
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const gltf = await loader.parseAsync(await response.arrayBuffer(), fileUrl);
       prepareTemplate(gltf.scene);
