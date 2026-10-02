@@ -996,6 +996,29 @@
       "tris": 3096,
       "textures": 0,
       "originNote": "Each mesh: base centre at the origin, +Y up, metres, baked vertex colours (COLOR_0), no material, Draco. One InstancedMesh per mesh name (src/reef.js)."
+    },
+    "lift_kit": {
+      "url": "models/lift/lift_kit.glb",
+      "kind": "kit",
+      "meshes": [
+        "lift_car_deck",
+        "lift_car_frame",
+        "lift_lever",
+        "lift_cable",
+        "lift_rail",
+        "lift_lamp"
+      ],
+      "materials": {
+        "lift_tread": "Poly Haven metal_plate (CC0), 512 KTX2",
+        "lift_paint": "Poly Haven green_metal_rust (CC0), 512 KTX2",
+        "lift_steel": "untextured",
+        "lift_lamp": "Poly Haven industrial_caged_sconce variant b (CC0), decimated to 30%, 256 KTX2 + emissive"
+      },
+      "license": "CC0",
+      "author": "Rob Tuytel (metal_plate, green_metal_rust), Ulan Cabanilla (industrial_caged_sconce) via Poly Haven; car modelled for House",
+      "bytes": 822316,
+      "originNote": "Car parts: car-local metres, origin at the centre of the car floor (world x 5.8, z 0.12), +Y up, deck top y 0.06, header y 2.08. lift_lever: pivot at its root, points +Y. lift_cable / lift_rail: 1 m units from y 0 to 1. lift_lamp: wall plate at z 0, projects +Z.",
+      "loading": "deferred (not in the boot preload); src/lift.js shows stand-in materials until it arrives"
     }
   },
   "placements": [
@@ -1299,6 +1322,7 @@
       "paint_can"
     ],
     "croc": ["croc"],
-    "reef": ["reef_corals"]
+    "reef": ["reef_corals"],
+    "liftkit": ["lift_kit"]
   }
 }
