@@ -6,6 +6,7 @@ import { legacy } from './flags.js';
 import { createSprayCan, createSprayFx, createSprayShared, sprayDirections } from './spray.js';
 import { START_CELL } from './cell.js';
 import { applyWorldUv } from './uv.js';
+import { createIconBaker } from './icons.js';
 
 const CHARACTERS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
 const CAPACITY = 100;
@@ -536,8 +537,15 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const arrowRay = new THREE.Raycaster();
   const arrowPrev = new THREE.Vector3();
   const arrowAim = new THREE.Vector3();
-  bow.position.set(2.35, cave.floor + 0.56, -3.85);
-  bow.rotation.y = 0.8;
+  const BOW_SPOT = legacy('bowspot')
+    ? { x: 2.35, z: -3.85, yaw: 0.8 }
+    : { x: 0.9, z: -2.2, yaw: Math.atan2(-(-1.925 + 2.2), -1.15 - 0.9) };
+  bow.position.set(BOW_SPOT.x, cave.floor + 0.56, BOW_SPOT.z);
+  bow.rotation.y = BOW_SPOT.yaw;
+  if (!legacy('bowspot')) {
+    stringMat.emissive.setHex(0x3a3222);
+    stringMat.emissiveIntensity = 1;
+  }
   bow.traverse((child) => {
     if (child.isMesh) {
       child.castShadow = true;
@@ -545,6 +553,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     }
   });
   bow.userData = { type: 'gear', gear: 'bow', floorY: cave.floor + 0.56, houseY: 0.58 };
+  bow.userData.home = { position: bow.position.clone(), rotation: bow.rotation.clone() };
   holdPose(bow, [0, -0.03, -0.02], [0.15, 0, 0]);
   scene.add(bow);
   enlist(bow);
@@ -923,6 +932,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const cell = 0.046;
   const origin = -cell * 4.5;
   const iconGeo = new THREE.PlaneGeometry(0.034, 0.04);
+  const itemIconGeo = new THREE.PlaneGeometry(0.039, 0.039);
   for (let i = 0; i < CAPACITY; i += 1) {
     const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.012), pocketMat.clone());
     const col = i % 10;
@@ -944,6 +954,12 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     sprayIcon.visible = false;
     pocket.add(sprayIcon);
     pocket.userData.sprayIcon = sprayIcon;
+    const itemIcon = new THREE.Mesh(itemIconGeo, pocketMat);
+    itemIcon.position.z = 0.0105;
+    itemIcon.visible = false;
+    itemIcon.raycast = () => {};
+    pocket.add(itemIcon);
+    pocket.userData.itemIcon = itemIcon;
     menu.add(pocket);
     pocketMeshes.push(pocket);
   }
@@ -1059,15 +1075,21 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   }
   chest.userData = { open: 0 };
   scene.add(chest);
+  for (const item of [hatchet, torch, brush, ...sprayCans]) {
+    if (item && !item.userData.home) item.userData.home = { position: item.position.clone(), rotation: item.rotation.clone() };
+  }
   refreshPockets();
 
   function refreshPockets() {
     pocketMeshes.forEach((pocket, index) => {
       const item = pockets[index];
-      pocket.material.color.set(item ? 0x8d7358 : 0x2c241c);
+      const baked = item && item.userData.gear !== 'tile' ? item.userData.bakedIcon : null;
+      pocket.material.color.set(item ? (baked ? 0x34465c : 0x8d7358) : 0x2c241c);
+      pocket.userData.itemIcon.visible = !!baked;
+      if (baked) pocket.userData.itemIcon.material = baked;
       pocket.userData.tileIcon.visible = item?.userData.gear === 'tile';
-      pocket.userData.axeIcon.visible = item?.userData.gear === 'hatchet';
-      pocket.userData.sprayIcon.visible = item?.userData.gear === 'spray';
+      pocket.userData.axeIcon.visible = !baked && item?.userData.gear === 'hatchet';
+      pocket.userData.sprayIcon.visible = !baked && item?.userData.gear === 'spray';
       if (item?.userData.gear === 'tile') pocket.userData.tileIcon.material = item.userData.faceMat;
       if (item?.userData.gear === 'spray') pocket.userData.sprayIcon.material = item.userData.iconMat;
     });
@@ -1128,6 +1150,17 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     item.visible = true;
     scene.attach(item);
     const shelf = groundAt?.(point.x, point.z);
+    if (!legacy('gearhome') && item.userData.home && point.y < -1 && shelf == null && point.x < cave.x0 - 0.05) {
+      item.position.copy(item.userData.home.position);
+      item.rotation.copy(item.userData.home.rotation);
+      item.userData.carried = false;
+      if (item.userData.grip) item.userData.grip.visible = false;
+      item.userData.inBag = false;
+      bladeReady = false;
+      enlist(item);
+      refreshPockets();
+      return;
+    }
     item.position.set(
       point.x + (Math.random() - 0.5) * 0.08,
       shelf != null && point.y < -1 ? shelf + 0.03 : (point.y > -1.5 && item.userData.houseY != null ? item.userData.houseY : (item.userData.floorY ?? 0.03)),
@@ -1654,6 +1687,19 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
 
   return {
     setCroc(next) { croc = next; arrowMask = null; },
+    bakeIcons(renderer) {
+      if (legacy('icons') || !renderer) return null;
+      const items = [hatchet, bow, torch, brush, ...sprayCans].filter(Boolean);
+      const labels = { hatchet: 'HATCHET', bow: 'BOW', torch: 'TORCH', brush: 'BRUSH', spray: 'SPRAY' };
+      const baker = createIconBaker(renderer, { env: scene.environment, cols: 4, rows: Math.max(1, Math.ceil(items.length / 4)) });
+      for (const item of items) {
+        const material = baker.bake({ key: item.uuid, object: item, label: labels[item.userData.gear] });
+        if (material) item.userData.bakedIcon = material;
+      }
+      const result = baker.finish();
+      refreshPockets();
+      return result;
+    },
     handHolding(name) {
       for (const [who, item] of vrHands) if (item?.userData?.gear === name) return who;
       return null;

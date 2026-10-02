@@ -12,6 +12,7 @@ import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAP
 import { addLadderVisuals, createFollower, p4Node } from './props4.js';
 import { START_CELL } from './cell.js';
 import { applyWorldUv } from './uv.js';
+import { createReef } from './reef.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -4235,6 +4236,7 @@ export function createWorld({ assets } = {}) {
   });
   const puddles = createPuddles(scene, floor, floorMap);
   const cliff = createCliff(scene, targets, assets);
+  const reef = createReef(scene, { assets, waterY: WATER_Y, rocks: SEA_OUTCROPS });
   function shallowFloor(x, z) {
     const shelf = cliff.cave.shallows;
     if (!shelf || z < shelf.z0 || z > shelf.z1) return null;
@@ -4425,6 +4427,7 @@ export function createWorld({ assets } = {}) {
     yard,
     crates,
     canoe,
+    reef,
     croc,
     cave: cliff.cave,
     shaft: cliff.shaft,

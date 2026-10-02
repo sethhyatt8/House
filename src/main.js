@@ -64,7 +64,7 @@ await assets.preload([
   'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
-  'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc',
+  'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals',
 ], ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
 });
@@ -94,6 +94,7 @@ if (envHdr) {
 }
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
 world.bakeWater(renderer);
+world.gear.bakeIcons?.(renderer);
 world.gear.setSounds({
   pickup: playPickup,
   chop: playChop,
@@ -2912,6 +2913,7 @@ function pullOar() {
 }
 
 let boatHeld = false;
+const canoeHoverPoints = [];
 
 function onPointerDown(event) {
   if (watching) return;
@@ -3127,6 +3129,10 @@ function onXrSqueeze(controller) {
   if (world.gear.isHolding(controller)) {
     world.gear.stowHand(controller);
     return;
+  }
+  if (!legacy('row') && !legacy('oarreach') && world.canoe.nearOar?.(handPoints(controller))) {
+    if (!aboard) boardCanoe();
+    if (gripOar(controller)) return;
   }
   if (world.gear.tryGrip(controller, handPoints(controller), aimed?.owner)) return;
   if (held) return;
@@ -3837,6 +3843,11 @@ function frame(time, frame) {
   syncAboard();
   pullOar();
   for (const controller of controllers) updateLaser(controller);
+  if (renderer.xr.isPresenting && !legacy('canoe') && world.canoe.hover) {
+    canoeHoverPoints.length = 0;
+    for (const controller of controllers) canoeHoverPoints.push(...handPoints(controller));
+    world.canoe.hover(canoeHoverPoints);
+  }
   if (!renderer.xr.isPresenting) controls.update();
   if (biteHold) {
     finishWaterBite();

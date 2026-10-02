@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { proxyMaterial } from './assets.js';
+import { legacy } from './flags.js';
 
 // Bow is local -Z, starboard is local +X. The rower faces the stern (local +Z), so their
 // left hand works the starboard oar. A starboard-only power stroke yaws the bow to port:
@@ -94,7 +95,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     stem.userData = { type: 'boatEnd', end: dir === -1 ? 'bow' : 'stern' };
     group.add(stem);
     ends.push(stem);
-    const loop = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 6, 16), ropeMat);
+    const loop = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 6, 16), ropeMat.clone());
     loop.position.set(0, 0.34, dir * 1.82);
     loop.rotation.y = Math.PI / 2;
     loop.userData = { type: 'boatEnd', end: stem.userData.end, loop: true };
@@ -111,7 +112,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 2.1, 6), oarMat);
     shaft.rotation.z = Math.PI / 2;
     oar.add(shaft);
-    const gripZone = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.12, 6), leather);
+    const gripZone = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.12, 6), leather.clone());
     gripZone.rotation.z = Math.PI / 2;
     gripZone.position.x = -side * 0.3;
     oar.add(gripZone);
@@ -155,7 +156,13 @@ export function createCanoe(scene, targets, cave, assets, water) {
     group.add(canoeModel);
   }
   group.rotation.y = Math.PI / 2;
-  group.position.set(cave.boatX + 0.7, cave.floor + 0.12, cave.z + 2.45);
+  const oldSpot = legacy('canoehome');
+  const shelf = cave.shallows;
+  const REST = oldSpot || !shelf
+    ? { x: cave.boatX + 0.7, z: cave.z + 2.45 }
+    : { x: cave.x0 - 1.45, z: cave.z + 2.45 };
+  const HOME = { x: REST.x - 0.5, z: REST.z };
+  group.position.set(REST.x, cave.floor + 0.12, REST.z);
   scene.add(group);
   targets.push(group);
 
@@ -172,9 +179,18 @@ export function createCanoe(scene, targets, cave, assets, water) {
   const anchor = new THREE.Vector3();
   let drag = null;
   const oarGrips = { starboard: null, port: null };
-  const gripHand = makeGripHand();
-  gripHand.visible = false;
-  scene.add(gripHand);
+  let hoveredOar = null;
+  let idleTime = 0;
+  let homing = false;
+  const segA = new THREE.Vector3();
+  const segB = new THREE.Vector3();
+  const segP = new THREE.Vector3();
+  const segLine = new THREE.Line3();
+  const gripHands = { starboard: makeGripHand(), port: makeGripHand() };
+  Object.values(gripHands).forEach((hand) => {
+    hand.visible = false;
+    scene.add(hand);
+  });
   const local = new THREE.Vector3();
   const worldPoint = new THREE.Vector3();
   let clock = 0;
@@ -208,6 +224,8 @@ export function createCanoe(scene, targets, cave, assets, water) {
     sim.vx = aheadX * 0.35;
     sim.vz = aheadZ * 0.35;
     sim.yawRate = 0;
+    group.updateMatrixWorld(true);
+    groundedNow();
     onHaptic?.(drag?.controller, 0.5, 45);
     return floating() ? 'water' : 'again';
   }
@@ -264,16 +282,40 @@ export function createCanoe(scene, targets, cave, assets, water) {
     return true;
   }
 
+  function nearOar(points, reach = 0.26) {
+    let best = null;
+    let bestDist = reach;
+    for (const oar of oars) {
+      oar.updateWorldMatrix(true, false);
+      segA.set(-oar.userData.side * 0.38, 0, 0);
+      oar.localToWorld(segA);
+      segB.set(oar.userData.side * 0.05, 0, 0);
+      oar.localToWorld(segB);
+      const seg = segLine.set(segA, segB);
+      for (const point of points) {
+        seg.closestPointToPoint(point, true, segP);
+        const dist = segP.distanceTo(point);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = oar;
+        }
+      }
+    }
+    return best;
+  }
+
   function tryOar(controller, points) {
-    const handle = nearest(points, oars.map((oar) => oar.userData.gripZone), 0.42);
-    if (!handle) return false;
-    const oar = handle.parent;
+    const oar = legacy('oarreach')
+      ? nearest(points, oars.map((item) => item.userData.gripZone), 0.42)?.parent
+      : nearOar(points);
+    if (!oar) return false;
     const name = oar.userData.name;
     if (oarGrips[name]) return false;
     oarGrips[name] = controller;
     oar.userData.prevBlade.set(0, 0, 0);
     onHaptic?.(controller, 0.8, 60);
-    snapHand(controller, handle);
+    snapHand(controller, oar.userData.gripZone);
+    gripHands[name].visible = true;
     return true;
   }
 
@@ -283,7 +325,10 @@ export function createCanoe(scene, targets, cave, assets, water) {
       onHaptic?.(controller, 0.2, 20);
     }
     for (const name of Object.keys(oarGrips)) {
-      if (oarGrips[name] === controller) oarGrips[name] = null;
+      if (oarGrips[name] === controller) {
+        oarGrips[name] = null;
+        gripHands[name].visible = false;
+      }
     }
     restoreHand(controller);
   }
@@ -293,7 +338,17 @@ export function createCanoe(scene, targets, cave, assets, water) {
   }
 
   function hover(points) {
-    const loop = nearest(points, loops, 0.35);
+    const oar = nearOar(points || []);
+    if (oar !== hoveredOar) {
+      if (hoveredOar) hoveredOar.userData.gripZone.material.emissive.setHex(0x000000);
+      hoveredOar = oar;
+      if (oar) {
+        oar.userData.gripZone.material.emissive.setHex(0xffd27a);
+        oar.userData.gripZone.material.emissiveIntensity = 0.7;
+        if (points.controller) onHaptic?.(points.controller, 0.15, 15);
+      }
+    }
+    const loop = nearest(points || [], loops, 0.35);
     if (loop === hovered) return;
     if (hovered) hovered.material.emissive.setHex(0x000000);
     hovered = loop;
@@ -354,6 +409,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
 
     poseOars(dt, aboard);
     const strokes = bladeStrokes(dt);
+    driftHome(dt, aboard);
     stepBoat(sim, dt, strokes);
     group.position.x += sim.vx * dt;
     group.position.z += sim.vz * dt;
@@ -391,7 +447,46 @@ export function createCanoe(scene, targets, cave, assets, water) {
       oar.position.copy(pin);
       oar.quaternion.setFromUnitVectors(new THREE.Vector3(oar.userData.side > 0 ? 1 : -1, 0, 0), toward.clone().multiplyScalar(oar.userData.side));
       oar.userData.hand = gripPoint;
+      const shown = gripHands[name];
+      oar.updateWorldMatrix(true, false);
+      oar.userData.gripZone.getWorldPosition(shown.position);
+      oar.getWorldQuaternion(shown.quaternion);
     });
+  }
+
+  function groundedNow() {
+    const floatY = water.level + 0.09 - draft;
+    let grounded = 0;
+    for (const z of [-1.6, 0, 1.6]) {
+      local.set(0, 0, z);
+      group.localToWorld(local);
+      const ground = water.ground?.(local.x, local.z);
+      if (Number.isFinite(ground) && ground + 0.09 >= floatY) grounded += 1;
+    }
+    groundedFrac = grounded / 3;
+    sim.groundedFrac = groundedFrac;
+  }
+
+  function driftHome(dt, aboard) {
+    const idle = !aboard && !drag && !anyOar();
+    idleTime = idle ? idleTime + dt : 0;
+    if (oldSpot || !shelf || idleTime < 6 || !floating()) {
+      homing = false;
+      return;
+    }
+    const dx = HOME.x - group.position.x;
+    const dz = HOME.z - group.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 1.5) homing = true;
+    if (dist < 0.4) homing = false;
+    if (!homing) return;
+    const speed = Math.min(0.45, 0.06 + dist * 0.08);
+    const k = 1 - Math.exp(-dt / 1.5);
+    sim.vx += ((dx / dist) * speed - sim.vx) * k;
+    sim.vz += ((dz / dist) * speed - sim.vz) * k;
+    let dyaw = Math.PI / 2 - sim.yaw;
+    dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+    sim.yawRate += (dyaw * 0.25 - sim.yawRate) * k;
   }
 
   function bladeStrokes(dt) {
@@ -508,6 +603,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     release,
     holding,
     hover,
+    nearOar,
     anyOar,
     oarGrips,
     setAboard,

@@ -976,8 +976,27 @@
       "tris": 918,
       "bytes": 1103432,
       "texVramMB": 2.8
+    },
+    "reef_corals": {
+      "url": "models/sea/reef_corals.glb",
+      "kind": "instanced-set",
+      "meshes": [
+        "coral_tube",
+        "coral_staghorn",
+        "coral_branch",
+        "coral_bubble",
+        "coral_plate",
+        "coral_anemone",
+        "coral_fan",
+        "coral_redbranch",
+        "urchin"
+      ],
+      "license": "CC0 + CC-BY 3.0 (see CREDITS-reef.md)",
+      "author": "MiniPoly, Kelli Ray, Poly by Google (via Poly Pizza)",
+      "tris": 3096,
+      "textures": 0,
+      "originNote": "Each mesh: base centre at the origin, +Y up, metres, baked vertex colours (COLOR_0), no material, Draco. One InstancedMesh per mesh name (src/reef.js)."
     }
-
   },
   "placements": [
     {
@@ -1279,6 +1298,7 @@
       "fire_pit",
       "paint_can"
     ],
-    "croc": ["croc"]
+    "croc": ["croc"],
+    "reef": ["reef_corals"]
   }
 }
