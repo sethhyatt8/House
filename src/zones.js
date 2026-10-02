@@ -33,11 +33,16 @@ const box = (x0, x1, y0, y1, z0, z1) => new THREE.Box3(new THREE.Vector3(x0, y0,
 const STOPS = [0, -3.6, -7.2, -10.8, -14.4];
 // Order matters: the first box that contains the eye wins.
 const ZONE_BOXES = [
-  ['liftshaft', box(5.1, 6.72, -15, 2.5, -0.68, 0.92)],
-  ...STOPS.slice(1).map((y, i) => [`lift:${i + 1}`, box(6.55, 9.45, y - 0.4, y + 2.45, -3.05, 3.3)]),
-  ['cell', box(3.3, 5.1, -0.2, 2.3, -0.8, 1.02)],
+  // gallery and tunnel first: the lift:2 box (-7.2 landing) overlaps the paint tunnel, so a walker halfway down the
+  // tunnel used to count as 'lift:2' and the tunnel, gallery and cave were hidden around them.
   ['gallery', box(10.55, 15.8, -8.7, -4.3, -1.0, 4.7)],
   ['tunnel', box(4.0, 10.55, -8.7, -4.6, 0.95, 2.72)],
+  ['liftshaft', box(5.1, 6.72, -15, 2.5, -0.68, 0.92)],
+  ...STOPS.slice(1).map((y, i) => [`lift:${i + 1}`, box(6.55, 9.45, y - 0.4, y + 2.45, -3.05, 3.3)]),
+  // x from 2.64 (just inside the choppable door at x 2.6, cell.js START_CELL.floor.x0 2.55): the whole cell floor is
+  // 'cell'. From 3.3 the west strip of the cell counted as outdoor, so with the door still boarded the portal walk
+  // never reached the cell or the lift and the gate showed the forest behind the shaft.
+  ['cell', box(2.64, 5.1, -0.2, 2.3, -0.8, 1.02)],
   ['cave', box(-1.7, 4.65, -9.6, -2.6, -7.0, 3.1)],
 ];
 // Asset ids worth fetching early when the camera is in (or next to) a zone.
