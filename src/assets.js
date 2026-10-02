@@ -21,6 +21,7 @@ const FEATURE_FOR = {
   table: 'props4',
   fire_pit: 'props4',
   paint_can: 'props4',
+  lift_kit: 'liftkit',
 };
 
 const BYTES_PER_PIXEL = new Map([
@@ -112,6 +113,11 @@ export function createAssetManager(renderer) {
   const envTextures = new Map();
   const unavailable = new Set();
   const counted = new Set();
+  const inflight = new Map();
+  const queue = [];
+  const deferredMaterials = new Set();
+  const placeholders = new Map();
+  let pumping = 0;
   let manifest = null;
   let textureBytes = 0;
 
@@ -141,8 +147,13 @@ export function createAssetManager(renderer) {
     textureBytes += pmrem ? 384 * 512 * 8 : textureByteSize(texture);
   }
 
-  async function loadOne(id) {
-    if (templates.has(id)) return templates.get(id);
+  function loadOne(id) {
+    if (templates.has(id)) return Promise.resolve(templates.get(id));
+    if (!inflight.has(id)) inflight.set(id, fetchOne(id).finally(() => inflight.delete(id)));
+    return inflight.get(id);
+  }
+
+  async function fetchOne(id) {
     const spec = manifest?.models?.[id];
     if (!spec?.url) {
       console.warn(`Model "${id}" is not in the manifest.`);
@@ -159,6 +170,7 @@ export function createAssetManager(renderer) {
       collectTextures(gltf.scene, textures);
       for (const texture of textures) account(texture);
       templates.set(id, gltf);
+      fillPlaceholder(id);
       return gltf;
     } catch (error) {
       console.warn(`Model "${id}" failed to load.`, error);
@@ -167,8 +179,13 @@ export function createAssetManager(renderer) {
     }
   }
 
-  async function loadEnv(id) {
-    if (envTextures.has(id)) return envTextures.get(id);
+  function loadEnv(id) {
+    if (envTextures.has(id)) return Promise.resolve(envTextures.get(id));
+    if (!inflight.has(id)) inflight.set(id, fetchEnv(id).finally(() => inflight.delete(id)));
+    return inflight.get(id);
+  }
+
+  async function fetchEnv(id) {
     const spec = manifest?.env?.[id];
     if (!spec?.url) {
       console.warn(`Env "${id}" is not in the manifest.`);
@@ -187,6 +204,80 @@ export function createAssetManager(renderer) {
       console.warn(`Env "${id}" failed to load.`, error);
       unavailable.add(id);
       return null;
+    }
+  }
+
+  function loadAny(id) {
+    return manifest?.env?.[id] ? loadEnv(id) : loadOne(id);
+  }
+
+  function pump() {
+    while (pumping < 2 && queue.length) {
+      const id = queue.shift();
+      if (templates.has(id) || envTextures.has(id) || unavailable.has(id)) continue;
+      pumping += 1;
+      loadAny(id).finally(() => {
+        pumping -= 1;
+        pump();
+      });
+    }
+  }
+
+  function prefetch(ids, { urgent = false } = {}) {
+    if (!enabled) return;
+    for (const id of ids) {
+      if (!shouldLoad(id) || templates.has(id) || envTextures.has(id)) continue;
+      const at = queue.indexOf(id);
+      if (at >= 0) {
+        if (!urgent) continue;
+        queue.splice(at, 1);
+      }
+      if (urgent) queue.unshift(id);
+      else queue.push(id);
+    }
+    pump();
+  }
+
+  function whenReady(id) {
+    if (!shouldLoad(id)) return Promise.resolve(null);
+    if (templates.has(id)) return Promise.resolve(templates.get(id));
+    if (envTextures.has(id)) return Promise.resolve(envTextures.get(id));
+    if (!inflight.has(id)) prefetch([id], { urgent: true });
+    return (inflight.get(id) || loadAny(id)).then((value) => value || null, () => null);
+  }
+
+  const LAZY_GREY = 0x777069;
+  function placeholder(id) {
+    if (placeholders.has(id)) return placeholders.get(id).base;
+    const base = new THREE.MeshStandardMaterial({ color: LAZY_GREY, roughness: 1, metalness: 0 });
+    base.name = `${id} (loading)`;
+    const family = [];
+    const track = (material) => {
+      family.push(material);
+      material.clone = function cloneTracked() {
+        return track(THREE.MeshStandardMaterial.prototype.clone.call(this));
+      };
+      return material;
+    };
+    track(base);
+    placeholders.set(id, { base, family });
+    whenReady(id);
+    return base;
+  }
+
+  function fillPlaceholder(id) {
+    const entry = placeholders.get(id);
+    const src = firstMaterial(id);
+    if (!entry || !src) return;
+    for (const material of entry.family) {
+      for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) material[key] = src[key] || null;
+      if (material.color.getHex() === LAZY_GREY) material.color.copy(src.color);
+      material.roughness = src.roughness;
+      material.metalness = src.metalness;
+      material.aoMapIntensity = src.aoMapIntensity;
+      if (src.normalScale) material.normalScale.copy(src.normalScale);
+      material.name = material.name.replace(' (loading)', '');
+      material.needsUpdate = true;
     }
   }
 
@@ -220,14 +311,24 @@ export function createAssetManager(renderer) {
       }
     },
     async preload(ids, onProgress) {
-      const queue = (enabled ? ids : []).filter((id) => shouldLoad(id));
-      for (let i = 0; i < queue.length; i += 1) {
-        const id = queue[i];
-        if (manifest?.env?.[id]) await loadEnv(id);
-        else await loadOne(id);
-        onProgress?.({ loaded: i + 1, total: queue.length, id });
+      const list = (enabled ? ids : []).filter((id) => shouldLoad(id));
+      for (let i = 0; i < list.length; i += 1) {
+        const id = list[i];
+        await loadAny(id);
+        onProgress?.({ loaded: i + 1, total: list.length, id });
       }
-      onProgress?.({ loaded: queue.length, total: queue.length });
+      onProgress?.({ loaded: list.length, total: list.length });
+    },
+    prefetch,
+    whenReady,
+    isReady(id) {
+      return templates.has(id) || envTextures.has(id);
+    },
+    deferMaterials(ids) {
+      ids.forEach((id) => deferredMaterials.add(id));
+    },
+    pending() {
+      return queue.length + inflight.size;
     },
     gltf(id) {
       if (!shouldLoad(id)) return null;
@@ -235,6 +336,8 @@ export function createAssetManager(renderer) {
     },
     material(id) {
       if (!shouldLoad(id)) return null;
+      if (placeholders.has(id)) return placeholders.get(id).base;
+      if (!templates.has(id) && deferredMaterials.has(id)) return placeholder(id);
       return firstMaterial(id);
     },
     texture(id) {
@@ -284,17 +387,21 @@ export function applyPlacements(scene, assets, manifest, { targets } = {}) {
       console.warn(`No scene object for placement ${placement.id}.`);
       return;
     }
-    const model = assets.instance(placement.model, {
-      fit: placement.fit,
-      anchor: 'center',
-    });
-    if (!model) return;
-    model.rotation.y = index * 0.87 + 0.35;
-    proxy.add(model);
-    if (proxy.isMesh) {
-      proxy.material = proxyMaterial;
-      proxy.castShadow = false;
-      proxy.receiveShadow = false;
-    }
+    const attach = () => {
+      const model = assets.instance(placement.model, {
+        fit: placement.fit,
+        anchor: 'center',
+      });
+      if (!model) return;
+      model.rotation.y = index * 0.87 + 0.35;
+      proxy.add(model);
+      if (proxy.isMesh) {
+        proxy.material = proxyMaterial;
+        proxy.castShadow = false;
+        proxy.receiveShadow = false;
+      }
+    };
+    if (assets.isReady?.(placement.model) === false && assets.whenReady) assets.whenReady(placement.model).then(attach);
+    else attach();
   });
 }
