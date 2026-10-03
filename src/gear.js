@@ -554,7 +554,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const arrowAim = new THREE.Vector3();
   const BOW_SPOT = legacy('bowspot')
     ? { x: 2.35, z: -3.85, yaw: 0.8 }
-    : { x: 0.9, z: -2.2, yaw: Math.atan2(-(0.69 + 2.2), 3.55 - 0.9) };
+    : { x: 0.9, z: -2.2, yaw: Math.atan2(-(-1.925 + 2.2), -1.15 - 0.9) };
   bow.position.set(BOW_SPOT.x, cave.floor + 0.56, BOW_SPOT.z);
   bow.rotation.y = BOW_SPOT.yaw;
   if (!legacy('bowspot')) {

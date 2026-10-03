@@ -16,7 +16,7 @@ import { createLift } from './lift.js';
 import { createZones } from './zones.js';
 import { createReef } from './reef.js';
 import { createForestNext, FOREST_LEGACY } from './forest.js';
-import { SHAFT_SLOT, cliffRoute, NOTCHES, notchShaft } from './notches.js';
+import { cliffRoute, NOTCHES } from './notches.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -3003,8 +3003,7 @@ function createCliff(scene, targets, assets) {
   mass(innerX, caveBack, caveTop, yTop, caveZ0, shaftZ0);
   mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
   mass(innerX, caveBack, NOTCHES ? caveTop : shaftTop, yTop, shaftZ0, shaftZ1);
-  mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, NOTCHES ? SHAFT_SLOT.z0 : doorZ0);
-  if (NOTCHES) mass(caveBack, caveBack + 0.7, yBot, caveTop, SHAFT_SLOT.z1, doorZ0);
+  mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, doorZ0);
   mass(caveBack, caveBack + 0.7, yBot, caveTop, doorZ1, caveZ1);
   mass(caveBack, caveBack + 0.7, doorTop, caveTop, doorZ0, doorZ1);
   mass(caveBack, caveBack + 0.7, yBot, doorSill, doorZ0, doorZ1);
@@ -3159,12 +3158,15 @@ function createCliff(scene, targets, assets) {
     scene.add(haunch);
   });
 
-  // forest pass: carved notches instead of the stone ladder, plus a hidden notch line down the cliff from the yard
+  // The outside cliff-face notches are the only climb. The interior stone ladder is removed, not replaced.
   let notches = null;
   if (NOTCHES) {
-    notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y, caveTop });
+    ladder.children.slice().forEach((child) => ladder.remove(child));
+    const ladderAt = targets.indexOf(ladder);
+    if (ladderAt >= 0) targets.splice(ladderAt, 1);
+    shaftVoid.visible = false;
     const route = cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y });
-    notches = { routes: [{ ladder }, { ladder: route.ladder }], shelf: route.shelf, step: route.step };
+    notches = { routes: [{ ladder: route.ladder }], shelf: route.shelf, step: route.step };
   }
 
   const rockCliff = assets?.feature('rock') ? assets.material('rock_cliff') : null;
