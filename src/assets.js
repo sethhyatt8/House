@@ -13,6 +13,7 @@ const FEATURE_FOR = {
   rock_floor: 'rock',
   sea_boulder: 'searocks',
   pines: 'trees',
+  forest_kit: 'trees',
   sky_backdrop: 'sky',
   sky_env: 'sky',
   water_normal: 'water',
@@ -162,12 +163,16 @@ export function createAssetManager(renderer) {
     }
     try {
       // feedback pass: ?crocmodel=hd tries the subdivided/rebaked croc (same rig + clips); falls back to croc.glb
-      const alt = id === 'croc' && new URLSearchParams(location.search).get('crocmodel') === 'hd' ? 'models/enemies/croc_hd.glb' : null;
+      const query = new URLSearchParams(location.search);
+      let alt = id === 'croc' && query.get('crocmodel') === 'hd' ? 'models/enemies/croc_hd.glb' : null;
+      // forest pass: the white shark is the Babylon.js shark (CC-BY 4.0) unless ?shark=old; falls back to shark_white.glb
+      if (id === 'shark_white' && query.get('shark') !== 'old' && spec.real) alt = spec.real;
       let fileUrl = url(alt || spec.url);
       let response = await fetch(fileUrl);
-      if (alt && !response.ok) { fileUrl = url(spec.url); response = await fetch(fileUrl); }
+      if (alt && !response.ok) { alt = null; fileUrl = url(spec.url); response = await fetch(fileUrl); }
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const gltf = await loader.parseAsync(await response.arrayBuffer(), fileUrl);
+      gltf.userData.variant = alt && id === 'shark_white' ? 'real' : 'default';
       prepareTemplate(gltf.scene);
       const textures = new Set();
       collectTextures(gltf.scene, textures);

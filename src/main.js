@@ -14,6 +14,8 @@ import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './w
 import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
 import { createSfx } from './sfx.js';
+import { nearNotches } from './notches.js';
+import { FOREST_LEGACY } from './forest.js';
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -70,6 +72,7 @@ await assets.preload([
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe', 'canoe_cedar', 'paddle',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
   'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals',
+  ...(FOREST_LEGACY ? [] : ['forest_kit']),
 ].filter((id) => !lazyBoot || !DEFERRED.includes(id)), ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;
 });
@@ -561,7 +564,7 @@ function standAtLadder(ladder) {
   if (!pose) return;
   const head = pose.transform.position;
   const dx = (ladder.position.x - 0.42) - head.x;
-  const dz = ladder.position.z - head.z;
+  const dz = (ladder.userData.zAt ? ladder.userData.zAt(xrOffset.y + 1.2) : ladder.position.z) - head.z;
   if (Math.hypot(dx, dz) > 0.55) shiftPlayer(dx, 0, dz);
 }
 
@@ -596,9 +599,11 @@ function attachClimb(controller, hit) {
   controller.getWorldPosition(handPoint);
   climb.handY = handPoint.y;
   pulseController(controller);
-  setStatus(ladder.userData.shaft
-    ? 'Holding a rung. Pull down to climb, push up to go down.'
-    : 'Holding a rung. Pull your hand down to climb.');
+  setStatus(ladder.userData.notches
+    ? 'Holding a notch. Pull down to climb, push up to go down. Swap hands as you go.'
+    : ladder.userData.shaft
+      ? 'Holding a rung. Pull down to climb, push up to go down.'
+      : 'Holding a rung. Pull your hand down to climb.');
 }
 
 function arriveOnRoof() {
@@ -653,25 +658,27 @@ function pullShaft(dy) {
   const shaft = climb.ladder.userData.shaft;
   if (dy < -0.004) {
     const lift = Math.min(0.35, -dy, Math.max(0, shaft.top - climb.feet));
-    if (lift > 0.004 && shiftPlayer(0, lift, 0)) {
+    const zAt = climb.ladder.userData.zAt; // the cliff notch line drifts sideways
+    if (lift > 0.004 && shiftPlayer(0, lift, zAt ? zAt(climb.feet + lift + 1.2) - zAt(climb.feet + 1.2) : 0)) {
       climb.handY = handPoint.y + lift;
       climb.feet += lift;
       climb.highest = Math.max(climb.highest, climb.feet);
     }
     if (climb.feet >= shaft.top - 0.25 && climb.lowest < shaft.top - 0.8) {
-      snapShaft(climb.ladder.userData.topSpot, 'On the cliff.');
+      snapShaft(climb.ladder.userData.topSpot, climb.ladder.userData.topStatus || 'On the cliff.');
     }
     return;
   }
   if (dy > 0.12) {
     const drop = Math.min(0.35, dy, Math.max(0, climb.feet - shaft.base));
-    if (drop > 0.004 && shiftPlayer(0, -drop, 0)) {
+    const zAt = climb.ladder.userData.zAt;
+    if (drop > 0.004 && shiftPlayer(0, -drop, zAt ? zAt(climb.feet - drop + 1.2) - zAt(climb.feet + 1.2) : 0)) {
       climb.handY = handPoint.y - drop;
       climb.feet -= drop;
       climb.lowest = Math.min(climb.lowest, climb.feet);
     }
     if (climb.feet <= shaft.base + 0.45 && climb.highest > shaft.base + 1.2) {
-      snapShaft(climb.ladder.userData.baseSpot, 'In the cave. Grab either end of the canoe.');
+      snapShaft(climb.ladder.userData.baseSpot, climb.ladder.userData.baseStatus || 'In the cave. Grab either end of the canoe.');
     }
     return;
   }
@@ -713,12 +720,13 @@ function moveClimb(dir) {
     const next = climb.rung + dir;
     if (next < 0) {
       const spot = climb.ladder.userData.baseSpot;
-      placeAtSpot(spot, world.canoe.center, 'In the cave. Grab either end of the canoe, then press F.');
+      placeAtSpot(spot, climb.ladder.userData.path ? new THREE.Vector3(spot.x + 2, spot.y + 1, spot.z - 3) : world.canoe.center,
+        climb.ladder.userData.baseStatus || 'In the cave. Grab either end of the canoe, then press F.');
       return;
     }
     if (next >= rungs.length) {
       const spot = climb.ladder.userData.topSpot;
-      placeAtSpot(spot, new THREE.Vector3(spot.x - 3, 0.7, spot.z), 'On the cliff.');
+      placeAtSpot(spot, new THREE.Vector3(spot.x - 3, 0.7, spot.z), climb.ladder.userData.topStatus || 'On the cliff.');
       return;
     }
     climb.rung = next;
@@ -816,9 +824,10 @@ function applyClimbView() {
   const rungs = climb.ladder.userData.rungs;
   const span = rungs.length > 1 ? rungs[1] - rungs[0] : 0.32;
   const y = rungs[climb.rung] + (climb.pull || 0) * span;
-  camera.position.set(base.x - 0.34, y + 0.18, base.z + 0.48);
-  camera.lookAt(base.x + 0.02, y, base.z);
-  gripHand.position.set(base.x + 0.02, y, base.z);
+  const bz = climb.ladder.userData.zAt ? climb.ladder.userData.zAt(y) : base.z;
+  camera.position.set(base.x - 0.34, y + 0.18, bz + 0.48);
+  camera.lookAt(base.x + 0.02, y, bz);
+  gripHand.position.set(base.x + 0.02, y, bz);
   gripHand.rotation.set(0, 0, 0);
 }
 
@@ -858,6 +867,8 @@ function groundUnder(x, z, feetY) {
   if (cave?.room && feetY < -1 && x >= cave.room.x0 && x <= cave.room.x1 && z >= cave.room.z0 && z <= cave.room.z1) return cave.floor;
   const shaft = world.shaft;
   if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.42 && Math.abs(z - shaft.z) < 0.5) return shaft.floor;
+  // forest pass: the rock shelf at the foot of the cliff notch line (and its step into the cave mouth)
+  if (feetY < -1 && (inBox(world.notches?.shelf, x, z) || inBox(world.notches?.step, x, z))) return world.notches.shelf.floor;
   const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
   const cell = START_CELL.floor;
   const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
@@ -905,9 +916,14 @@ function finishWaterBite() {
   teleportTo(1);
 }
 
+function inBox(box, x, z) {
+  return !!box && x >= box.x0 && x <= box.x1 && z >= box.z0 && z <= box.z1;
+}
+
 function landShift(ground, feetY, head) {
   const cave = world.cave;
-  const fromShaft = ground === world.shaft?.floor && head.x < cave.x0 + 0.15;
+  const onShelf = inBox(world.notches?.shelf, head.x, head.z) || inBox(world.notches?.step, head.x, head.z);
+  const fromShaft = !onShelf && ground === world.shaft?.floor && head.x < cave.x0 + 0.15;
   shiftPlayer(fromShaft ? cave.standX - head.x : 0, ground - feetY, fromShaft ? cave.standZ - head.z : 0);
 }
 
@@ -997,9 +1013,16 @@ function updatePlayerFall(dt) {
   }
   if (climb) leaveClimb();
   fallVy = Math.max(-16, fallVy - 9.2 * dt);
+  // forest pass: letting go on a notch line is a controlled slide down the rock, not a free fall
+  const sliding = world.notches && nearNotches(world.notches.routes, head.x, head.z);
+  if (sliding) fallVy = Math.max(-4.5, fallVy);
   const next = feetY + fallVy * dt;
   if (next <= ground) {
     landShift(ground, feetY, head);
+    if (sliding && fallVy < -2.5 && ground > WATER_Y + 0.05) {
+      pulseBoth(0.6, 90);
+      setStatus('You slide down the rock and land on your feet.');
+    }
     const wading = world.shallowFloor?.(head.x, head.z) != null;
     if (!wading && ground <= WATER_Y + 0.05) {
       fallVy = 0;

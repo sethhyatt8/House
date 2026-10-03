@@ -15,6 +15,8 @@ import { applyWorldUv } from './uv.js';
 import { createLift } from './lift.js';
 import { createZones } from './zones.js';
 import { createReef } from './reef.js';
+import { createForestNext, FOREST_LEGACY } from './forest.js';
+import { cliffRoute, NOTCHES, notchShaft } from './notches.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -1304,7 +1306,10 @@ function createSharks(scene, splash, assets, water, { floorY = null } = {}) {
   const SHARK_HOLD = 6;
   const SHARK_SINK = 5;
   const waterline = { sword: 0.16, white: 0.2 };
-  const glbWaterline = { sword: 0.687, white: 0.344 };
+  // ?shark=old keeps the Quaternius shark; the default Babylon.js shark (shark_real.glb) is normalised to the same unit
+  // space (faces +X, nose x 1.06, tail x -1.56) with its dorsal tip at 0.591 instead of 0.604.
+  const REAL_SHARK = !!(models && assets.gltf('shark_white')?.userData?.variant === 'real');
+  const glbWaterline = { sword: 0.687, white: REAL_SHARK ? 0.331 : 0.344 };
   const routes = [
     { kind: 'sword', cx: -16, cz: 2.4, rx: 4.2, rz: 5.2, speed: 0.42, phase: 0.3, scale: 2.15 * SWORD_SIZE, dive: 0.7 * SWORD_SIZE },
     { kind: 'sword', cx: -32, cz: -2.2, rx: 4.4, rz: 4.6, speed: -0.52, phase: 1.6, scale: 1.7 * SWORD_SIZE, dive: 0.55 * SWORD_SIZE },
@@ -1323,7 +1328,8 @@ function createSharks(scene, splash, assets, water, { floorY = null } = {}) {
     const glb = pair.shark.userData.glb;
     if (glb) {
       const wag = route.kind === 'sword' ? 5.4 : 4.2;
-      glb.swim.timeScale = glb.clip.duration / (2 * Math.PI / wag);
+      // the real shark's Swim clip is one slow tail beat (1.96 s); play it at its authored pace
+      glb.swim.timeScale = route.kind === 'white' && REAL_SHARK ? 1 : glb.clip.duration / (2 * Math.PI / wag);
       glb.swim.time = (index * 0.37) % glb.clip.duration;
     }
     route.reach = route.scale * (route.kind === 'white' ? 1.25 : 1.05);
@@ -1334,7 +1340,7 @@ function createSharks(scene, splash, assets, water, { floorY = null } = {}) {
       route.vy = 0;
       route.ups = 0;
     }
-    route.finTip = glb ? (route.kind === 'white' ? 0.604 : 0.887) : (route.kind === 'white' ? 0.46 : 0.36);
+    route.finTip = glb ? (route.kind === 'white' ? (REAL_SHARK ? 0.591 : 0.604) : 0.887) : (route.kind === 'white' ? 0.46 : 0.36);
     route.wasAbove = true;
     route.wake = 0;
     return pair;
@@ -2011,10 +2017,14 @@ function createBite(scene, source, assets) {
   let mouthY = (jawY / 4) * shark.scale.x;
   let biteMixer = null;
   let biteAction = null;
+  const realShark = assets?.gltf('shark_white')?.userData?.variant === 'real';
+  // Bite clip: Quaternius jaw opens over t 0 -> 0.208; the real shark's jaw is shut until t 0.22 and fully open at 0.42.
+  const biteT0 = realShark ? 0.22 : 0;
+  const biteSpan = realShark ? 0.2 : 0.208;
   if (glbChild && assets?.gltf('shark_white')) {
-    nose = 1.06 * shark.scale.x;
-    mouthX = 0.837 * shark.scale.x;
-    mouthY = 0.253 * shark.scale.x;
+    nose = (realShark ? 1.08 : 1.06) * shark.scale.x;
+    mouthX = (realShark ? 0.975 : 0.837) * shark.scale.x;
+    mouthY = (realShark ? -0.03 : 0.253) * shark.scale.x;
     biteMixer = new THREE.AnimationMixer(glbChild);
     biteAction = biteMixer.clipAction(THREE.AnimationClip.findByName(assets.gltf('shark_white').animations, 'Bite'));
     biteAction.play();
@@ -2023,7 +2033,7 @@ function createBite(scene, source, assets) {
   const poseBite = (open) => {
     poseSharkMouth(shark, open);
     if (!biteAction) return;
-    biteAction.time = open * 0.208;
+    biteAction.time = biteT0 + open * biteSpan;
     biteMixer.update(0);
   };
   const dropGeo = new THREE.SphereGeometry(0.05, 6, 5);
@@ -3146,6 +3156,14 @@ function createCliff(scene, targets, assets) {
     scene.add(haunch);
   });
 
+  // forest pass: carved notches instead of the stone ladder, plus a hidden notch line down the cliff from the yard
+  let notches = null;
+  if (NOTCHES) {
+    notchShaft({ scene, rock, ladder, shaftVoid, faceX, skin, shaftZ0, shaftZ1, shaftTop, caveTop, beachTop, WATER_Y });
+    const route = cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y });
+    notches = { routes: [{ ladder }, { ladder: route.ladder }], shelf: route.shelf, step: route.step };
+  }
+
   const rockCliff = assets?.feature('rock') ? assets.material('rock_cliff') : null;
   const rockFloor = assets?.feature('rock') ? assets.material('rock_floor') : null;
   if (rockCliff && rockFloor) {
@@ -3160,7 +3178,7 @@ function createCliff(scene, targets, assets) {
     });
     stoneMap.dispose();
   }
-  if (assets?.feature('props4')) {
+  if (assets?.feature('props4') && !NOTCHES) {
     const w = rungW * 0.78;
     const y0 = rungYs[rungYs.length - 1] - 0.4;
     const y1 = rungYs[0] + 0.42;
@@ -3429,7 +3447,7 @@ function createCliff(scene, targets, assets) {
     else waterMat.uniforms.uBoat.value.set(x, z, yaw, active ? 1 : 0);
   }
 
-  return { update, splash, ripple, cave, shaft, gallery, waterMat, water: ocean, setBoat };
+  return { update, splash, ripple, cave, shaft, notches, gallery, waterMat, water: ocean, setBoat };
 }
 
 function plateTexture() {
@@ -3725,19 +3743,6 @@ function createCrateYard(scene, targets, rockMap, assets) {
 }
 
 function createForest(scene, assets) {
-  const soil = new THREE.MeshStandardMaterial({ color: 0x1a261e, roughness: 1 });
-  const addGround = (x0, x1, z0, z1) => {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), soil);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set((x0 + x1) / 2, -0.04, (z0 + z1) / 2);
-    mesh.userData.backdrop = true;
-    scene.add(mesh);
-  };
-  const far = 150;
-  addGround(3.7, far, -far, far);
-  addGround(-1.55, 3.7, 11.3, far);
-  addGround(-1.55, 3.7, -far, -4.1);
-
   const spots = [];
   const blocked = (x, z) => (x < 6.4 && z > -5 && z < 12.6) || (x < 6.9 && z > -0.8 && z < 1.1);
   let band = 0;
@@ -3774,9 +3779,24 @@ function createForest(scene, assets) {
   scatter(78, 145, -145, 145, 15, 0.62, 11);
   scatter(-1.05, 78, 78, 145, 15, 0.55, 10);
   scatter(-1.05, 78, -145, -78, 15, 0.55, 10);
-  if (!spots.length) return;
-
   const pines = assets?.feature('trees') ? assets.gltf('pines') : null;
+  // forest pass: new forest (src/forest.js) unless ?forest=legacy or the pines are off
+  if (!FOREST_LEGACY && pines) return createForestNext(scene, assets, { pines, spots });
+
+  const soil = new THREE.MeshStandardMaterial({ color: 0x1a261e, roughness: 1 });
+  const addGround = (x0, x1, z0, z1) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), soil);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set((x0 + x1) / 2, -0.04, (z0 + z1) / 2);
+    mesh.userData.backdrop = true;
+    scene.add(mesh);
+  };
+  const far = 150;
+  addGround(3.7, far, -far, far);
+  addGround(-1.55, 3.7, 11.3, far);
+  addGround(-1.55, 3.7, -far, -4.1);
+  if (!spots.length) return null;
+
   if (pines) {
     // Later, not now: pine_far on band 1 would drop the forest to about 80k tris.
     // Splitting each InstancedMesh into 4 quadrants with frustum culling would
@@ -4465,7 +4485,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   if (croc) gear.setCroc(croc);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
-  createForest(scene, assets);
+  const forest = createForest(scene, assets);
   const zones = createZones({
     scene,
     targets,
@@ -4496,6 +4516,7 @@ export function createWorld({ assets, renderer = null } = {}) {
         birds.update(dt);
       }
       reef?.update?.(camera);
+      if (zones.isAwake('outdoor')) forest?.update?.(dt);
       bite.update(dt);
       cliff.update(dt);
       cliff.gallery.update(dt);
@@ -4509,9 +4530,11 @@ export function createWorld({ assets, renderer = null } = {}) {
     crates,
     canoe,
     reef,
+    forest,
     croc,
     cave: cliff.cave,
     shaft: cliff.shaft,
+    notches: cliff.notches,
     gallery: cliff.gallery,
     splash: cliff.splash,
     ripple: cliff.ripple,

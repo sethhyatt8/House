@@ -145,6 +145,29 @@
       },
       "originNote": "Each node's origin is the trunk base; roots go 0.235 m below y=0. Scale uniformly by spot.h / bboxMax.y."
     },
+    "forest_kit": {
+      "url": "models/nature/forest_kit.glb",
+      "source": "https://quaternius.com/packs/stylizednaturemegakit.html (ground cover) + https://polyhaven.com/a/forest_leaves_04 (floor)",
+      "author": "Quaternius; Rob Tuytel (Poly Haven)",
+      "license": "CC0",
+      "nodes": {
+        "fern": 150,
+        "plant": 120,
+        "groundleaf": 48,
+        "bush": 260,
+        "grass": 110,
+        "rock_a": 170,
+        "rock_b": 140,
+        "mushroom": 120,
+        "forest_floor": 2
+      },
+      "materials": {
+        "ForestKit": "1024 atlas (MegaKit Leaves / Leaves_TwistedTree_C / Grass / Rocks / Mushrooms), KTX2 ETC1S",
+        "ForestFloor": "forest_leaves_04 diffuse 1024, KTX2 ETC1S, tiles every 3.2 m"
+      },
+      "note": "Used by src/forest.js (not loaded with ?forest=legacy). Nodes are bottom-centred, +Y up, real-world size (m). Cover is merged into one static mesh per quadrant at boot.",
+      "bytes": 347828
+    },
     "shark_white": {
       "url": "models/sea/shark_white.glb",
       "kind": "skinned",
@@ -190,7 +213,26 @@
       "note": "2 SkinnedMeshes (body atlas + teeth) on one 20-joint skeleton. KHR_mesh_quantization (no Draco). Clone with SkeletonUtils.clone(), never Object3D.clone().",
       "tris": 3602,
       "bytes": 132024,
-      "texVramMB": 0.044
+      "texVramMB": 0.044,
+      "real": "models/sea/shark_real.glb",
+      "realSpec": {
+        "source": "https://github.com/BabylonJS/Assets/blob/master/meshes/shark.glb",
+        "author": "Babylon.js",
+        "license": "CC-BY 4.0",
+        "note": "Default white shark since the forest pass (?shark=old loads shark_white.glb). 51k -> 6k tris, spec-gloss -> metal-rough (roughness 0.72), circling anim + AO removed, clips Swim (1.958 s) / Bite (1.0 s), 512 KTX2, quantized; wrapped in a root node that puts it in makeWhite() unit space.",
+        "faces": "+X, nose x 1.06, tail x -1.56, spine y 0",
+        "finTip": 0.591,
+        "waterline": 0.331,
+        "biteOpen": "jaw shut until t 0.22, fully open (38 deg) at t 0.42",
+        "mouthUnitOpen": [
+          0.975,
+          -0.03
+        ],
+        "noseUnitOpen": 1.08,
+        "tris": 5999,
+        "bytes": 589060,
+        "joints": 31
+      }
     },
     "swordfish": {
       "url": "models/sea/swordfish.glb",
