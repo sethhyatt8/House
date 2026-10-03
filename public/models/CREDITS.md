@@ -44,3 +44,14 @@ Changes made for House (Blender 4.2.3 + gltf-transform + KTX-Software 4.4.2, scr
 - canoe_cedar: Blender 4.2, transforms applied, scaled to 0.86 x 0.459 x 3.7 m (same frame as canoe.glb), texture 512 KTX2 (ETC1S), quantized.
 - paddle: PCA-aligned so the shaft is -Y from the grip point (origin), 0.85 m long, blade widened x1.25, texture 256 KTX2, quantized.
 - croc_hd: croc.glb's rig and clips unchanged; Catmull-Clark subdivision level 1 applied (918 -> 3,940 tris, lip and teeth edges creased), new baked 1024 textures (procedural scutes/osteoderms, countershading, crevice AO, original teeth/mouth/eyes kept), KTX2 + Draco. Only loads with `?crocmodel=hd`.
+
+## Forest pass (shark, forest kit)
+
+| File | Asset | Author | License | Source |
+|---|---|---|---|---|
+| models/sea/shark_real.glb | "shark.glb" | Babylon.js | CC-BY 4.0 | https://github.com/BabylonJS/Assets/blob/master/meshes/shark.glb |
+| models/nature/forest_kit.glb (ground cover) | "Stylized Nature MegaKit" (ferns, plants, grass, bushes, rocks, mushrooms) | Quaternius | CC0 1.0 | https://quaternius.com/packs/stylizednaturemegakit.html |
+| models/nature/forest_kit.glb (floor texture) | "Forest Leaves 04" | Rob Tuytel (Poly Haven) | CC0 1.0 | https://polyhaven.com/a/forest_leaves_04 |
+
+- shark_real: mesh, skin (31 joints) and Swim animation kept. Wrapped in a root node so it uses the makeWhite() unit frame (faces +X, nose x 1.06, tail x -1.56, fin tip y 0.591). Textures resized to 512 and compressed to KTX2 (ETC1S colour, UASTC normal); mesh quantized. 5,999 tris. Loads by default; `?shark=old` uses shark_white.glb.
+- forest_kit: chosen MegaKit pieces packed into one 1024 alpha-tested atlas, plus the Forest Leaves 04 diffuse resized to 1024 (tiling floor). Both are ETC1S KTX2; meshes are Draco. Built with Blender 4.2.3 + gltf-transform (forest/build_atlas.py, build_kit.py, outside this repo).
