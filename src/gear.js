@@ -1595,7 +1595,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       const data = item.userData;
       let steered = false;
       if (Math.abs(stickY) > 0.15) {
-        data.cone = THREE.MathUtils.clamp(data.cone + stickY * 0.6 * dt, 0.035, 0.35);
+        data.cone = THREE.MathUtils.clamp(data.cone + stickY * 0.6 * dt, 0.035, 0.45);
         steered = true;
       }
       if (Math.abs(stickX) > 0.15) {
@@ -1624,8 +1624,9 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
           reach: data.reach,
           flow,
           dt,
+          key,
         });
-        const burst = Math.max(16, Math.round(4200 * flow * dt));
+        const burst = Math.max(24, Math.round(6000 * flow * dt));
         const reach = data.reach * 1.6;
         sprayDirections(tmp2, data.cone, burst).forEach((sample, index) => {
           const hit = distances[index % Math.max(1, distances.length)] ?? reach;
@@ -1646,6 +1647,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     for (const hand of [...spraying]) {
       if (sprayActive.has(hand)) continue;
       spraying.delete(hand);
+      gallery?.sprayEnd?.(hand.uuid);
       onSprayStop?.(hand.uuid);
     }
     if (sprayFx) sprayFx.update(dt);

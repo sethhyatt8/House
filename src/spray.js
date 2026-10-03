@@ -59,7 +59,7 @@ export function createSprayCan(color, shared) {
     nozzle,
     guide,
     guideLeft: 0,
-    cone: 0.12,
+    cone: 0.18,   // rowing pass: wider default fan (was 0.12); the stick still narrows/widens it, 0.035..0.45
     reach: 1.2,
     rattled: false,
   };
@@ -67,7 +67,7 @@ export function createSprayCan(color, shared) {
 }
 
 export function createSprayFx(scene) {
-  const count = 8000;
+  const count = 12000;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) positions[i * 3 + 1] = -50;
@@ -75,10 +75,10 @@ export function createSprayFx(scene) {
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
-    size: 0.0028,
+    size: 0.004,
     vertexColors: true,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.85,
     depthWrite: false,
   });
   const points = new THREE.Points(geometry, material);

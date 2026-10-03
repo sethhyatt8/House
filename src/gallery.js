@@ -3,6 +3,10 @@ import { proxyMaterial } from './assets.js';
 import { campfire, fireEnabled } from './fire.js';
 import { applyWorldUv } from './uv.js';
 
+// Spray paint (rowing pass): each frame the can paints a solid, soft-edged dot where it points, and joins it to last
+// frame's dot on the same wall, so a fast sweep leaves an unbroken line. Overlapping dots build to opaque in one pass;
+// a fine overspray speckle rides around the edge. ?spray=old restores the sparse per-ray dots.
+const SPRAY_OLD = typeof location !== 'undefined' && new URLSearchParams(location.search).get('spray') === 'old';
 const PAINTS = ['#c4322a', '#e07a1f', '#e2c04a', '#2f8a45', '#2a5fbf', '#6a3d9a', '#1a1a1a', '#f7f4ee'];
 const STORE = 'house-gallery-paint';
 
@@ -309,7 +313,117 @@ function stamp(wall, x, y, color, radiusPx, alpha) {
   const sprayDir = new THREE.Vector3();
   const wallInverse = new THREE.Matrix4();
 
+  // --- spray paint ---
+  const brushes = new Map(); // colour -> soft round brush canvas (opaque core, feathered rim)
+  function brushFor(color) {
+    let brush = brushes.get(color);
+    if (brush) return brush;
+    brush = document.createElement('canvas');
+    brush.width = 64;
+    brush.height = 64;
+    const bctx = brush.getContext('2d');
+    const grad = bctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, rgba(color, 1));
+    grad.addColorStop(0.55, rgba(color, 0.95));
+    grad.addColorStop(0.8, rgba(color, 0.45));
+    grad.addColorStop(1, rgba(color, 0));
+    bctx.fillStyle = grad;
+    bctx.fillRect(0, 0, 64, 64);
+    brushes.set(color, brush);
+    return brush;
+  }
+  const strokes = new Map(); // can key -> last dot { wall, x, y, r }
+  const rayDir = new THREE.Vector3();
+  function castWall(origin, ray, maxT) {
+    let best = null;
+    for (const wall of walls) {
+      wallInverse.copy(wall.mesh.matrixWorld).invert();
+      sprayOrigin.copy(origin).applyMatrix4(wallInverse);
+      const localDir = rayDir.copy(ray).transformDirection(wallInverse);
+      if (Math.abs(localDir.z) < 1e-6) continue;
+      const t = -sprayOrigin.z / localDir.z;
+      if (!(t > 0 && t <= maxT)) continue;
+      const x = sprayOrigin.x + localDir.x * t;
+      const y = sprayOrigin.y + localDir.y * t;
+      if (Math.abs(x) > wall.width / 2 || Math.abs(y) > wall.height / 2) continue;
+      if (!best || t < best.t) best = { wall, x, y, t };
+    }
+    return best;
+  }
+  function sprayEnd(key) {
+    strokes.delete(key);
+  }
+  function sprayLine(origin, dir, color, opts) {
+    if (!lit || !color) return [];
+    const { cone, reach, flow, dt } = opts;
+    const key = opts.key ?? 'can';
+    const aim = sprayDir.copy(dir).normalize();
+    const maxT = reach * 1.6;
+    const hit = castWall(origin, aim, maxT);
+    // a few cone rays only to size the visible particle stream
+    const helper = Math.abs(aim.y) > 0.92 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(aim, helper).normalize();
+    const up = new THREE.Vector3().crossVectors(right, aim).normalize();
+    const distances = [];
+    for (let i = 0; i < 8; i += 1) {
+      const angle = Math.sqrt(Math.random()) * cone;
+      const spin = Math.random() * Math.PI * 2;
+      sprayRay.copy(aim)
+        .addScaledVector(right, Math.cos(spin) * Math.sin(angle))
+        .addScaledVector(up, Math.sin(spin) * Math.sin(angle))
+        .normalize();
+      distances.push(castWall(origin, sprayRay, maxT)?.t ?? maxT);
+    }
+    if (!hit || flow <= 0.02) {
+      strokes.delete(key);
+      return distances;
+    }
+    const wall = hit.wall;
+    const pxPerM = wall.canvas.width / wall.width;
+    const x = (hit.x / wall.width + 0.5) * wall.canvas.width;
+    const y = (0.5 - hit.y / wall.height) * wall.canvas.height;
+    // dot radius = the cone's footprint on the wall (+ a nozzle minimum); further away = wider and a little thinner
+    const r = THREE.MathUtils.clamp((0.006 + hit.t * Math.tan(cone) * 0.85) * pxPerM, 2, 70);
+    const near = 1 / (1 + (hit.t / Math.max(0.3, reach)) ** 2);
+    const passAlpha = THREE.MathUtils.clamp(flow * (0.3 + 0.25 * near), 0.04, 0.55); // per dab while sweeping
+    const brush = brushFor(color);
+    const ctx = wall.ctx;
+    const prev = strokes.get(key);
+    const dab = (cx, cy, rad, a) => {
+      ctx.globalAlpha = a;
+      ctx.drawImage(brush, cx - rad, cy - rad, rad * 2, rad * 2);
+    };
+    if (prev && prev.wall === wall && Math.hypot(x - prev.x, y - prev.y) < wall.canvas.width * 0.6) {
+      // join last frame's dot to this one: dabs every 0.3 radius, so a fast sweep is one unbroken, opaque line
+      const span = Math.hypot(x - prev.x, y - prev.y);
+      const steps = Math.min(400, Math.ceil(span / Math.max(1, r * 0.3)));
+      for (let i = 1; i <= steps; i += 1) {
+        const k = i / steps;
+        dab(prev.x + (x - prev.x) * k, prev.y + (y - prev.y) * k, prev.r + (r - prev.r) * k, passAlpha);
+      }
+      if (steps === 0) dab(x, y, r, 1 - (1 - passAlpha) ** Math.max(1, dt * 24)); // held still: builds up fast
+    } else {
+      dab(x, y, r, 1 - (1 - passAlpha) ** Math.max(1, dt * 24));
+    }
+    // overspray: fine speckle around the dot
+    ctx.globalAlpha = 0.5 * flow;
+    ctx.fillStyle = color;
+    const specks = Math.round(30 + 70 * flow);
+    for (let i = 0; i < specks; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      const d = r * (0.7 + Math.random() * 0.9);
+      const size = Math.random() < 0.8 ? 1 : 2;
+      ctx.fillRect(x + Math.cos(a) * d, y + Math.sin(a) * d, size, size);
+    }
+    ctx.globalAlpha = 1;
+    strokes.set(key, { wall, x, y, r });
+    wall.texture.needsUpdate = true;
+    saveTimer = 0.8;
+    return distances;
+  }
+
   function spray(origin, dir, color, opts) {
+    if (!SPRAY_OLD) return sprayLine(origin, dir, color, opts);
     if (!lit || !color) return [];
     const cone = opts.cone;
     const reach = opts.reach;
@@ -442,6 +556,8 @@ function stamp(wall, x, y, color, radiusPx, alpha) {
     dip,
     paint,
     spray,
+    sprayEnd,
+    light,
     update,
   };
 }
