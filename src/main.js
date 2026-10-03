@@ -16,6 +16,7 @@ import { createPlayerHealth } from './health.js';
 import { createSfx } from './sfx.js';
 import { nearNotches } from './notches.js';
 import { FOREST_LEGACY } from './forest.js';
+import { MOVE, MOVE_SPEED, SMOOTH_TURN_DEG, SNAP_DEG, TELEPORT, TURN, createGround, createWalker, stickToWorld } from './walk.js';
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -186,7 +187,7 @@ function addTeleportSpot(spec) {
   }
   group.userData = { type: 'teleport', spot: teleportSpots.length };
   targets.push(group);
-  teleportSpots.push({ ...spec, ringMat });
+  teleportSpots.push({ ...spec, ringMat, group });
 }
 
 addTeleportSpot({
@@ -246,6 +247,17 @@ if (world.cave?.tunnel && world.cave?.room) {
   });
 }
 
+// Rowing pass: with teleport off (?teleport=0, or TELEPORT_DEFAULT in walk.js) the spots stay as respawn points
+// (teleportTo(1) after the water bite / going down) but the rings, the A button and pointer-teleport go away.
+if (!TELEPORT) {
+  teleportSpots.forEach((spot) => {
+    spot.group.visible = false;
+    const at = targets.indexOf(spot.group);
+    if (at >= 0) targets.splice(at, 1);
+  });
+}
+const nextSpotHint = TELEPORT ? ' Press A for the next spot.' : '';
+
 function doorStanding() {
   return world.gear.doorBoards?.some((board) => !board.userData.dead);
 }
@@ -262,9 +274,7 @@ function teleportTo(index) {
     boardCanoe();
     return;
   }
-  aboard = false;
-  boatGrip = null;
-  oarGrip = null;
+  leaveCanoe();
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
     const pose = ref && xrFrame.getViewerPose(ref);
@@ -282,7 +292,7 @@ function teleportTo(index) {
     controls.target.copy(spot.look);
     controls.update();
   }
-  setStatus(`${spot.status} Press A for the next spot.`);
+  setStatus(`${spot.status}${nextSpotHint}`);
 }
 
 function teleportNext() {
@@ -296,6 +306,8 @@ let climb = null;
 let boatGrip = null;
 let oarGrip = null;
 let aboard = false;
+let exitCooldown = 0; // rowing pass: no auto-boarding for a second after you get out
+let stickExit = 0;
 let fallVy = 0;
 let biteHold = false;
 let xrBaseSpace = null;
@@ -744,7 +756,7 @@ function moveClimb(dir) {
   const next = climb.rung + dir;
   if (next < 0) {
     leaveClimb();
-    setStatus('Middle of the room. Press A for the other spot.');
+    setStatus(TELEPORT ? 'Middle of the room. Press A for the other spot.' : 'Middle of the room.');
     return;
   }
   if (next >= rungs.length) {
@@ -785,7 +797,7 @@ function pullClimb(pointerY) {
     climb.pull = 0;
     if (climb.rung <= 0) {
       leaveClimb();
-      setStatus('Middle of the room. Press A for the other spot.');
+      setStatus(TELEPORT ? 'Middle of the room. Press A for the other spot.' : 'Middle of the room.');
       return;
     }
     climb.rung -= 1;
@@ -841,47 +853,16 @@ function leaveClimb() {
   controls.enabled = !renderer.xr.isPresenting;
 }
 
+// rowing pass: the ground model lives in walk.js (same rules), shared with stick locomotion and the reachability test
+const groundModel = createGround({ world, roof, startCell: START_CELL, cliffX: CLIFF_X, waterY: WATER_Y });
+const walker = createWalker({ world, ground: groundModel, startCell: START_CELL, cliffX: CLIFF_X, roof, waterY: WATER_Y });
+
 function standHeight(x, z, feetY, floor) {
-  let best = floor;
-  for (const crate of world.crates) {
-    if (crate.userData.dead || crate.userData.role === 'held') continue;
-    if (Math.abs(x - crate.position.x) > crate.userData.hx) continue;
-    if (Math.abs(z - crate.position.z) > crate.userData.hz) continue;
-    const top = crate.position.y + crate.userData.hy;
-    if (top > feetY + 0.4) continue;
-    if (top > best) best = top;
-  }
-  return best;
+  return groundModel.standHeight(x, z, feetY, floor);
 }
 
 function groundUnder(x, z, feetY) {
-  const overRoof = x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1;
-  if (overRoof && feetY >= roof.y - 0.25) return standHeight(x, z, feetY, roof.y);
-  const cave = world.cave;
-  if (cave && feetY < -1 && x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return cave.floor;
-  const pad = cave?.pad;
-  if (pad && feetY < -1 && x >= pad.x0 && x <= pad.x1 && z >= pad.z0 && z <= pad.z1) return cave.floor;
-  if (cave?.tunnel && feetY < -1 && x >= cave.tunnel.x0 && x <= cave.tunnel.x1 && z >= cave.tunnel.z0 && z <= cave.tunnel.z1) return cave.floor;
-  // the 0.2 m seam between the cave box (x1 4.05) and the tunnel box (x0 4.25) used to read as open water
-  if (cave?.tunnel && feetY < -1 && x >= cave.x1 - 0.05 && x <= cave.tunnel.x0 + 0.05 && z >= cave.tunnel.z0 && z <= cave.tunnel.z1) return cave.floor;
-  if (cave?.room && feetY < -1 && x >= cave.room.x0 && x <= cave.room.x1 && z >= cave.room.z0 && z <= cave.room.z1) return cave.floor;
-  const shaft = world.shaft;
-  if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.42 && Math.abs(z - shaft.z) < 0.5) return shaft.floor;
-  // forest pass: the rock shelf at the foot of the cliff notch line (and its step into the cave mouth)
-  if (feetY < -1 && (inBox(world.notches?.shelf, x, z) || inBox(world.notches?.step, x, z))) return world.notches.shelf.floor;
-  const overFloor = x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
-  const cell = START_CELL.floor;
-  const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
-  if (overFloor || inCell) return standHeight(x, z, feetY, 0);
-  const liftFloor = world.lift?.floorAt(x, z, feetY);
-  if (liftFloor != null) return liftFloor;
-  const yard = world.yard;
-  if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
-    return standHeight(x, z, feetY, yard.y);
-  }
-  const shelf = world.shallowFloor?.(x, z);
-  if (shelf != null && feetY < -1) return shelf;
-  return WATER_Y;
+  return groundModel.groundUnder(x, z, feetY);
 }
 
 function startWaterBite(x, z) {
@@ -923,7 +904,11 @@ function inBox(box, x, z) {
 function landShift(ground, feetY, head) {
   const cave = world.cave;
   const onShelf = inBox(world.notches?.shelf, head.x, head.z) || inBox(world.notches?.step, head.x, head.z);
-  const fromShaft = !onShelf && ground === world.shaft?.floor && head.x < cave.x0 + 0.15;
+  // rowing pass: shaft.floor equals the cave floor, so this used to fire on ANY step up onto the cave floor west of
+  // x -1.5 (e.g. wading up out of the shallows toward the torch) and yank you back to the stand spot. Only from the shaft.
+  const shaft = world.shaft;
+  const inShaft = shaft && Math.abs(head.x - shaft.x) < 0.42 && Math.abs(head.z - shaft.z) < 0.5 && feetY > shaft.floor + 0.6;
+  const fromShaft = !onShelf && inShaft && ground === shaft.floor && head.x < cave.x0 + 0.15;
   shiftPlayer(fromShaft ? cave.standX - head.x : 0, ground - feetY, fromShaft ? cave.standZ - head.z : 0);
 }
 
@@ -1003,7 +988,7 @@ function updatePlayerFall(dt) {
   if (gap <= 0.12) {
     if (gap < -0.01) landShift(ground, feetY, head);
     const wading = world.shallowFloor?.(head.x, head.z) != null;
-    if (!wading && fallVy < -1.2 && ground <= WATER_Y + 0.05) {
+    if (!wading && fallVy < -1.2 && ground === WATER_Y) { // rowing pass: was <= WATER_Y + 0.05, which made the dry lift floors at -10.8 / -14.4 count as sea
       fallVy = 0;
       startWaterBite(head.x, head.z);
       return;
@@ -1019,12 +1004,12 @@ function updatePlayerFall(dt) {
   const next = feetY + fallVy * dt;
   if (next <= ground) {
     landShift(ground, feetY, head);
-    if (sliding && fallVy < -2.5 && ground > WATER_Y + 0.05) {
+    if (sliding && fallVy < -2.5 && ground !== WATER_Y) {
       pulseBoth(0.6, 90);
       setStatus('You slide down the rock and land on your feet.');
     }
     const wading = world.shallowFloor?.(head.x, head.z) != null;
-    if (!wading && ground <= WATER_Y + 0.05) {
+    if (!wading && ground === WATER_Y) {
       fallVy = 0;
       startWaterBite(head.x, head.z);
       return;
@@ -2916,6 +2901,7 @@ function shoveBoat() {
 
 function boardCanoe() {
   if (aboard) return;
+  world.canoe.releaseAll?.(); // drop the bow/stern rope and anything left over from last time
   const seat = world.canoe.seatPoint;
   if (renderer.xr.isPresenting && xrFrame) {
     const ref = renderer.xr.getReferenceSpace();
@@ -2923,6 +2909,17 @@ function boardCanoe() {
     if (pose) {
       const head = pose.transform.position;
       shiftPlayer(seat.x - head.x, seat.y + 0.72 - head.y, seat.z - head.z);
+      // rowing pass: sit facing the bow (oars and paddles), so pushing the handles forward reads as forward
+      if (world.canoe.oarMode || world.canoe.paddleMode) {
+        const o = pose.transform.orientation;
+        spaceQuat.set(o.x, o.y, o.z, o.w);
+        const look = new THREE.Vector3(0, 0, -1).applyQuaternion(spaceQuat);
+        if (look.x * look.x + look.z * look.z > 1e-6) {
+          let delta = world.canoe.group.rotation.y - Math.atan2(-look.x, -look.z);
+          delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+          if (Math.abs(delta) > 0.02) yawAround(delta, seat.x, seat.z);
+        }
+      }
     }
   } else {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(world.canoe.group.quaternion);
@@ -2935,12 +2932,83 @@ function boardCanoe() {
     controls.update();
   }
   lastSeat.copy(seat);
+  lastBoatYaw = world.canoe.group.rotation.y; // was stale: the first synced frame yawed you by the boat's turn since last time
   aboard = true;
   boatGrip = null;
+  fallVy = 0;
+  stickExit = 0;
   if (climb) leaveClimb();
+  const out = MOVE ? ' Push the left stick to step out.' : ' Stand up and step over the side to get out.';
   setStatus(world.canoe.paddleMode
-    ? 'In the canoe. Squeeze a grip to take a paddle in each hand. Dip the blade and pull back to paddle.'
-    : 'In the canoe. Grip an oar and pull back to row.');
+    ? `In the canoe. Squeeze a grip to take a paddle in each hand. Dip the blade and pull back to paddle.${out}`
+    : world.canoe.oarMode
+      ? `In the canoe. Squeeze at the end of each oar handle. Push the handles forward to row; press them down to lift the blades back.${out}`
+      : 'In the canoe. Grip an oar and pull back to row.');
+}
+
+// Rowing pass: one way out of the canoe, whatever the reason (teleport, respawn, stepping out, stick exit).
+// Leaving used to keep `aboard` set (rig still dragged by the boat, no falling, every squeeze took a paddle, so the
+// torch could not be picked up), and kept the oars, the rope and the hidden controller models attached.
+function leaveCanoe() {
+  world.canoe.releaseAll?.();
+  const was = aboard;
+  aboard = false;
+  boatGrip = null;
+  oarGrip = null;
+  fallVy = 0;
+  stickExit = 0;
+  if (was) exitCooldown = 1;
+}
+
+function nearSeat() {
+  const head = headSample();
+  const seat = world.canoe.seatPoint;
+  return Math.hypot(head.x - seat.x, head.z - seat.z) < 1.1 && Math.abs(head.y - seat.y) < 1.8;
+}
+
+const hullLocal = new THREE.Vector3();
+function inHull(x, y, z, halfX, halfZ) {
+  hullLocal.set(x, y, z);
+  world.canoe.group.worldToLocal(hullLocal);
+  return Math.abs(hullLocal.x) < halfX && Math.abs(hullLocal.z) < halfZ;
+}
+
+// Stepping out: land on the shelf, the cave pad or the shallows (up 0.8 m, down 1.2 m from the seat).
+const EXIT_STEP = { up: 0.8, down: 1.2 };
+function stepOutTo(x, z) {
+  const seat = world.canoe.seatPoint;
+  const spot = walker.walkable(x, z, seat.y, EXIT_STEP);
+  if (!spot.ok) return false;
+  const head = headSample();
+  leaveCanoe();
+  if (renderer.xr.isPresenting) shiftPlayer(x - head.x, spot.ground - xrOffset.y, z - head.z);
+  setStatus('Out of the canoe.');
+  return true;
+}
+
+function checkStepOut() {
+  if (!aboard || !renderer.xr.isPresenting || !xrFrame) return;
+  const head = headSample();
+  if (inHull(head.x, head.y, head.z, 0.62, 1.85)) return;
+  const seat = world.canoe.seatPoint;
+  const spot = walker.walkable(head.x, head.z, seat.y, EXIT_STEP);
+  if (!spot.ok) return; // leaning out over open water: you stay in the boat
+  leaveCanoe();
+  shiftPlayer(0, spot.ground - xrOffset.y, 0);
+  setStatus('Out of the canoe.');
+}
+
+// Held stick (> 0.7 for 0.35 s): look for dry footing 0.7..2.4 m away in that direction (+-60 degrees).
+function tryStickExit(dirX, dirZ) {
+  const seat = world.canoe.seatPoint;
+  const base = Math.atan2(dirX, dirZ);
+  for (const dist of [0.7, 0.95, 1.2, 1.5, 1.9, 2.4]) {
+    for (const off of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]) {
+      const a = base + off;
+      if (stepOutTo(seat.x + Math.sin(a) * dist, seat.z + Math.cos(a) * dist)) return true;
+    }
+  }
+  return false;
 }
 
 const lastSeat = new THREE.Vector3();
@@ -3220,7 +3288,7 @@ function onXrSqueeze(controller) {
     world.gear.stowHand(controller);
     return;
   }
-  if (!legacy('row') && !legacy('oarreach') && world.canoe.nearOar?.(handPoints(controller))) {
+  if (!legacy('row') && !legacy('oarreach') && (aboard || nearSeat()) && world.canoe.nearOar?.(handPoints(controller))) {
     if (!aboard) boardCanoe();
     if (gripOar(controller)) return;
   }
@@ -3284,6 +3352,78 @@ function onXrRelease(controller) {
   releaseHeld();
 }
 
+// Rowing pass: smooth left-stick locomotion (head-relative) and right-stick snap/smooth turn.
+// A hand holding a spray can (stick = cone/reach) or a brick (stick = rotate) is skipped, and so is a hand on an oar.
+let snapLatch = false;
+function canoeHolds(controller) {
+  const c = world.canoe;
+  return !!(c.longOars?.some((o) => o.hand === controller) || c.paddles?.some((pd) => pd.hand === controller)
+    || c.oarGrips?.starboard === controller || c.oarGrips?.port === controller);
+}
+
+function pollMove(dt) {
+  exitCooldown = Math.max(0, exitCooldown - dt);
+  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold) {
+    liftFeel.setComfort?.(0);
+    return;
+  }
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const head = pose.transform.position;
+  let comfort = 0;
+  let moveHand = null;
+  let turnHand = null;
+  const sprayHand = world.gear.handHolding?.('spray');
+  for (const controller of controllers) {
+    const source = controller.userData.inputSource;
+    if (!source?.gamepad || controller === sprayHand || heldFrom === controller || canoeHolds(controller)) continue;
+    if (source.handedness === 'left') moveHand = controller;
+    else if (source.handedness === 'right') turnHand = controller;
+  }
+  // turn
+  if (TURN !== 'off' && turnHand && !climb?.hand) {
+    const x = turnHand.userData.inputSource.gamepad.axes?.[2] ?? 0;
+    if (TURN === 'snap') {
+      if (Math.abs(x) > 0.7 && !snapLatch) {
+        snapLatch = true;
+        yawAround(-Math.sign(x) * THREE.MathUtils.degToRad(SNAP_DEG), head.x, head.z);
+      } else if (Math.abs(x) < 0.3) snapLatch = false;
+    } else if (Math.abs(x) > 0.2) {
+      const k = (Math.abs(x) - 0.2) / 0.8;
+      yawAround(-Math.sign(x) * k * THREE.MathUtils.degToRad(SMOOTH_TURN_DEG) * dt, head.x, head.z);
+      comfort = Math.max(comfort, 0.3 * k);
+    }
+  }
+  // move
+  if (MOVE && moveHand) {
+    const pad = moveHand.userData.inputSource.gamepad;
+    const stick = stickToWorld(pose.transform.orientation, pad.axes?.[2] ?? 0, pad.axes?.[3] ?? 0);
+    if (aboard) {
+      if (stick.mag > 0.7) {
+        stickExit += dt;
+        if (stickExit >= 0.35) {
+          stickExit = -1; // one try per push
+          if (!tryStickExit(stick.x, stick.z)) setStatus('No footing that way. Row closer to the shelf or the shallows.');
+        }
+      } else if (stick.mag < 0.3) stickExit = 0;
+    } else if (stick.mag > 0 && !climb && !(ridingLift && world.lift?.moving)) {
+      const feet = xrOffset.y;
+      const dx = stick.x * MOVE_SPEED * dt;
+      const dz = stick.z * MOVE_SPEED * dt;
+      const res = walker.move(head.x, head.z, feet, dx, dz);
+      if (res.x !== head.x || res.z !== head.z) shiftPlayer(res.x - head.x, 0, res.z - head.z);
+      // walking into the floating canoe gets you in
+      const seat = world.canoe.seatPoint;
+      if (exitCooldown <= 0 && Math.abs(feet - seat.y) < 1.2 && inHull(head.x + dx * 6, seat.y, head.z + dz * 6, 0.5, 1.5)) boardCanoe();
+      comfort = Math.max(comfort, 0.25 + 0.35 * stick.mag);
+    }
+  }
+  // stepping physically into the hull also boards
+  if (!aboard && exitCooldown <= 0 && !climb && Math.abs(xrOffset.y - world.canoe.seatPoint.y) < 1.2 && inHull(head.x, head.y, head.z, 0.36, 1.3)) boardCanoe();
+  liftFeel.setComfort?.(comfort);
+}
+
 function pollGazeLock() {
   if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || world.canoe.anyOar?.() || world.gear.drawing()) {
     gazeLock = null;
@@ -3317,6 +3457,7 @@ function pollGazeLock() {
 }
 
 function pollTeleport(controller) {
+  if (!TELEPORT) return;
   const pressed = !!controller.userData.inputSource?.gamepad?.buttons?.[4]?.pressed;
   if (pressed && !controller.userData.teleportLatch) {
     controller.userData.teleportLatch = true;
@@ -3937,6 +4078,7 @@ function frame(time, frame) {
   }
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
+  checkStepOut();
   pullOar();
   for (const controller of controllers) updateLaser(controller);
   if (renderer.xr.isPresenting && !legacy('canoe') && world.canoe.hover) {
@@ -3960,6 +4102,7 @@ function frame(time, frame) {
     if (!renderer.xr.isPresenting) applyClimbView();
   }
   updateLift(dt);
+  pollMove(dt);
   updatePlayerFall(dt);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
     pollGazeLock();
@@ -3967,7 +4110,8 @@ function frame(time, frame) {
       pollTeleport(controller);
       pollRotate(controller);
       pollBag(controller);
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !oarGrip && aboard && !world.gear.isHolding(controller)) {
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !oarGrip && aboard && !world.gear.isHolding(controller)
+        && (world.canoe.paddleMode || world.canoe.nearOar?.(handPoints(controller)))) {
         gripOar(controller);
       }
       if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !world.gear.isHolding(controller)) {
@@ -4011,3 +4155,31 @@ function frame(time, frame) {
 }
 
 startRelay();
+
+// Test hooks for the headless WebXR checks (?testhooks=1 only; nothing is exposed otherwise).
+if (pageParams.get('testhooks') === '1') {
+  window.__house = {
+    world,
+    state: () => ({
+      aboard,
+      climb: !!climb,
+      offset: xrOffset.toArray(),
+      yaw: xrYaw,
+      head: headSample().toArray?.() ?? [headSample().x, headSample().y, headSample().z],
+      torch: !!world.gear.handHolding?.('torch'),
+      canoe: world.canoe.debug?.(),
+      seat: world.canoe.seatPoint.toArray(),
+      boatYaw: world.canoe.group.rotation.y,
+      spotsVisible: teleportSpots.filter((spot) => spot.group.visible).length,
+      teleportIndex,
+      status: statusEl?.textContent || '',
+    }),
+    place(x, feet, z) { // move the player's feet to (x, feet, z) keeping the head offset (test setup only)
+      leaveCanoe();
+      const head = headSample();
+      shiftPlayer(x - head.x, feet - xrOffset.y, z - head.z);
+    },
+    cameraMatrix: () => renderer.xr.getCamera().matrixWorld.toArray(),
+    chopDoor() { (world.gear.doorBoards || []).forEach((b) => { b.userData.dead = true; b.visible = false; }); },
+  };
+}

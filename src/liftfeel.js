@@ -1,11 +1,11 @@
 // depart/arrive, a tick when passing a landing, a gate squeal, haptics, and a comfort vignette while moving.
-// ?vignette=0 turns the vignette off, ?liftsound=0 the sounds.
+// ?vignette=0 turns the vignette off (lift and stick locomotion), ?liftsound=0 the sounds.
 import * as THREE from 'three';
 
 const params = new URLSearchParams(location.search);
 
 export function createLiftFeel({ lift, scene, camera, audio, pulse, controllers = [] }) {
-  if (!lift?.on) return { update() {} };
+  if (!lift?.on) return { update() {}, setComfort() {} };
   const soundOn = params.get('liftsound') !== '0';
   const vignetteOn = params.get('vignette') !== '0';
 
@@ -84,8 +84,10 @@ export function createLiftFeel({ lift, scene, camera, audio, pulse, controllers 
   lift.on('door', ({ open }) => squeal(open));
 
   let rumbleAt = 0;
+  let comfort = 0; // rowing pass: stick locomotion / smooth turn ask for the same vignette (0..1)
   return {
     veil,
+    setComfort(amount) { comfort = Math.max(0, Math.min(1, amount || 0)); },
     update(dt, isRiding, inXr) {
       riding = isRiding;
       const v = Math.abs(lift.speed || 0);
@@ -104,7 +106,7 @@ export function createLiftFeel({ lift, scene, camera, audio, pulse, controllers 
         rumbleAt -= dt;
         if (rumbleAt <= 0) { rumbleAt = 0.22; buzzAll(0.05 + 0.08 * k, 22); }
       }
-      const want = vignetteOn && riding && lift.moving ? 0.35 + 0.45 * k : 0;
+      const want = vignetteOn ? Math.max(riding && lift.moving ? 0.35 + 0.45 * k : 0, inXr ? comfort : 0) : 0;
       uniforms.uAmount.value += (want - uniforms.uAmount.value) * Math.min(1, dt * 6);
       veil.visible = uniforms.uAmount.value > 0.01;
     },

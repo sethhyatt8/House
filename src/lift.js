@@ -144,8 +144,16 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     geo.translate(x, y, z);
     put(group, matKey, geo, tile);
   };
-  const wallZ = (g, m, z, x0, x1, y0, y1) => box(g, m, x1 - x0, y1 - y0, t, mid(x0, x1), mid(y0, y1), z);
-  const wallX = (g, m, x, z0, z1, y0, y1) => box(g, m, t, y1 - y0, z1 - z0, x, mid(y0, y1), mid(z0, z1));
+  // rowing pass: every rock wall is also a collider for stick locomotion (walk.js)
+  const colliders = [];
+  const wallZ = (g, m, z, x0, x1, y0, y1) => {
+    if (m === 'rock' && y1 - y0 > 0.3) colliders.push({ x0, x1, z0: z - t / 2, z1: z + t / 2, y0, y1 });
+    box(g, m, x1 - x0, y1 - y0, t, mid(x0, x1), mid(y0, y1), z);
+  };
+  const wallX = (g, m, x, z0, z1, y0, y1) => {
+    if (m === 'rock' && y1 - y0 > 0.3) colliders.push({ x0: x - t / 2, x1: x + t / 2, z0, z1, y0, y1 });
+    box(g, m, t, y1 - y0, z1 - z0, x, mid(y0, y1), mid(z0, z1));
+  };
   const S = shaftGroup;
   // shaft walls (same openings as the old lift: the cell gate on the west at the top, the landings on the east)
   wallX(S, 'rock', shaft.x0 - t / 2, shaft.z0, back.z0, 0, crown);
@@ -361,6 +369,7 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     carBox,
     floors,
     stops,
+    colliders,
     car,
     shaftGroup,
     floorGroups,

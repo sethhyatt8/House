@@ -3159,9 +3159,13 @@ function createCliff(scene, targets, assets) {
   // forest pass: carved notches instead of the stone ladder, plus a hidden notch line down the cliff from the yard
   let notches = null;
   if (NOTCHES) {
-    notchShaft({ scene, rock, ladder, shaftVoid, faceX, skin, shaftZ0, shaftZ1, shaftTop, caveTop, beachTop, WATER_Y });
+    const cleft = notchShaft({ scene, rock, ladder, shaftVoid, faceX, skin, shaftZ0, shaftZ1, shaftTop, caveTop, beachTop, WATER_Y });
     const route = cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y });
-    notches = { routes: [{ ladder }, { ladder: route.ladder }], shelf: route.shelf, step: route.step };
+    // rowing pass: the rock rib in the cave mouth is a wall for stick locomotion (walk.js)
+    const p = cleft.rib.position;
+    const g = cleft.rib.geometry.parameters;
+    const rib = { x0: p.x - g.width / 2, x1: p.x + g.width / 2, z0: p.z - g.depth / 2, z1: p.z + g.depth / 2, y0: p.y - g.height / 2, y1: p.y + g.height / 2 };
+    notches = { routes: [{ ladder }, { ladder: route.ladder }], shelf: route.shelf, step: route.step, rib };
   }
 
   const rockCliff = assets?.feature('rock') ? assets.material('rock_cliff') : null;
