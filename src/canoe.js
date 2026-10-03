@@ -7,10 +7,32 @@ import { legacy } from './flags.js';
 // positive yaw, counter-clockwise from above. From the seat, the stern swings to the left.
 const BLADE = 78;
 const OARLOCK = { x: 0.5, y: 0.34, z: 0.02 };
-// Hand paddles (feedback pass, default): one short paddle per hand, thrust from the blade's velocity through the water.
-// ?rowing=old (or ?legacy=row) goes back to the oarlock oars. ?paddlegain=<n> scales the thrust (default 1).
+// Rowing modes (rowing pass):
+//   default 'oars'    two long oars pivoting in oarlock rings on the gunwales. Grab each oar at the very end of the
+//                     handle; the oar turns about its ring as the hand moves. You sit facing the bow: push the handles
+//                     forward with the blades in the water (they sweep back) = forward; press the handles down (blade
+//                     lifts out) or roll the wrist (blade feathers flat) for the recovery = no thrust; one oar = turn.
+//                     Thrust comes from each blade's velocity through the water. ?oargain=<n> scales it.
+//   ?rowing=paddle    the feedback-pass hand paddles. ?paddlegain=<n> scales their thrust.
+//   ?rowing=old       (or ?legacy=row) the original oarlock oars with the stroke-burst rowing.
 const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-export const PADDLE_MODE = params.get('rowing') !== 'old' && !legacy('row');
+export const ROW_MODE = (params.get('rowing') === 'old' || legacy('row')) ? 'old' : (params.get('rowing') === 'paddle' ? 'paddle' : 'oars');
+export const PADDLE_MODE = ROW_MODE === 'paddle';
+export const OAR_MODE = ROW_MODE === 'oars';
+const OARS = {
+  len: 2.1,                 // handle end to blade tip (the paddle.glb model stretched to oar length)
+  inboard: 0.55,            // handle end to the ring
+  pivot: { x: 0.45, y: 0.34, z: -0.35 },  // ring centre, boat frame (a little ahead of the seat: the hands sweep around it)
+  bladeLen: 0.7,
+  samples: [0.12, 0.33, 0.54], // blade sample points, metres in from the tip
+  neutralDepth: 0.08,       // where the blade centre sits when you take hold (handle height is calibrated on grab)
+  gain: Number(params.get('oargain')) || 1,
+  k: 38,                    // N per (m/s)^2 per sample (blade ~0.7 x 0.25 m, 3 samples; tuned for ~1.3 m/s cruising)
+  lin: 10,
+  maxForce: 380,
+  maxTorque: 300,
+  feather: params.get('feather') !== '0', // wrist roll about the shaft feathers the blade (25 deg dead zone)
+};
 const PADDLE = {
   gain: Number(params.get('paddlegain')) || 1,
   k: 57,             // N per (m/s)^2 per blade sample: 0.5 * rho 1000 * Cd ~1.2 * (blade 0.26 x 0.3 m / 3 samples) * game gain ~3.6
@@ -148,7 +170,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     oars.push(oar);
   });
   const canoeModel = assets?.feature('boats')
-    ? ((PADDLE_MODE && assets.instance('canoe_cedar')) || assets.instance('canoe'))
+    ? (((PADDLE_MODE || OAR_MODE) && assets.instance('canoe_cedar')) || assets.instance('canoe'))
     : null;
   const modelMats = [];
   if (canoeModel) {
@@ -207,6 +229,66 @@ export function createCanoe(scene, targets, cave, assets, water) {
       paddles.push({
         mesh, rest, side, name: side > 0 ? 'starboard' : 'port', hand: null, prev: [null, null, null],
         wet: 0, wasWet: false, force: 0, userData: { gripZone: grip },
+      });
+    });
+  }
+
+  // --- oarlock oars (rowing pass, default) ---
+  const longOars = [];
+  if (OAR_MODE) {
+    oars.forEach((oar) => { oar.visible = false; });
+    group.children.forEach((child) => { if (child.geometry?.type === 'BoxGeometry' && child.position.y === OARLOCK.y) child.visible = false; });
+    const bronze = new THREE.MeshStandardMaterial({ color: 0x5a4a32, metalness: 0.75, roughness: 0.42 });
+    const ringGeo = new THREE.TorusGeometry(0.03, 0.0065, 6, 18);
+    const postGeo = new THREE.CylinderGeometry(0.009, 0.012, 0.075, 8);
+    [-1, 1].forEach((side) => {
+      const P = new THREE.Vector3(side * OARS.pivot.x, OARS.pivot.y, OARS.pivot.z);
+      const ring = new THREE.Mesh(ringGeo, bronze);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.copy(P);
+      ring.castShadow = true;
+      ring.raycast = () => {};
+      const post = new THREE.Mesh(postGeo, bronze);
+      post.position.set(P.x, P.y - 0.065, P.z);
+      post.raycast = () => {};
+      group.add(ring, post);
+      let model = assets?.feature('boats') ? assets.instance('paddle') : null;
+      if (!model) {
+        model = new THREE.Group();
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.016, 0.62, 8), oarMat);
+        shaft.position.y = -0.19;
+        const knob = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.03), oarMat);
+        knob.position.y = 0.11;
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 0.014), oarMat);
+        blade.position.y = -0.58;
+        model.add(shaft, knob, blade);
+      }
+      model.traverse((child) => {
+        if (!child.isMesh) return;
+        child.material = child.material.clone();
+        child.raycast = () => {};
+        child.castShadow = true;
+      });
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const srcLen = Math.max(0.2, box.max.y - box.min.y);
+      const holder = new THREE.Group();
+      holder.add(model);
+      holder.scale.set(1.25, OARS.len / srcLen, 1.25);
+      holder.position.y = -box.max.y * (OARS.len / srcLen); // handle end at the root origin, blade down -Y
+      const root = new THREE.Group();
+      root.matrixAutoUpdate = false;
+      root.add(holder);
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.13, 8), leather.clone());
+      grip.material.emissive = new THREE.Color(0x000000);
+      grip.position.y = -0.075;
+      grip.raycast = () => {};
+      root.add(grip);
+      group.add(root);
+      longOars.push({
+        root, side, P, name: side > 0 ? 'starboard' : 'port', hand: null, dy0: 0, roll0: 0, feather: 0,
+        prev: [null, null, null], wet: 0, wasWet: false, force: 0, userData: { gripZone: grip },
+        end: new THREE.Vector3(), axis: new THREE.Vector3(), normal: new THREE.Vector3(), basis: new THREE.Matrix4(),
       });
     });
   }
@@ -375,6 +457,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
 
   function dropPaddle(pd) {
     if (pd.hand) restoreHand(pd.hand);
+    gripHands[pd.name].visible = false; // rowing pass: the shown grip hand used to stay floating where you let go
     oarGrips[pd.name] = null;
     pd.hand = null;
     pd.mesh.parent?.remove(pd.mesh);
@@ -383,7 +466,200 @@ export function createCanoe(scene, targets, cave, assets, water) {
     pd.userData.gripZone?.material.emissive?.setHex(0x000000);
   }
 
+  // --- oarlock oars ---
+  const oarTmp = new THREE.Vector3();
+  const oarUp = new THREE.Vector3(0, 1, 0);
+  const oarQ = new THREE.Quaternion();
+  const oarQ2 = new THREE.Quaternion();
+  const oarX = new THREE.Vector3();
+  const oarN0 = new THREE.Vector3();
+  const oarB0 = new THREE.Vector3();
+  const handLocalV = new THREE.Vector3();
+  function handLocal(controller, out) {
+    controller.getWorldPosition(out);
+    return group.worldToLocal(out);
+  }
+  // twist of the controller about the oar shaft (boat frame), for feathering
+  function wristRoll(controller, axis) {
+    controller.getWorldQuaternion(oarQ);
+    group.getWorldQuaternion(oarQ2);
+    oarQ.premultiply(oarQ2.invert());
+    oarX.set(0, 1, 0).applyQuaternion(oarQ);
+    if (Math.abs(oarX.dot(axis)) > 0.9) oarX.set(0, 0, -1).applyQuaternion(oarQ);
+    oarN0.crossVectors(oarUp, axis).normalize();
+    oarB0.crossVectors(axis, oarN0);
+    return Math.atan2(oarX.dot(oarB0), oarX.dot(oarN0));
+  }
+  // Pose one oar in the boat frame from the hand (or the rest pose). The handle end follows the hand's height
+  // (minus the grab calibration) and its bearing around the ring; the oar always passes through the ring, so the
+  // blade moves the other way, Lout/Lin = 2.8x as far.
+  function poseLongOar(o) {
+    const { P, side } = o;
+    const Lin = OARS.inboard;
+    let dy;
+    let ux;
+    let uz;
+    let feather;
+    if (o.hand) {
+      const h = handLocal(o.hand, handLocalV);
+      dy = THREE.MathUtils.clamp(h.y - o.dy0 - P.y, -0.8 * Lin, 0.8 * Lin);
+      const hx = h.x - P.x;
+      const hz = h.z - P.z;
+      let ang = Math.atan2(hz, Math.max(0.02, -side * hx)); // 0 = straight inboard, + = toward the stern
+      ang = THREE.MathUtils.clamp(ang, -1.25, 1.25);
+      ux = -side * Math.cos(ang);
+      uz = Math.sin(ang);
+      feather = o.feather;
+    } else {
+      dy = 0.12;
+      const ang = 0.78; // handles resting in the rower's lap, blades forward and flat
+      ux = -side * Math.cos(ang);
+      uz = Math.sin(ang);
+      feather = Math.PI / 2;
+    }
+    const horiz = Math.sqrt(Math.max(0, Lin * Lin - dy * dy));
+    // inboard unit direction (ring -> handle end)
+    oarTmp.set(ux * horiz, dy, uz * horiz).divideScalar(Lin);
+    o.end.copy(P).addScaledVector(oarTmp, Lin);
+    o.axis.copy(oarTmp).negate(); // handle -> blade
+    oarN0.crossVectors(oarUp, o.axis).normalize();
+    oarB0.crossVectors(o.axis, oarN0);
+    o.normal.copy(oarN0).multiplyScalar(Math.cos(feather)).addScaledVector(oarB0, Math.sin(feather));
+    const yAxis = oarTmp; // model +Y points from the blade back to the handle
+    oarX.crossVectors(yAxis, o.normal).normalize();
+    o.basis.makeBasis(oarX, yAxis, o.normal).setPosition(o.end);
+    o.root.matrix.copy(o.basis);
+    o.root.matrixWorldNeedsUpdate = true;
+  }
+  function nearLongOar(points, reach = 0.24) {
+    let best = null;
+    let bestDist = reach;
+    for (const o of longOars) {
+      if (o.hand) continue;
+      segA.copy(o.end);
+      group.localToWorld(segA);
+      segB.copy(o.end).addScaledVector(o.axis, 0.3);
+      group.localToWorld(segB);
+      const seg = segLine.set(segA, segB);
+      for (const point of points) {
+        seg.closestPointToPoint(point, true, segP);
+        const dist = segP.distanceTo(point);
+        if (dist < bestDist) { bestDist = dist; best = o; }
+      }
+    }
+    return best;
+  }
+  function takeLongOar(controller, points) {
+    if (longOars.some((o) => o.hand === controller)) return false;
+    const o = nearLongOar(points, 0.26);
+    if (!o) return false;
+    // calibrate: wherever you take hold, the blade starts just under the surface (catch-ready)
+    const pivotW = oarTmp.copy(o.P);
+    group.localToWorld(pivotW);
+    const above = pivotW.y - surfaceAt(pivotW.x, pivotW.z);
+    const outCentre = OARS.len - OARS.inboard - OARS.bladeLen / 2;
+    const dyNeutral = (above + OARS.neutralDepth) * OARS.inboard / outCentre;
+    const h = handLocal(controller, handLocalV);
+    o.dy0 = THREE.MathUtils.clamp(h.y - o.P.y - dyNeutral, -0.7, 0.7);
+    o.hand = controller;
+    o.prev = [null, null, null];
+    o.wet = 0;
+    o.wasWet = false;
+    o.feather = 0;
+    poseLongOar(o);
+    o.roll0 = wristRoll(controller, o.axis);
+    oarGrips[o.name] = controller;
+    onHaptic?.(controller, 0.8, 60);
+    snapHand(controller, o.root);
+    return true;
+  }
+  function dropLongOar(o) {
+    if (o.hand) restoreHand(o.hand);
+    gripHands[o.name].visible = false;
+    oarGrips[o.name] = null;
+    o.hand = null;
+    o.prev = [null, null, null];
+    o.userData.gripZone.material.emissive.setHex(0x000000);
+    poseLongOar(o);
+  }
+  const oaPoint = new THREE.Vector3();
+  const oaVel = new THREE.Vector3();
+  const oaNormal = new THREE.Vector3();
+  const oaQuat = new THREE.Quaternion();
+  function oarForces(dt) {
+    const out = { x: 0, z: 0, torque: 0 };
+    group.updateMatrixWorld(true);
+    group.getWorldQuaternion(oaQuat);
+    for (const o of longOars) {
+      if (o.hand && OARS.feather) {
+        const roll = wristRoll(o.hand, o.axis) - o.roll0;
+        const r = Math.atan2(Math.sin(roll), Math.cos(roll));
+        const dead = 0.44;
+        o.feather = Math.abs(r) <= dead ? 0 : THREE.MathUtils.clamp((r - Math.sign(r) * dead) * 1.6, -Math.PI / 2, Math.PI / 2);
+      }
+      poseLongOar(o);
+      const shown = gripHands[o.name];
+      if (!o.hand) { shown.visible = false; continue; }
+      o.root.updateMatrixWorld(true);
+      shown.visible = true;
+      o.root.getWorldPosition(shown.position);
+      o.root.getWorldQuaternion(shown.quaternion);
+      if (!dt) continue;
+      oaNormal.copy(o.normal).applyQuaternion(oaQuat);
+      let wetSum = 0;
+      let force = 0;
+      const yaw = sim.yaw;
+      OARS.samples.forEach((fromTip, i) => {
+        oaPoint.copy(o.end).addScaledVector(o.axis, OARS.len - fromTip);
+        group.localToWorld(oaPoint);
+        const prev = o.prev[i];
+        const depth = surfaceAt(oaPoint.x, oaPoint.z) - oaPoint.y;
+        const wet = THREE.MathUtils.clamp(depth / 0.1 + 0.5, 0, 1);
+        wetSum += wet;
+        if (prev && wet > 0) {
+          oaVel.subVectors(oaPoint, prev).multiplyScalar(1 / dt);
+          if (oaVel.lengthSq() < 144) {            // > 12 m/s at the blade = tracking glitch: ignore
+            const vn = oaVel.dot(oaNormal);
+            const mag = -OARS.gain * wet * (OARS.k * Math.abs(vn) + OARS.lin) * vn;
+            const fx = oaNormal.x * mag;
+            const fz = oaNormal.z * mag;
+            const f = boatFrame(fx, fz, yaw);
+            const r = boatFrame(oaPoint.x - group.position.x, oaPoint.z - group.position.z, yaw);
+            out.x += f.lat;
+            out.z += f.along;
+            out.torque += r.along * f.lat - r.lat * f.along;
+            force += Math.hypot(fx, fz);
+          }
+        }
+        if (prev) prev.copy(oaPoint); else o.prev[i] = oaPoint.clone();
+      });
+      o.wet = wetSum / OARS.samples.length;
+      o.force = force;
+      const tip = oaPoint.copy(o.end).addScaledVector(o.axis, OARS.len - 0.35);
+      group.localToWorld(tip);
+      if (o.wet > 0.25 && !o.wasWet) {
+        onHaptic?.(o.hand, 0.45, 30);
+        water.ripple?.(tip.x, tip.z, 0.6);
+        onSplash?.('catch', tip, Math.min(1, 0.3 + force / 180));
+      } else if (o.wet < 0.08 && o.wasWet) {
+        onHaptic?.(o.hand, 0.12, 12);
+        onSplash?.('exit', tip, 0.3);
+      } else if (o.wet > 0.25 && force > 5) {
+        onHaptic?.(o.hand, 0.05 + 0.35 * Math.min(1, force / 180), 25);
+      }
+      if (o.wet > 0.25 !== o.wasWet) o.wasWet = o.wet > 0.25;
+    }
+    const fl = Math.hypot(out.x, out.z);
+    if (fl > OARS.maxForce) { out.x *= OARS.maxForce / fl; out.z *= OARS.maxForce / fl; }
+    out.torque = THREE.MathUtils.clamp(out.torque, -OARS.maxTorque, OARS.maxTorque);
+    if (!floating()) { out.x *= 0.15; out.z *= 0.15; out.torque *= 0.15; }
+    lastPush = out;
+    return out;
+  }
+  longOars.forEach((o) => poseLongOar(o));
+
   function nearOar(points, reach = 0.26) {
+    if (OAR_MODE) return nearLongOar(points, Math.max(reach, 0.24));
     if (PADDLE_MODE) return nearPaddle(points, Math.max(reach, 0.3));
     let best = null;
     let bestDist = reach;
@@ -407,6 +683,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
   }
 
   function tryOar(controller, points) {
+    if (OAR_MODE) return takeLongOar(controller, points);
     if (PADDLE_MODE) return takePaddle(controller, points);
     const oar = legacy('oarreach')
       ? nearest(points, oars.map((item) => item.userData.gripZone), 0.42)?.parent
@@ -424,6 +701,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
 
   function release(controller) {
     for (const pd of paddles) if (pd.hand === controller) dropPaddle(pd);
+    for (const o of longOars) if (o.hand === controller) dropLongOar(o);
     if (drag?.controller === controller) {
       drag = null;
       onHaptic?.(controller, 0.2, 20);
@@ -439,6 +717,23 @@ export function createCanoe(scene, targets, cave, assets, water) {
 
   function anyOar() {
     return !!(oarGrips.starboard || oarGrips.port);
+  }
+
+  // Let go of everything the boat holds (oars, paddles, the bow/stern rope) and give the hands back. Called whenever
+  // you leave the canoe, however you leave it (rowing pass: leaving used to keep oars, rope and hidden hands attached).
+  function releaseAll() {
+    const hands = new Set();
+    paddles.forEach((pd) => { if (pd.hand) hands.add(pd.hand); });
+    longOars.forEach((o) => { if (o.hand) hands.add(o.hand); });
+    Object.values(oarGrips).forEach((c) => { if (c) hands.add(c); });
+    if (drag?.controller) hands.add(drag.controller);
+    hands.forEach((c) => release(c));
+    paddles.forEach((pd) => { if (pd.hand) dropPaddle(pd); });
+    longOars.forEach((o) => { if (o.hand) dropLongOar(o); });
+    oarGrips.starboard = null;
+    oarGrips.port = null;
+    drag = null;
+    Object.values(gripHands).forEach((hand) => { hand.visible = false; });
   }
 
   function setSplash(fn) {
@@ -516,7 +811,9 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const poseYaw = sim.yaw;
 
     if (PADDLE_MODE && !aboard) paddles.forEach((pd) => { if (pd.hand) dropPaddle(pd); });
-    const strokes = PADDLE_MODE ? { push: paddleForces(dt) } : (poseOars(dt, aboard), bladeStrokes(dt));
+    if (OAR_MODE && !aboard) longOars.forEach((o) => { if (o.hand) dropLongOar(o); });
+    const strokes = OAR_MODE ? { push: oarForces(dt) }
+      : PADDLE_MODE ? { push: paddleForces(dt) } : (poseOars(dt, aboard), bladeStrokes(dt));
     driftHome(dt, aboard);
     stepBoat(sim, dt, strokes);
     group.position.x += sim.vx * dt;
@@ -798,9 +1095,22 @@ export function createCanoe(scene, targets, cave, assets, water) {
     oarGrips,
     setAboard,
     setSplash,
+    releaseAll,
     paddles,
+    longOars,
     paddleMode: PADDLE_MODE,
-    debug: () => ({ sim: { ...sim }, push: lastPush, paddles: paddles.map((pd) => ({ name: pd.name, held: !!pd.hand, wet: +pd.wet.toFixed(2), force: +pd.force.toFixed(1) })), floating: floating() }),
+    oarMode: OAR_MODE,
+    rowMode: ROW_MODE,
+    rider: () => rider,
+    debug: () => ({
+      sim: { ...sim },
+      push: lastPush,
+      paddles: paddles.map((pd) => ({ name: pd.name, held: !!pd.hand, wet: +pd.wet.toFixed(2), force: +pd.force.toFixed(1) })),
+      oars: longOars.map((o) => ({ name: o.name, held: !!o.hand, wet: +o.wet.toFixed(2), force: +o.force.toFixed(1), feather: +o.feather.toFixed(2) })),
+      gripHandsVisible: Object.values(gripHands).filter((h) => h.visible).length,
+      drag: !!drag,
+      floating: floating(),
+    }),
   };
 }
 
