@@ -9,8 +9,8 @@ import { proxyMaterial } from './assets.js';
 
 export const NOTCHES = new URLSearchParams(location.search).get('ladders') !== 'old' && !legacy('ladders');
 
-// The room-corner shaft is closed. The climb is a recessed line in the cave's east wall, under the
-// start cell and clear of the tunnel mouth (z 1.23+). x0..faceX is the open column; the wall face is faceX.
+// Recessed holds on the cave's east wall, under the start cell and clear of the tunnel (z 1.23+).
+// The face is faceX. This does not open the cell floor.
 export const SHAFT_SLOT = {
   x0: 3.7,
   faceX: 4.4,
@@ -56,14 +56,15 @@ function proxy(ladder, x, y, z, rungs) {
 
 // The old ladder group is emptied and reused as the east-wall climb. Call before the rock material swap.
 // No rib and no cleft back-plate: the cave-mouth slot stays a hidden void, and the holds are pockets in the east wall.
-export function notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y }) {
+export function notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y, caveTop }) {
   ladder.children.slice().forEach((child) => ladder.remove(child));
   if (shaftVoid) shaftVoid.visible = false;
   const { x0, faceX, x1, z0, z1 } = SHAFT_SLOT;
   const zc = (z0 + z1) / 2;
   ladder.position.set(faceX, 0, zc);
   const yBot = WATER_Y - 0.35;
-  const yTop = 0;
+  // Stop at the cave ceiling. The start-room floor stays solid; this is not a shaft up into the cell.
+  const yTop = caveTop;
   const skin = 0.08;
   const addRock = (xa, xb, ya, yb, za, zb) => {
     if (xb - xa < 0.012 || yb - ya < 0.012 || zb - za < 0.012) return;
@@ -80,7 +81,7 @@ export function notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y }
   const rungs = [];
   const holds = [];
   let side = 0;
-  for (let y = -0.16; y >= WATER_Y + 0.95; y -= 0.23) {
+  for (let y = caveTop - 0.28; y >= WATER_Y + 0.95; y -= 0.23) {
     holds.push({ y, z: zc + (side % 2 ? 0.11 : -0.11) });
     side += 1;
   }
@@ -111,13 +112,12 @@ export function notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y }
     rungs,
     roofY: 0.4,
     notches: true,
-    shaft: { top: 0, base: beachTop },
-    topSpot: { x: x0 - 0.18, y: 0, z: zc },
-    baseSpot: { x: x0 - 0.15, y: beachTop, z: zc },
-    topStatus: 'In the starting room. A notch shaft opens in the floor beside you.',
+    shaft: { top: caveTop, base: beachTop },
+    topSpot: { x: x0 - 0.35, y: beachTop, z: zc },
+    baseSpot: { x: x0 - 0.35, y: beachTop, z: zc },
+    topStatus: 'In the cave, at the notches in the east wall.',
     baseStatus: 'In the cave, at the notches in the east wall.',
   };
-  return { mouth: { x0, x1: faceX, z0, z1 } };
 }
 
 // Route 2: hidden notch line down the cliff face from the yard edge (z 10.05: the yard's far corner, behind the rim boulder and past the last crate pile) to a shelf at the

@@ -3001,13 +3001,7 @@ function createCliff(scene, targets, assets) {
   mass(innerX, caveBack + 0.7, yBot, yTop, -12, caveZ0);
   mass(innerX, caveBack + 0.7, yBot, yTop, caveZ1, 12);
   mass(innerX, caveBack, caveTop, yTop, caveZ0, shaftZ0);
-  if (NOTCHES) {
-    mass(innerX, caveBack, caveTop, yTop, shaftZ1, SHAFT_SLOT.z0);
-    mass(innerX, caveBack, caveTop, yTop, SHAFT_SLOT.z1, caveZ1);
-    mass(innerX, SHAFT_SLOT.x0, caveTop, yTop, SHAFT_SLOT.z0, SHAFT_SLOT.z1);
-  } else {
-    mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
-  }
+  mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
   mass(innerX, caveBack, NOTCHES ? caveTop : shaftTop, yTop, shaftZ0, shaftZ1);
   mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, NOTCHES ? SHAFT_SLOT.z0 : doorZ0);
   if (NOTCHES) mass(caveBack, caveBack + 0.7, yBot, caveTop, SHAFT_SLOT.z1, doorZ0);
@@ -3168,9 +3162,9 @@ function createCliff(scene, targets, assets) {
   // forest pass: carved notches instead of the stone ladder, plus a hidden notch line down the cliff from the yard
   let notches = null;
   if (NOTCHES) {
-    const moved = notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y });
+    notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y, caveTop });
     const route = cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y });
-    notches = { routes: [{ ladder }, { ladder: route.ladder }], shelf: route.shelf, step: route.step, mouth: moved.mouth };
+    notches = { routes: [{ ladder }, { ladder: route.ladder }], shelf: route.shelf, step: route.step };
   }
 
   const rockCliff = assets?.feature('rock') ? assets.material('rock_cliff') : null;
@@ -4262,19 +4256,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   const cellZ1 = annexZ1 - annexT - 0.02;
   const liner = 0.04;
   const cellTop = door.h + liner;
-  if (NOTCHES) {
-    const hx0 = Math.max(cellX0, SHAFT_SLOT.x0);
-    const hx1 = Math.min(cellX1, SHAFT_SLOT.faceX);
-    const hz0 = Math.max(cellZ0, SHAFT_SLOT.z0);
-    const hz1 = Math.min(cellZ1, SHAFT_SLOT.z1);
-    const fy = liner / 2;
-    addCell(hx0 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + hx0) / 2, fy, (cellZ0 + cellZ1) / 2);
-    addCell(cellX1 - hx1, liner, cellZ1 - cellZ0, (hx1 + cellX1) / 2, fy, (cellZ0 + cellZ1) / 2);
-    addCell(hx1 - hx0, liner, hz0 - cellZ0, (hx0 + hx1) / 2, fy, (cellZ0 + hz0) / 2);
-    addCell(hx1 - hx0, liner, cellZ1 - hz1, (hx0 + hx1) / 2, fy, (hz1 + cellZ1) / 2);
-  } else {
-    addCell(cellX1 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + cellX1) / 2, liner / 2, (cellZ0 + cellZ1) / 2);
-  }
+  addCell(cellX1 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + cellX1) / 2, liner / 2, (cellZ0 + cellZ1) / 2);
   addCell(cellX1 - cellX0, liner, cellZ1 - cellZ0, (cellX0 + cellX1) / 2, cellTop - liner / 2, (cellZ0 + cellZ1) / 2);
   addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ0 + liner / 2);
   addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ1 - liner / 2);
