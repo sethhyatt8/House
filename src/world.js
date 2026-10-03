@@ -3008,7 +3008,7 @@ function createCliff(scene, targets, assets) {
   } else {
     mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
   }
-  mass(innerX, caveBack, shaftTop, yTop, shaftZ0, shaftZ1);
+  mass(innerX, caveBack, NOTCHES ? caveTop : shaftTop, yTop, shaftZ0, shaftZ1);
   mass(caveBack, caveBack + 0.7, yBot, caveTop, caveZ0, NOTCHES ? SHAFT_SLOT.z0 : doorZ0);
   if (NOTCHES) mass(caveBack, caveBack + 0.7, yBot, caveTop, SHAFT_SLOT.z1, doorZ0);
   mass(caveBack, caveBack + 0.7, yBot, caveTop, doorZ1, caveZ1);
@@ -3023,7 +3023,7 @@ function createCliff(scene, targets, assets) {
   slab(caveZ0, caveZ1, yBot, caveBot);
   slab(caveZ0, shaftZ0, caveTop, yTop);
   slab(shaftZ1, caveZ1, caveTop, yTop);
-  slab(shaftZ0, shaftZ1, shaftTop, yTop);
+  slab(shaftZ0, shaftZ1, NOTCHES ? caveTop : shaftTop, yTop);
 
   const shaftVoid = new THREE.Mesh(
     new THREE.BoxGeometry(0.42, shaftTop - caveTop, shaftZ1 - shaftZ0 - 0.08),
@@ -3150,8 +3150,10 @@ function createCliff(scene, targets, assets) {
     edge.position.set(faceX + 0.05, (shaftTop + caveTop) / 2, z);
     scene.add(edge);
   };
-  jamb(shaftZ0);
-  jamb(shaftZ1);
+  if (!NOTCHES) {
+    jamb(shaftZ0);
+    jamb(shaftZ1);
+  }
   const caveHalf = (caveZ1 - caveZ0) / 2;
   const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, caveZ1 - caveZ0 + 0.35), rock);
   brow.position.set(faceX + 0.06, caveTop + 0.1, caveMid);

@@ -239,19 +239,23 @@ export function createCanoe(scene, targets, cave, assets, water) {
     oars.forEach((oar) => { oar.visible = false; });
     group.children.forEach((child) => { if (child.geometry?.type === 'BoxGeometry' && child.position.y === OARLOCK.y) child.visible = false; });
     const bronze = new THREE.MeshStandardMaterial({ color: 0x5a4a32, metalness: 0.75, roughness: 0.42 });
-    const ringGeo = new THREE.TorusGeometry(0.03, 0.0065, 6, 18);
-    const postGeo = new THREE.CylinderGeometry(0.009, 0.012, 0.075, 8);
+    // Hole faces outboard so the shaft stays captive in a fixed ring, the way a rowboat oarlock works.
+    const ringGeo = new THREE.TorusGeometry(0.055, 0.012, 8, 22);
+    const hornGeo = new THREE.CylinderGeometry(0.013, 0.016, 0.12, 8);
     [-1, 1].forEach((side) => {
       const P = new THREE.Vector3(side * OARS.pivot.x, OARS.pivot.y, OARS.pivot.z);
       const ring = new THREE.Mesh(ringGeo, bronze);
-      ring.rotation.x = Math.PI / 2;
+      ring.rotation.y = Math.PI / 2;
       ring.position.copy(P);
       ring.castShadow = true;
       ring.raycast = () => {};
-      const post = new THREE.Mesh(postGeo, bronze);
-      post.position.set(P.x, P.y - 0.065, P.z);
-      post.raycast = () => {};
-      group.add(ring, post);
+      const hornA = new THREE.Mesh(hornGeo, bronze);
+      const hornB = new THREE.Mesh(hornGeo, bronze);
+      hornA.position.set(P.x, P.y - 0.02, P.z - 0.07);
+      hornB.position.set(P.x, P.y - 0.02, P.z + 0.07);
+      hornA.raycast = () => {};
+      hornB.raycast = () => {};
+      group.add(ring, hornA, hornB);
       let model = assets?.feature('boats') ? assets.instance('paddle') : null;
       if (!model) {
         model = new THREE.Group();
@@ -283,7 +287,12 @@ export function createCanoe(scene, targets, cave, assets, water) {
       grip.material.emissive = new THREE.Color(0x000000);
       grip.position.y = -0.075;
       grip.raycast = () => {};
-      root.add(grip);
+      // leather collar where the shaft crosses the stationary ring (model -Y runs handle -> blade)
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.008, 6, 14), leather.clone());
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = -OARS.inboard;
+      collar.raycast = () => {};
+      root.add(grip, collar);
       group.add(root);
       longOars.push({
         root, side, P, name: side > 0 ? 'starboard' : 'port', hand: null, dy0: 0, roll0: 0, feather: 0,
@@ -511,11 +520,11 @@ export function createCanoe(scene, targets, cave, assets, water) {
       uz = Math.sin(ang);
       feather = o.feather;
     } else {
-      dy = 0.12;
-      const ang = 0.78; // handles resting in the rower's lap, blades forward and flat
+      dy = 0.05;
+      const ang = 0.12; // square in the lock, shaft through the ring, blade just out over the side
       ux = -side * Math.cos(ang);
       uz = Math.sin(ang);
-      feather = Math.PI / 2;
+      feather = 0.35;
     }
     const horiz = Math.sqrt(Math.max(0, Lin * Lin - dy * dy));
     // inboard unit direction (ring -> handle end)
