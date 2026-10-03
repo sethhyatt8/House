@@ -9,6 +9,16 @@ import { proxyMaterial } from './assets.js';
 
 export const NOTCHES = new URLSearchParams(location.search).get('ladders') !== 'old' && !legacy('ladders');
 
+// The room-corner shaft is closed. The climb is a recessed line in the cave's east wall, under the
+// start cell and clear of the tunnel mouth (z 1.23+). x0..faceX is the open column; the wall face is faceX.
+export const SHAFT_SLOT = {
+  x0: 3.7,
+  faceX: 4.4,
+  x1: 5.1,
+  z0: 0.48,
+  z1: 0.9,
+};
+
 const cutMat = new THREE.MeshStandardMaterial({ color: 0x26221d, roughness: 1 });
 const wornMat = new THREE.MeshStandardMaterial({ color: 0x766e64, roughness: 0.95 });
 cutMat.name = 'notch_cut';
@@ -44,47 +54,70 @@ function proxy(ladder, x, y, z, rungs) {
   return rung;
 }
 
-// Route 1: rebuild the existing shaft ladder group as a notch column in the room-side corner of the slot.
-// Call before the rock material swap in createCliff so the new rock gets the cliff texture.
-export function notchShaft({ scene, rock, ladder, shaftVoid, faceX, skin, shaftZ0, shaftZ1, shaftTop, caveTop, beachTop, WATER_Y }) {
-  const hideVisuals = () => ladder.children.forEach((child) => { child.visible = false; child.raycast = () => {}; });
-  hideVisuals();
+// The old ladder group is emptied and reused as the east-wall climb. Call before the rock material swap.
+// No rib and no cleft back-plate: the cave-mouth slot stays a hidden void, and the holds are pockets in the east wall.
+export function notchShaft({ scene, rock, ladder, shaftVoid, beachTop, WATER_Y }) {
   ladder.children.slice().forEach((child) => ladder.remove(child));
   if (shaftVoid) shaftVoid.visible = false;
-  const zc = shaftZ0 + 0.35; // tucked into the corner against the south jamb (the room's south-west corner above)
-  ladder.position.z = zc;
-  const rx = ladder.position.x;
-  // the slot becomes a shallow cleft (0.16 deep) instead of a dark void
-  const back = new THREE.Mesh(new THREE.BoxGeometry(skin - 0.16, shaftTop - caveTop, shaftZ1 - shaftZ0), rock);
-  back.position.set(faceX + 0.16 + (skin - 0.16) / 2, (shaftTop + caveTop) / 2, (shaftZ0 + shaftZ1) / 2);
-  back.receiveShadow = true;
-  scene.add(back);
-  // in the cave mouth: a natural rock rib (where the ladder pier was), narrower and set back
-  const rib = new THREE.Mesh(new THREE.BoxGeometry(0.3, caveTop - beachTop + 0.05, 0.56), rock);
-  rib.position.set(faceX + 0.12 + 0.15, (caveTop + beachTop) / 2, zc);
-  rib.castShadow = true;
-  rib.receiveShadow = true;
-  scene.add(rib);
+  const { x0, faceX, x1, z0, z1 } = SHAFT_SLOT;
+  const zc = (z0 + z1) / 2;
+  ladder.position.set(faceX, 0, zc);
+  const yBot = WATER_Y - 0.35;
+  const yTop = 0;
+  const skin = 0.08;
+  const addRock = (xa, xb, ya, yb, za, zb) => {
+    if (xb - xa < 0.012 || yb - ya < 0.012 || zb - za < 0.012) return;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, yb - ya, zb - za), rock);
+    mesh.position.set((xa + xb) / 2, (ya + yb) / 2, (za + zb) / 2);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  };
+  // rock behind the pockets, so each cut has a back wall
+  addRock(faceX + skin, x1, yBot, yTop, z0, z1);
+
   const cuts = [];
   const lips = [];
   const rungs = [];
+  const holds = [];
   let side = 0;
   for (let y = -0.16; y >= WATER_Y + 0.95; y -= 0.23) {
-    // above the slot (y > shaftTop) the holds are cut into the face itself, right under the room's floor edge
-    const surface = y > shaftTop ? faceX : y > caveTop ? faceX + 0.16 : faceX + 0.12;
-    const z = (side % 2 ? 0.12 : -0.12) + (Math.sin(y * 7.3) * 0.02);
-    holdParts(cuts, lips, surface - rx, y, z);
-    proxy(ladder, surface - rx - 0.07, y, z * 0.5, rungs);
+    holds.push({ y, z: zc + (side % 2 ? 0.11 : -0.11) });
     side += 1;
   }
-  // worn lip at the floor edge above the first notch (the only hint from the room)
-  const top = new THREE.BoxGeometry(0.05, 0.012, 0.3);
-  top.translate(faceX + 0.02 - rx, -0.012, 0);
-  lips.push(top);
+  const pocketH = 0.07;
+  const pocketW = 0.13;
+  let yCursor = yTop;
+  holds.forEach((hold) => {
+    const top = hold.y + pocketH / 2;
+    const bot = hold.y - pocketH / 2;
+    addRock(faceX, faceX + skin, top, yCursor, z0, z1);
+    const pz0 = hold.z - pocketW / 2;
+    const pz1 = hold.z + pocketW / 2;
+    addRock(faceX, faceX + skin, bot, top, z0, pz0);
+    addRock(faceX, faceX + skin, bot, top, pz1, z1);
+    // dark pocket, entirely inside the wall (nothing proud of faceX)
+    const cut = new THREE.BoxGeometry(skin - 0.016, pocketH - 0.01, pocketW - 0.016);
+    cut.translate(0.008 + (skin - 0.016) / 2, hold.y, hold.z - zc);
+    cuts.push(cut);
+    const lip = new THREE.BoxGeometry(0.026, 0.011, pocketW);
+    lip.translate(0.013, top - 0.004, hold.z - zc);
+    lips.push(lip);
+    proxy(ladder, -0.07, hold.y, hold.z - zc, rungs);
+    yCursor = bot;
+  });
+  addRock(faceX, faceX + skin, yBot, yCursor, z0, z1);
   [mergedMesh(cuts, cutMat, 'notches_cut'), mergedMesh(lips, wornMat, 'notches_worn')].forEach((m) => m && ladder.add(m));
-  ladder.userData.rungs = rungs;
-  ladder.userData.notches = true;
-  return { rib, back };
+  ladder.userData = {
+    rungs,
+    roofY: 0.4,
+    notches: true,
+    shaft: { top: 0, base: beachTop },
+    topSpot: { x: x0 - 0.18, y: 0, z: zc },
+    baseSpot: { x: x0 - 0.15, y: beachTop, z: zc },
+    topStatus: 'In the starting room. A notch shaft opens in the floor beside you.',
+    baseStatus: 'In the cave, at the notches in the east wall.',
+  };
+  return { mouth: { x0, x1: faceX, z0, z1 } };
 }
 
 // Route 2: hidden notch line down the cliff face from the yard edge (z 10.05: the yard's far corner, behind the rim boulder and past the last crate pile) to a shelf at the

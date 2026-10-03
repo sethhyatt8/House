@@ -59,6 +59,9 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
     if (shaft && feetY < -0.2 && Math.abs(x - shaft.x) < 0.42 && Math.abs(z - shaft.z) < 0.5) return shaft.floor;
     // forest pass: the rock shelf at the foot of the cliff notch line (and its step into the cave mouth)
     if (feetY < -1 && (inBox(world.notches?.shelf, x, z) || inBox(world.notches?.step, x, z))) return world.notches.shelf.floor;
+    // the notch shaft is an open column through the cell floor; standing over it is a drop, not the room
+    const mouth = world.notches?.mouth;
+    if (mouth && feetY < 0.45 && x >= mouth.x0 && x <= mouth.x1 && z >= mouth.z0 && z <= mouth.z1) return cave.floor;
     const overFloor = x >= cliffX + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
     const cell = startCell.floor;
     const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
@@ -86,8 +89,6 @@ function staticColliders({ world, startCell, cliffX, roof }) {
   // room north wall (rock, 0.7 thick)
   list.push({ x0: cliffX - 0.4, x1: roof.roomX1 + 0.65, z0: roof.roomZ0 - 0.55, z1: roof.roomZ0 - 0.0, y0: -0.1, y1: 2.7, why: 'room wall' });
   for (const w of world.lift?.colliders || []) list.push({ ...w, why: 'lift wall' });
-  const rib = world.notches?.rib;
-  if (rib) list.push({ ...rib, why: 'rock rib' });
   return list;
 }
 
