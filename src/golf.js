@@ -210,6 +210,7 @@ export function createGolf(scene, targets) {
   const samples = [];
   let fade = 0;
   let wait = 0;
+  let wet = false;
 
   const prevRaw = new THREE.Vector3();
   const gripV = new THREE.Vector3();
@@ -336,6 +337,7 @@ export function createGolf(scene, targets) {
     samples.length = 0;
     fade = 0;
     wait = 0;
+    wet = false;
     trail.geo.setDrawRange(0, 0);
   }
 
@@ -398,6 +400,11 @@ export function createGolf(scene, targets) {
     writeTrail();
 
     const inWater = ball.p.y < waterY + 0.2;
+    if (inWater && !wet) {
+      wet = true;
+      events.push({ type: 'splash', at: { x: ball.p.x, y: waterY, z: ball.p.z }, speed });
+    }
+    if (!inWater) wet = false;
     const far = Math.hypot(ball.p.x - spawn.x, ball.p.z - spawn.z) > 1.2;
     if ((inWater && speed < 0.7) || (ball.asleep && far)) wait += dt;
     else wait = 0;

@@ -20,48 +20,32 @@ const SOUTH = 5.7;
 const WEST = -1.63;
 const LAMP_COUNT = 5;
 
-// A barred door across the shaft mouth, chained and locked. There is no key, so it never opens.
-function chainedDoor(scene, shaft) {
+// Barred gate on the yard side of the shaft. It swings outward. The grab handle opens it.
+function openGate(scene, shaft, targets) {
   const iron = new THREE.MeshStandardMaterial({ color: 0x5c656e, metalness: 0.88, roughness: 0.45 });
-  const group = new THREE.Group();
-  group.name = 'lift_door';
-  const x = shaft.x0 - 0.06;
-  const z0 = shaft.z0 + 0.05;
-  const z1 = shaft.z1 - 0.05;
+  const hinge = new THREE.Group();
+  hinge.name = 'lift_door';
+  hinge.position.set(shaft.x0 - 0.04, 0, shaft.z0 + 0.04);
+  const span = shaft.z1 - shaft.z0 - 0.08;
   const h = 2.02;
   const bar = (w, ht, d, px, py, pz) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, ht, d), iron);
     mesh.position.set(px, py, pz);
     mesh.castShadow = true;
-    group.add(mesh);
+    hinge.add(mesh);
   };
-  bar(0.05, h, 0.05, x, h / 2, z0);
-  bar(0.05, h, 0.05, x, h / 2, z1);
-  bar(0.04, 0.05, z1 - z0, x, h - 0.03, (z0 + z1) / 2);
-  bar(0.04, 0.05, z1 - z0, x, 0.06, (z0 + z1) / 2);
-  const leaves = 5;
-  for (let i = 1; i < leaves; i += 1) {
-    const z = z0 + ((z1 - z0) * i) / leaves;
-    bar(0.02, h - 0.12, 0.02, x, h / 2, z);
-  }
-  const strand = (y, sag) => {
-    const n = 8;
-    for (let i = 0; i < n; i += 1) {
-      const t = i / (n - 1);
-      const z = z0 + 0.12 + (z1 - z0 - 0.24) * t;
-      const link = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.007, 5, 8), iron);
-      link.position.set(x - 0.02, y - Math.sin(t * Math.PI) * sag, z);
-      link.rotation.y = Math.PI / 2;
-      link.castShadow = true;
-      group.add(link);
-    }
-  };
-  strand(0.78, 0.1);
-  strand(1.28, 0.08);
-  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.04), iron);
-  lock.position.set(x - 0.03, 1.02, (z0 + z1) / 2);
-  lock.castShadow = true;
-  group.add(lock);
+  bar(0.05, h, 0.05, 0, h / 2, 0);
+  bar(0.05, h, 0.05, 0, h / 2, span);
+  bar(0.04, 0.05, span, 0, h - 0.03, span / 2);
+  bar(0.04, 0.05, span, 0, 0.06, span / 2);
+  for (let i = 1; i < 5; i += 1) bar(0.02, h - 0.12, 0.02, 0, h / 2, (span * i) / 5);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, 0.06), iron);
+  handle.position.set(-0.07, 1.05, span * 0.78);
+  handle.userData.type = 'lift';
+  handle.userData.role = 'open';
+  hinge.add(handle);
+  targets.push(handle);
+  scene.add(hinge);
   const sill = new THREE.Mesh(
     new THREE.BoxGeometry(Math.max(0.2, shaft.x0 - 3.15), 0.08, (shaft.z1 - shaft.z0) + 0.4),
     new THREE.MeshStandardMaterial({ color: 0x6e675e, roughness: 0.95 }),
@@ -69,15 +53,17 @@ function chainedDoor(scene, shaft) {
   sill.position.set((3.15 + shaft.x0) / 2, 0.04, (shaft.z0 + shaft.z1) / 2);
   sill.receiveShadow = true;
   scene.add(sill);
-  scene.add(group);
   return {
-    x0: x - 0.08,
-    x1: shaft.x0 + 0.02,
-    z0: shaft.z0,
-    z1: shaft.z1,
-    y0: 0,
-    y1: h,
-    porch: { x0: 3.15, x1: shaft.x0 + 0.08, z0: shaft.z0 - 0.2, z1: shaft.z1 + 0.2 },
+    hinge,
+    box: {
+      x0: shaft.x0 - 0.14,
+      x1: shaft.x0 + 0.06,
+      z0: shaft.z0,
+      z1: shaft.z1,
+      y0: 0,
+      y1: h,
+      porch: { x0: 3.15, x1: shaft.x0 + 0.08, z0: shaft.z0 - 0.2, z1: shaft.z1 + 0.2 },
+    },
   };
 }
 
@@ -217,7 +203,7 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     box(g, m, t, y1 - y0, z1 - z0, x, mid(y0, y1), mid(z0, z1));
   };
   const S = shaftGroup;
-  // west face: solid below ground and above the door. The door itself is the chained gate, not a hole into the start room.
+  // west face: solid below ground and above the door. The barred gate fills the opening at the yard.
   wallX(S, 'rock', shaft.x0 - t / 2, shaft.z0, shaft.z1, 2.02, crown);
   wallX(S, 'rock', shaft.x0 - t / 2, shaft.z0, shaft.z1, pit, 0);
   const levels = stops.slice(1).sort((a, b) => a - b);
@@ -401,6 +387,9 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     if (lv) { handle.material = new THREE.MeshBasicMaterial({ visible: false }); const hv = lv.clone(); hv.material = M.paint; hv.position.set(0, -0.14, 0); hv.raycast = () => {}; handle.add(hv); }
   });
 
+  const gate = openGate(scene, shaft, targets);
+  const hinge = gate.hinge;
+
   const listeners = {};
   const emit = (type, data = {}) => (listeners[type] || []).forEach((fn) => fn({ type, ...data }));
   let leverKick = 0;
@@ -417,7 +406,7 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     speed: 0,
     accel: 0,
     shaft,
-    door: chainedDoor(scene, shaft),
+    door: gate.box,
     carBox,
     floors,
     stops,

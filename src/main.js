@@ -924,28 +924,27 @@ function headSample() {
   return camera.position;
 }
 
-function guardLiftDoor() {
+function inLiftCar(head) {
   const lift = world.lift;
-  if (!lift?.shaft || !renderer.xr.isPresenting || !xrFrame) return;
-  const head = headSample();
-  const shaft = lift.shaft;
-  const inShaft = head.x > shaft.x0 - 0.02
-    && head.x < shaft.x1 - 0.08
-    && head.z > shaft.z0 + 0.02
-    && head.z < shaft.z1 - 0.02;
-  if (!inShaft) return;
-  const midZ = (shaft.z0 + shaft.z1) / 2;
-  shiftPlayer(shaft.x0 - 0.75 - head.x, -xrOffset.y, midZ - head.z);
+  const box = lift?.carBox;
+  if (!box || !head) return false;
+  const y = lift.floorY;
+  return head.x > box.x0 - 0.08 && head.x < box.x1 + 0.08
+    && head.z > box.z0 - 0.08 && head.z < box.z1 + 0.08
+    && head.y > y + 0.25 && head.y < y + 2.15;
 }
 
 function updateLift(dt) {
   const lift = world.lift;
   if (!lift) return;
-  guardLiftDoor();
+  const inside = renderer.xr.isPresenting && inLiftCar(headSample());
   const dy = lift.update(dt);
-  if (dy) fallVy = 0;
-  ridingLift = false;
-  liftFeel.update(dt, false, renderer.xr.isPresenting);
+  if (inside && dy) {
+    shiftPlayer(0, dy, 0);
+    fallVy = 0;
+  }
+  ridingLift = inside && lift.moving;
+  liftFeel.update(dt, ridingLift, renderer.xr.isPresenting);
 }
 
 function updatePlayerFall(dt) {
@@ -1093,6 +1092,12 @@ renderer.xr.addEventListener('sessionend', () => {
 const controllerFactory = new XRControllerModelFactory();
 const controllers = [0, 1].map((index) => setupController(index));
 const liftFeel = createLiftFeel({ lift: world.lift, scene, camera, audio, pulse: pulseController, controllers });
+world.lift?.on('depart', ({ from, to }) => {
+  const down = world.lift.stops[to] < world.lift.stops[from];
+  sfx.play(down ? 'creak' : 'latch', { gain: down ? 0.55 : 0.32, rate: down ? 0.55 : 1.1 });
+});
+world.lift?.on('arrive', () => sfx.play('hit_metal', { gain: 0.34, rate: 0.72 }));
+world.lift?.on('door', ({ open }) => sfx.play(open ? 'door_open' : 'door_close', { gain: 0.5 }));
 
 const croc = world.croc ?? null;
 const crocDebug = pageParams.get('crocdebug') === '1';
@@ -3228,7 +3233,8 @@ function onXrTrigger(controller) {
   }
   const hit = hitFromController(controller);
   if (hit?.owner?.userData.type === 'lift') {
-    setStatus('The elevator is shut.');
+    if (hit.owner.userData.role === 'open') world.lift.openDoor();
+    else world.lift.go(inLiftCar(headSample()));
     return;
   }
   if (hit?.owner?.userData.action === 'peg') {
@@ -4238,13 +4244,18 @@ function frame(time, frame) {
     const hand = world.golf.club.userData.carried ? world.golf.club.parent : null;
     for (const event of events) {
       if (event.type === 'strike') {
-        sfx.play(['hit_wood', 'hit_wood2'], { at: event.at, gain: Math.min(1, 0.4 + event.speed / 28), rate: 1.55 });
+        sfx.play('hit_wood', { at: event.at, gain: Math.min(0.85, 0.28 + event.speed / 30), rate: 1.7 });
+        sfx.play('hit_metal', { at: event.at, gain: Math.min(0.45, 0.12 + event.speed / 50), rate: 1.85 });
         pulseController(hand, Math.min(1, 0.45 + event.speed / 30), 22);
       } else if (event.type === 'turf') {
         sfx.play('hit_soft', { at: event.at, gain: Math.min(0.7, 0.25 + event.kill), rate: 0.9 });
         pulseController(hand, Math.min(1, 0.3 + event.kill), 36);
       } else if (event.type === 'push') {
         sfx.play('hit_soft', { at: event.at, gain: 0.16, rate: 1.6 });
+      } else if (event.type === 'bounce') {
+        sfx.play('hit_soft', { at: event.at, gain: Math.min(0.32, event.speed / 26), rate: 1.4 });
+      } else if (event.type === 'splash') {
+        sfx.play(event.speed > 8 ? 'splash_big' : 'splash_small1', { at: event.at, gain: 0.75 });
       }
     }
   }

@@ -104,20 +104,6 @@ function staticColliders({ world, startCell, cliffX, roof }) {
   // rock chunks standing in the room
   list.push({ x0: 0.6, x1: 1.7, z0: -2.55, z1: -1.75, y0: 0, y1: 1.16, why: 'room wall' });
   list.push({ x0: 1.8, x1: 2.5, z0: 0.9, z1: 2.2, y0: 0, y1: 0.85, why: 'room wall' });
-  const lift = world.lift;
-  if (lift?.shaft) {
-    const s = lift.shaft;
-    // the shaft only. It no longer reaches back into the start room.
-    list.push({
-      x0: s.x0 - 0.08,
-      x1: s.x1,
-      z0: s.z0,
-      z1: s.z1,
-      y0: -16,
-      y1: 2.6,
-      why: 'lift shaft',
-    });
-  }
   for (const w of world.lift?.colliders || []) list.push({ ...w, why: 'lift wall' });
   for (const block of world.crag?.colliders || []) list.push(block);
   const cave = world.cave;
@@ -157,10 +143,12 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
       if (hitsBox(box, x, z, feet, r)) return 'door boards';
     }
     const lift = world.lift;
-    if (lift?.door) {
+    if (lift?.door && lift.doorOpen < 0.45) {
       const d = lift.door;
       box.x0 = d.x0; box.x1 = d.x1; box.z0 = d.z0; box.z1 = d.z1; box.y0 = d.y0; box.y1 = d.y1;
       if (hitsBox(box, x, z, feet, r)) return 'lift gate';
+    }
+    if (lift?.shaft) {
       for (const stop of (lift.stops || []).slice(1)) {
         const atStop = !lift.moving && Math.abs(lift.floorY - stop) < 0.05;
         if (atStop) continue;

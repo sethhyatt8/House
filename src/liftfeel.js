@@ -98,8 +98,9 @@ export function createLiftFeel({ lift, scene, camera, audio, pulse, controllers 
           const t = h.ctx.currentTime;
           h.out.gain.setTargetAtTime(lift.moving ? 0.05 + 0.1 * k : 0, t, 0.08);
           h.ng.gain.setTargetAtTime(lift.moving ? 0.03 * k : 0, t, 0.08);
-          h.a.frequency.setTargetAtTime(40 + 22 * k, t, 0.1);
-          h.b.frequency.setTargetAtTime(80 + 45 * k, t, 0.1);
+          const down = (lift.speed || 0) < 0;
+          h.a.frequency.setTargetAtTime((down ? 26 : 42) + (down ? 12 : 22) * k, t, 0.12);
+          h.b.frequency.setTargetAtTime((down ? 52 : 84) + (down ? 24 : 45) * k, t, 0.12);
         }
       }
       if (riding && lift.moving && inXr) {
