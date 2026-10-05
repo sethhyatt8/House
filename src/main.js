@@ -15,6 +15,7 @@ import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
 import { createSfx } from './sfx.js';
 import { nearNotches } from './notches.js';
+import { barFrame, stepGlide } from './glider.js';
 import { FOREST_LEGACY } from './forest.js';
 import { MOVE, MOVE_SPEED, SMOOTH_TURN_DEG, SNAP_DEG, TELEPORT, TURN, createGround, createWalker, stickToWorld } from './walk.js';
 
@@ -309,6 +310,14 @@ let aboard = false;
 let exitCooldown = 0; // rowing pass: no auto-boarding for a second after you get out
 let stickExit = 0;
 let fallVy = 0;
+const glide = {
+  flying: false,
+  loose: false,
+  airborne: false,
+  v: new THREE.Vector3(),
+  nose: new THREE.Vector3(-1, 0, 0),
+  up: new THREE.Vector3(0, 1, 0),
+};
 let biteHold = false;
 let xrBaseSpace = null;
 let xrYaw = 0;
@@ -482,21 +491,11 @@ function containPlayer() {
   if (!pose) return;
   let x = pose.transform.position.x;
   let z = pose.transform.position.z;
-  const radius = 0.2;
-  const boxes = START_CELL.blocks.slice();
-  for (const board of world.gear.doorBoards || []) {
-    if (board.userData.dead) continue;
-    boxes.push({
-      x0: board.position.x - board.userData.hx,
-      x1: board.position.x + board.userData.hx,
-      z0: board.position.z - board.userData.hz,
-      z1: board.position.z + board.userData.hz,
-    });
-  }
-  for (let pass = 0; pass < 4; pass += 1) {
+  const boxes = walker.solids(xrOffset.y);
+  for (let pass = 0; pass < 6; pass += 1) {
     let hit = false;
     for (const box of boxes) {
-      const push = pushOutOf(x, z, box, radius);
+      const push = pushOutOf(x, z, box, 0.2);
       if (!push) continue;
       if (!shiftPlayer(push.dx, 0, push.dz)) return;
       x += push.dx;
@@ -611,7 +610,9 @@ function attachClimb(controller, hit) {
   controller.getWorldPosition(handPoint);
   climb.handY = handPoint.y;
   pulseController(controller);
-  setStatus(ladder.userData.notches
+  setStatus(ladder.userData.crag
+    ? 'Holding a rock edge. Pull down to climb, push up to go down. Swap hands as you go.'
+    : ladder.userData.notches
     ? 'Holding a notch. Pull down to climb, push up to go down. Swap hands as you go.'
     : ladder.userData.shaft
       ? 'Holding a rung. Pull down to climb, push up to go down.'
@@ -923,58 +924,32 @@ function headSample() {
   return camera.position;
 }
 
-function inLiftCar() {
-  const lift = world.lift;
-  if (!lift) return false;
-  const head = headSample();
-  const box = lift.carBox;
-  return head.x >= box.x0 && head.x <= box.x1
-    && head.z >= box.z0 && head.z <= box.z1
-    && Math.abs(xrOffset.y - lift.floorY) < 0.85;
-}
-
 function guardLiftDoor() {
   const lift = world.lift;
-  if (!lift || lift.doorOpen > 0.65 || Math.abs(lift.floorY) > 0.2) return;
-  if (!renderer.xr.isPresenting || !xrFrame) return;
+  if (!lift || !renderer.xr.isPresenting || !xrFrame) return;
   const head = headSample();
-  if (head.x > 5.12) return;
-  const push = pushOutOf(head.x, head.z, { x0: 4.9, x1: 5.3, z0: -0.36, z1: 0.6 }, 0.18);
-  if (!push) return;
-  if (push.dx > 0) shiftPlayer(4.9 - 0.18 - head.x, 0, 0);
-  else shiftPlayer(push.dx, 0, push.dz);
+  const shaft = lift.shaft;
+  const inShaft = head.x > 5.02
+    && head.x < shaft.x1 - 0.08
+    && head.z > shaft.z0 - 0.05
+    && head.z < shaft.z1 + 0.05;
+  if (!inShaft) return;
+  shiftPlayer(4.45 - head.x, -xrOffset.y, START_CELL.spawnZ - head.z);
 }
 
 function updateLift(dt) {
   const lift = world.lift;
   if (!lift) return;
-  const inside = inLiftCar();
-  if (inside) ridingLift = true;
-  const dy = lift.update(dt);
-  if (dy && ridingLift && renderer.xr.isPresenting) {
-    shiftPlayer(0, dy, 0);
-    fallVy = 0;
-    if (lift.moving) {
-      const head = headSample();
-      const box = lift.carBox;
-      const margin = 0.2;
-      let pushX = 0;
-      let pushZ = 0;
-      if (head.x < box.x0 + margin) pushX = box.x0 + margin - head.x;
-      if (head.x > box.x1 - margin) pushX = box.x1 - margin - head.x;
-      if (head.z < box.z0 + margin) pushZ = box.z0 + margin - head.z;
-      if (head.z > box.z1 - margin) pushZ = box.z1 - margin - head.z;
-      if (pushX || pushZ) shiftPlayer(pushX, 0, pushZ);
-    }
-  }
-  if (!lift.moving && !inside) ridingLift = false;
-  liftFeel.update(dt, ridingLift || inside, renderer.xr.isPresenting);
   guardLiftDoor();
+  const dy = lift.update(dt);
+  if (dy) fallVy = 0;
+  ridingLift = false;
+  liftFeel.update(dt, false, renderer.xr.isPresenting);
 }
 
 function updatePlayerFall(dt) {
   if (watching || biteHold || aboard || !renderer.xr.isPresenting || !xrFrame) return;
-  if (climb?.hand || boatGrip) {
+  if (climb?.hand || boatGrip || glide.flying) {
     fallVy = 0;
     return;
   }
@@ -3252,9 +3227,7 @@ function onXrTrigger(controller) {
   }
   const hit = hitFromController(controller);
   if (hit?.owner?.userData.type === 'lift') {
-    if (hit.owner.userData.role === 'open') world.lift.openDoor();
-    else world.lift.go(inLiftCar());
-    pulseController(controller, 0.4, 30);
+    setStatus('The elevator is shut.');
     return;
   }
   if (hit?.owner?.userData.action === 'peg') {
@@ -3278,6 +3251,149 @@ function onXrTrigger(controller) {
   if (hit?.owner?.userData.type === 'ui') activateUi(hit.owner);
 }
 
+function gliderHand(controller) {
+  return world.glider.grips.some((grip) => grip.userData.heldBy === controller);
+}
+
+function gripGlider(controller) {
+  if (aboard || climb?.hand || biteHold || glide.flying) return false;
+  if (gliderHand(controller)) return true;
+  const points = handPoints(controller);
+  let best = null;
+  let bestDist = 0.2;
+  for (const grip of world.glider.grips) {
+    if (grip.userData.heldBy) continue;
+    grip.getWorldPosition(worldPoint);
+    for (const point of points) {
+      const dist = worldPoint.distanceTo(point);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = grip;
+      }
+    }
+  }
+  if (!best) return false;
+  best.userData.heldBy = controller;
+  pulseController(controller, 0.45, 28);
+  const both = world.glider.grips.every((grip) => grip.userData.heldBy);
+  if (both) launchGlider();
+  else setStatus('Both hands on the bar.');
+  return true;
+}
+
+function gliderFrame() {
+  let left = null;
+  let right = null;
+  for (const grip of world.glider.grips) {
+    if (grip.userData.side < 0) left = grip.userData.heldBy;
+    else right = grip.userData.heldBy;
+  }
+  if (!left || !right || !renderer.xr.isPresenting || !xrFrame) return null;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return null;
+  left.getWorldPosition(handPoint);
+  const leftAt = handPoint.clone();
+  right.getWorldPosition(worldPoint);
+  return barFrame(leftAt, worldPoint, pose.transform.position, glide.nose);
+}
+
+function launchGlider() {
+  const frame = gliderFrame();
+  glide.flying = true;
+  glide.loose = false;
+  glide.airborne = false;
+  if (frame) glide.nose.copy(frame.nose);
+  const flat = Math.hypot(glide.nose.x, glide.nose.z) || 1;
+  glide.v.set((glide.nose.x / flat) * 4.5, 0, (glide.nose.z / flat) * 4.5);
+  setStatus('In the air.');
+  pulseBoth(0.55, 45);
+}
+
+function settleGlider(x, ground, z) {
+  const wing = world.glider.group;
+  wing.position.set(x, ground + 1.12, z);
+  wing.rotation.set(0, Math.atan2(-glide.nose.z, glide.nose.x), 0);
+}
+
+function releaseGlider(controller) {
+  if (!gliderHand(controller)) return false;
+  const wasFlying = glide.flying;
+  for (const grip of world.glider.grips) grip.userData.heldBy = null;
+  glide.flying = false;
+  if (wasFlying && glide.airborne) {
+    glide.loose = true;
+    fallVy = Math.min(glide.v.y, -0.5);
+    setStatus('You let go.');
+  } else {
+    glide.v.set(0, 0, 0);
+    if (!wasFlying) setStatus('');
+  }
+  return true;
+}
+
+function updateGlider(dt) {
+  const wing = world.glider;
+  if (glide.flying) {
+    const frame = gliderFrame();
+    if (!frame) return;
+    glide.nose.copy(frame.nose);
+    glide.up.copy(frame.wingUp);
+    stepGlide(glide.v, glide.nose, glide.up, dt);
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = ref && xrFrame.getViewerPose(ref);
+    const head = pose?.transform.position;
+    if (!head) return;
+    const feet = xrOffset.y;
+    const ground = groundUnder(head.x, head.z, feet);
+    if (feet - ground > 1) glide.airborne = true;
+    const nextFeet = feet + glide.v.y * dt;
+    if (!glide.airborne && glide.v.y < 0 && nextFeet < ground + 0.04) {
+      glide.v.y = 0;
+      shiftPlayer(glide.v.x * dt, Math.max(0, ground + 0.02 - feet), glide.v.z * dt);
+      const placed = gliderFrame();
+      if (placed) {
+        wing.group.position.copy(placed.mid);
+        wing.aim(wing.group.quaternion, placed.nose, placed.wingUp);
+      }
+      return;
+    }
+    if (glide.airborne && glide.v.y < 0 && nextFeet <= ground + 0.08) {
+      for (const grip of wing.grips) grip.userData.heldBy = null;
+      glide.flying = false;
+      if (ground === WATER_Y) {
+        glide.loose = true;
+        startWaterBite(head.x, head.z);
+        return;
+      }
+      shiftPlayer(glide.v.x * dt, ground - feet, glide.v.z * dt);
+      glide.v.set(0, 0, 0);
+      settleGlider(head.x, ground, head.z);
+      setStatus('Down.');
+      return;
+    }
+    shiftPlayer(glide.v.x * dt, glide.v.y * dt, glide.v.z * dt);
+    const placed = gliderFrame();
+    if (placed) {
+      wing.group.position.copy(placed.mid);
+      wing.aim(wing.group.quaternion, placed.nose, placed.wingUp);
+      glide.nose.copy(placed.nose);
+    }
+    return;
+  }
+  if (!glide.loose) return;
+  glide.v.y = Math.max(-8, glide.v.y - 6 * dt);
+  glide.v.x *= Math.max(0, 1 - dt * 0.35);
+  glide.v.z *= Math.max(0, 1 - dt * 0.35);
+  wing.group.position.addScaledVector(glide.v, dt);
+  const ground = groundUnder(wing.group.position.x, wing.group.position.z, wing.group.position.y);
+  if (wing.group.position.y <= ground + 1.12) {
+    settleGlider(wing.group.position.x, ground, wing.group.position.z);
+    glide.v.set(0, 0, 0);
+    glide.loose = false;
+  }
+}
+
 function onXrSqueeze(controller) {
   if (watching) return;
   if (held && heldFrom === controller) return;
@@ -3299,6 +3415,7 @@ function onXrSqueeze(controller) {
     return;
   }
   if (gripBoatEnd(controller)) return;
+  if (gripGlider(controller)) return;
   const near = rungFromController(controller);
   if (near) {
     attachClimb(controller, near);
@@ -3331,6 +3448,7 @@ function piecePoint() {
 }
 
 function onXrRelease(controller) {
+  if (releaseGlider(controller)) return;
   if (world.gear.releaseDraw(controller)) return;
   world.canoe.release?.(controller);
   if (boatGrip?.controller === controller) boatGrip = null;
@@ -3407,7 +3525,7 @@ function pollMove(dt) {
           if (!tryStickExit(stick.x, stick.z)) setStatus('No footing that way. Row closer to the shelf or the shallows.');
         }
       } else if (stick.mag < 0.3) stickExit = 0;
-    } else if (stick.mag > 0 && !climb && !(ridingLift && world.lift?.moving)) {
+    } else if (stick.mag > 0 && !climb && !glide.flying && !(ridingLift && world.lift?.moving)) {
       const feet = xrOffset.y;
       const dx = stick.x * MOVE_SPEED * dt;
       const dz = stick.z * MOVE_SPEED * dt;
@@ -3425,7 +3543,7 @@ function pollMove(dt) {
 }
 
 function pollGazeLock() {
-  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || world.canoe.anyOar?.() || world.gear.drawing()) {
+  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || glide.flying || world.canoe.anyOar?.() || world.gear.drawing()) {
     gazeLock = null;
     return;
   }
@@ -3457,7 +3575,7 @@ function pollGazeLock() {
 }
 
 function pollTeleport(controller) {
-  if (!TELEPORT) return;
+  if (!TELEPORT || glide.flying) return;
   const pressed = !!controller.userData.inputSource?.gamepad?.buttons?.[4]?.pressed;
   if (pressed && !controller.userData.teleportLatch) {
     controller.userData.teleportLatch = true;
@@ -4049,6 +4167,25 @@ function notePerf(time) {
   }
 }
 
+function sampleGripMotion(item) {
+  if (!item?.userData.carried || !renderer.xr.isPresenting || !xrFrame) return { held: false };
+  const source = item.parent?.userData?.inputSource;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = source?.gripSpace && ref ? xrFrame.getPose(source.gripSpace, ref) : null;
+  const lv = pose?.linearVelocity;
+  const av = pose?.angularVelocity;
+  if (!lv) return { held: true };
+  return {
+    held: true,
+    v: { x: lv.x, y: lv.y, z: lv.z },
+    w: av ? { x: av.x, y: av.y, z: av.z } : { x: 0, y: 0, z: 0 },
+  };
+}
+
+function sampleStickMotion() {
+  return sampleGripMotion(world.hockey?.stick);
+}
+
 function frame(time, frame) {
   xrFrame = frame ?? null;
   placeInCell();
@@ -4065,6 +4202,51 @@ function frame(time, frame) {
   world.challenge.update(dt);
   world.canoe.setAboard?.(aboard);
   world.update(dt);
+  if (world.hockey) {
+    const events = world.hockey.update(dt, {
+      colliders: walker.colliders,
+      groundUnder,
+      waterY: WATER_Y,
+      motion: sampleStickMotion(),
+    });
+    const hand = world.hockey.stick.userData.carried ? world.hockey.stick.parent : null;
+    for (const event of events) {
+      if (event.type === 'strike') {
+        sfx.play(['hit_wood', 'hit_wood2'], { at: event.at, gain: Math.min(1, 0.35 + event.speed / 22), rate: 1.2 });
+        pulseController(hand, Math.min(1, 0.4 + event.speed / 24), 30);
+      } else if (event.type === 'turf') {
+        sfx.play(event.kill > 0.55 ? 'hit_plank' : 'hit_soft', { at: event.at, gain: Math.min(0.85, 0.3 + event.kill), rate: 0.72 });
+        pulseController(hand, Math.min(1, 0.35 + event.kill), 45);
+      } else if (event.type === 'push') {
+        sfx.play('hit_soft', { at: event.at, gain: 0.2, rate: 1.45 });
+      } else if (event.type === 'bounce') {
+        sfx.play('hit_soft', { at: event.at, gain: Math.min(0.4, event.speed / 20) });
+      } else if (event.type === 'goal') {
+        sfx.play('hit_plank', { at: event.at, gain: 0.65 });
+        setStatus('Goal.');
+      }
+    }
+  }
+  if (world.golf) {
+    const events = world.golf.update(dt, {
+      colliders: walker.colliders,
+      groundUnder,
+      waterY: WATER_Y,
+      motion: sampleGripMotion(world.golf.club),
+    });
+    const hand = world.golf.club.userData.carried ? world.golf.club.parent : null;
+    for (const event of events) {
+      if (event.type === 'strike') {
+        sfx.play(['hit_wood', 'hit_wood2'], { at: event.at, gain: Math.min(1, 0.4 + event.speed / 28), rate: 1.55 });
+        pulseController(hand, Math.min(1, 0.45 + event.speed / 30), 22);
+      } else if (event.type === 'turf') {
+        sfx.play('hit_soft', { at: event.at, gain: Math.min(0.7, 0.25 + event.kill), rate: 0.9 });
+        pulseController(hand, Math.min(1, 0.3 + event.kill), 36);
+      } else if (event.type === 'push') {
+        sfx.play('hit_soft', { at: event.at, gain: 0.16, rate: 1.6 });
+      }
+    }
+  }
   sfx.update(dt, {
     camera: renderer.xr.isPresenting ? renderer.xr.getCamera() : camera,
     zone: world.zones?.current ?? null,
@@ -4102,6 +4284,7 @@ function frame(time, frame) {
     if (!renderer.xr.isPresenting) applyClimbView();
   }
   updateLift(dt);
+  updateGlider(dt);
   pollMove(dt);
   updatePlayerFall(dt);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
@@ -4114,7 +4297,7 @@ function frame(time, frame) {
         && (world.canoe.paddleMode || world.canoe.nearOar?.(handPoints(controller)))) {
         gripOar(controller);
       }
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !world.gear.isHolding(controller)) {
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !gliderHand(controller) && !world.gear.isHolding(controller)) {
         const grabbedBoat = legacy('canoe') && gripBoatEnd(controller);
         if (!grabbedBoat) {
           const near = rungFromController(controller);

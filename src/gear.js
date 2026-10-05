@@ -78,7 +78,7 @@ function paintAxe() {
 
 function carryable(object) {
   const gear = object?.userData?.gear;
-  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush' || gear === 'spray';
+  return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush' || gear === 'spray' || gear === 'stick' || gear === 'driver';
 }
 
 export function createGear(scene, camera, targets, roof, cave, gallery, assets) {

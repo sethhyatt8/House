@@ -17,6 +17,10 @@ import { createZones } from './zones.js';
 import { createReef } from './reef.js';
 import { createForestNext, FOREST_LEGACY } from './forest.js';
 import { cliffRoute, NOTCHES } from './notches.js';
+import { createBackCrag } from './crag.js';
+import { createGlider } from './glider.js';
+import { createHockey } from './hockey.js';
+import { createGolf } from './golf.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -4330,6 +4334,15 @@ export function createWorld({ assets, renderer = null } = {}) {
   });
   const puddles = createPuddles(scene, floor, floorMap);
   const cliff = createCliff(scene, targets, assets);
+  const crag = createBackCrag({
+    scene,
+    targets,
+    rock: assets?.feature('rock') ? assets.material('rock_cliff') : null,
+    roof,
+  });
+  if (cliff.notches) cliff.notches.routes.push({ ladder: crag.ladder });
+  else cliff.notches = { routes: [{ ladder: crag.ladder }], shelf: null, step: null };
+  const glider = createGlider(scene);
   const reef = createReef(scene, { assets, waterY: WATER_Y, rocks: SEA_OUTCROPS });
   function shallowFloor(x, z) {
     const shelf = cliff.cave.shallows;
@@ -4486,6 +4499,8 @@ export function createWorld({ assets, renderer = null } = {}) {
   const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
+  const hockey = createHockey(scene, targets);
+  const golf = createGolf(scene, targets);
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   if (croc) gear.setCroc(croc);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
@@ -4531,6 +4546,8 @@ export function createWorld({ assets, renderer = null } = {}) {
       finds.update();
     },
     gear,
+    hockey,
+    golf,
     yard,
     crates,
     canoe,
@@ -4540,6 +4557,8 @@ export function createWorld({ assets, renderer = null } = {}) {
     cave: cliff.cave,
     shaft: cliff.shaft,
     notches: cliff.notches,
+    crag,
+    glider,
     gallery: cliff.gallery,
     splash: cliff.splash,
     ripple: cliff.ripple,

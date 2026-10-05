@@ -4,7 +4,7 @@
 // - Smooth left-stick locomotion (head-relative) and right-stick snap turn (or smooth turn), with collisions:
 //   you can't walk through walls, door boards, the closed lift gate or tall crate stacks, can't walk off a ledge
 //   (cliff, roof edge, the yard rim, the shaft) and can't walk into deep water. Step-ups up to 0.42 m (crates, sills)
-//   are fine. Physical (room-scale) walking is not blocked, same as before.
+//   are fine. Room-scale walking is pushed back out of the same walls (main.js containPlayer).
 // - The ground model (groundUnder / standHeight) moved here from main.js unchanged, so the game and the headless
 //   reachability test use exactly the same rules.
 import * as THREE from 'three';
@@ -45,8 +45,18 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
   }
 
   function groundUnder(x, z, feetY) {
+    const green = world.golf?.green;
+    if (green && feetY > 8 && x >= green.x0 && x <= green.x1 && z >= green.z0 && z <= green.z1 && feetY >= green.y - 0.9) {
+      return green.y;
+    }
+    const crag = world.crag;
+    if (crag && feetY > 8) {
+      const deck = crag.deckAt(x, z);
+      if (deck != null && feetY >= deck - 0.9) return deck;
+    }
     const overRoof = x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1;
-    if (overRoof && feetY >= roof.y - 0.25) return standHeight(x, z, feetY, roof.y);
+    // the slab has thickness; standing in it or on it stays on top instead of dropping through to the floor
+    if (overRoof && feetY >= roof.y - 0.9) return standHeight(x, z, feetY, roof.y);
     const cave = world.cave;
     if (cave && feetY < -1 && x >= cave.x0 && x <= cave.x1 && z >= cave.z0 && z <= cave.z1) return cave.floor;
     const pad = cave?.pad;
@@ -62,6 +72,7 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
     const overFloor = x >= cliffX + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1;
     const cell = startCell.floor;
     const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
+    if (inCell && feetY >= startCell.ceiling - 0.35) return startCell.ceiling;
     // rowing pass: only from above (feet > -1). The room box overhangs the cave mouth by 9 cm (x -1.74..-1.65), and
     // standing there in the cave used to read as the room floor 7.9 m up (landShift lifted you onto it).
     if ((overFloor || inCell) && feetY > -1) return standHeight(x, z, feetY, 0);
@@ -85,7 +96,41 @@ function staticColliders({ world, startCell, cliffX, roof }) {
   for (const b of startCell.blocks) list.push({ ...b, y0: -0.1, y1: 3.1, why: 'cell wall' });
   // room north wall (rock, 0.7 thick)
   list.push({ x0: cliffX - 0.4, x1: roof.roomX1 + 0.65, z0: roof.roomZ0 - 0.55, z1: roof.roomZ0 - 0.0, y0: -0.1, y1: 2.7, why: 'room wall' });
+  for (const post of world.hockey?.posts || []) list.push(post);
+  // rock chunks standing in the room
+  list.push({ x0: 0.6, x1: 1.7, z0: -2.55, z1: -1.75, y0: 0, y1: 1.16, why: 'room wall' });
+  list.push({ x0: 1.8, x1: 2.5, z0: 0.9, z1: 2.2, y0: 0, y1: 0.85, why: 'room wall' });
+  const lift = world.lift;
+  if (lift?.shaft) {
+    const back = startCell.back;
+    // the gate and the whole shaft. The car is not a room you can enter.
+    list.push({
+      x0: back.gateX - 0.28,
+      x1: lift.shaft.x1,
+      z0: Math.min(back.z0, lift.shaft.z0),
+      z1: Math.max(back.z1, lift.shaft.z1),
+      y0: -16,
+      y1: 2.6,
+      why: 'lift shaft',
+    });
+  }
   for (const w of world.lift?.colliders || []) list.push({ ...w, why: 'lift wall' });
+  for (const block of world.crag?.colliders || []) list.push(block);
+  const cave = world.cave;
+  if (cave) {
+    const y0 = cave.floor - 0.2;
+    const y1 = -2.9;
+    // rock outside the walkable cave. Kept off the west mouth and the cliff shelf.
+    list.push({ x0: -1.05, x1: cave.x1 + 0.8, z0: cave.z0 - 0.55, z1: cave.z0 - 0.12, y0, y1, why: 'cave wall' });
+    list.push({ x0: -1.05, x1: cave.x1 + 0.8, z0: cave.z1 + 0.35, z1: cave.z1 + 0.9, y0, y1, why: 'cave wall' });
+    const tunnel = cave.tunnel;
+    if (tunnel) {
+      list.push({ x0: cave.x1 - 0.02, x1: cave.x1 + 0.7, z0: cave.z0, z1: tunnel.z0, y0, y1, why: 'cave wall' });
+      list.push({ x0: cave.x1 - 0.02, x1: cave.x1 + 0.7, z0: tunnel.z1, z1: cave.z1, y0, y1, why: 'cave wall' });
+    } else {
+      list.push({ x0: cave.x1 - 0.02, x1: cave.x1 + 0.7, z0: cave.z0, z1: cave.z1, y0, y1, why: 'cave wall' });
+    }
+  }
   return list;
 }
 
@@ -110,11 +155,8 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
     const lift = world.lift;
     if (lift) {
       const back = startCell.back;
-      const here = !lift.moving && Math.abs(lift.floorY) < 0.08;
-      if (!(here && lift.doorOpen > 0.65)) {
-        box.x0 = back.gateX - 0.12; box.x1 = lift.shaft.x0 + 0.05; box.z0 = back.z0; box.z1 = back.z1; box.y0 = -0.1; box.y1 = 2.0;
-        if (hitsBox(box, x, z, feet, r)) return 'lift gate';
-      }
+      box.x0 = back.gateX - 0.2; box.x1 = lift.shaft.x0 + 0.08; box.z0 = back.z0; box.z1 = back.z1; box.y0 = -0.2; box.y1 = 2.4;
+      if (hitsBox(box, x, z, feet, r)) return 'lift gate';
       for (const stop of (lift.stops || []).slice(1)) {
         const atStop = !lift.moving && Math.abs(lift.floorY - stop) < 0.05;
         if (atStop) continue;
@@ -184,7 +226,38 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
     return { x: cx, z: cz, ground: f, blocked };
   }
 
-  return { walkable, move, colliders, isWater };
+  // Boxes room-scale walking has to be pushed out of. Same walls the stick uses.
+  function solids(feet) {
+    const out = [];
+    for (const c of colliders) {
+      if (feet + 1.7 < c.y0 || feet + 0.3 > c.y1) continue;
+      out.push(c);
+    }
+    for (const board of world.gear?.doorBoards || []) {
+      if (board.userData.dead) continue;
+      out.push({
+        x0: board.position.x - board.userData.hx,
+        x1: board.position.x + board.userData.hx,
+        z0: board.position.z - board.userData.hz,
+        z1: board.position.z + board.userData.hz,
+      });
+    }
+    for (const crate of world.crates || []) {
+      if (crate.userData.dead || crate.userData.role === 'held') continue;
+      const top = crate.position.y + crate.userData.hy;
+      const bottom = crate.position.y - crate.userData.hy;
+      if (top <= feet + STEP_UP || bottom > feet + 1.7) continue;
+      out.push({
+        x0: crate.position.x - crate.userData.hx,
+        x1: crate.position.x + crate.userData.hx,
+        z0: crate.position.z - crate.userData.hz,
+        z1: crate.position.z + crate.userData.hz,
+      });
+    }
+    return out;
+  }
+
+  return { walkable, move, colliders, solids, isWater };
 }
 
 // Head-relative stick vector -> world (dx, dz) per second.
