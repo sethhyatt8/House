@@ -19,7 +19,6 @@ import { createForestNext, FOREST_LEGACY } from './forest.js';
 import { cliffRoute, NOTCHES } from './notches.js';
 import { createBackCrag } from './crag.js';
 import { createGlider } from './glider.js';
-import { createHockey } from './hockey.js';
 import { createGolf } from './golf.js';
 
 const TABLE_TOP = 0.76;
@@ -4499,7 +4498,6 @@ export function createWorld({ assets, renderer = null } = {}) {
   const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
-  const hockey = createHockey(scene, targets);
   const golf = createGolf(scene, targets);
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   if (croc) gear.setCroc(croc);
@@ -4546,7 +4544,6 @@ export function createWorld({ assets, renderer = null } = {}) {
       finds.update();
     },
     gear,
-    hockey,
     golf,
     yard,
     crates,

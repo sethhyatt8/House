@@ -1,4 +1,4 @@
-// Eloise's room: the main hall. A field-hockey stick, an FIH ball, and two goals.
+// Field hockey for Eloise's room. Not placed in the main hall; that room is the way through the house.
 // The ball solver lives in hockeyball.js (spin, bounce, strike, push pass).
 import * as THREE from 'three';
 import { BALL_R, createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
