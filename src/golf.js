@@ -8,19 +8,36 @@ const LOFT = 12 * Math.PI / 180;
 const COS = Math.cos(LOFT);
 const SIN = Math.sin(LOFT);
 const HEAD_Y = -1.02;
-const PLATE = 0.05;
+// The face plate, in the head's own space, before the loft tilt. Wide and flat, on the front of the head.
+const PLATE_AT = new THREE.Vector3(0.062, -0.012, 0.02);
+const PLATE_W = 0.108;
+const PLATE_H = 0.058;
 
 export const GREEN = { x0: -0.62, x1: 0.72, z0: -0.42, z1: 0.42, y: 11.36 };
 const TEE = { x: -0.42, z: 0.02 };
 const TEE_H = 0.042;
 
-const FACE_LOCAL = new THREE.Vector3(PLATE * COS, HEAD_Y + PLATE * SIN, 0);
+const zAxis = new THREE.Vector3(0, 0, 1);
+const FACE_LOCAL = PLATE_AT.clone().applyAxisAngle(zAxis, LOFT).add(new THREE.Vector3(0, HEAD_Y, 0));
 const FACE_N = new THREE.Vector3(COS, SIN, 0);
 const FACE_TOE = new THREE.Vector3(0, 0, 1);
 const FACE_UP = new THREE.Vector3(-SIN, COS, 0);
 const SHAFT_A = new THREE.Vector3(0, -0.04, 0);
-const SHAFT_B = new THREE.Vector3(0, -0.94, 0);
-const SOLE = [-0.04, 0, 0.04].map((z) => new THREE.Vector3(0.032 * SIN, HEAD_Y - 0.032 * COS, z));
+const SHAFT_B = new THREE.Vector3(0, HEAD_Y + 0.02, 0);
+const SOLE = [-0.03, 0.02, 0.07].map((z) => {
+  const p = new THREE.Vector3(0.02, -0.032, z).applyAxisAngle(zAxis, LOFT);
+  p.y += HEAD_Y;
+  return p;
+});
+
+// One hand: point the controller and the shaft follows. The top of that controller is the face.
+const HOLD_QUAT = new THREE.Quaternion().setFromRotationMatrix(
+  new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(1, 0, 0),
+  ),
+);
 
 const TRAIL_N = 48;
 
@@ -133,29 +150,57 @@ export function createGolf(scene, targets) {
   const gripMat = new THREE.MeshStandardMaterial({ color: 0x1a1c1e, roughness: 0.82 });
   const headMat = new THREE.MeshStandardMaterial({ color: 0x16181c, roughness: 0.32, metalness: 0.62 });
   const faceMat = new THREE.MeshStandardMaterial({ map: faceTexture(), color: 0xffffff, roughness: 0.42, metalness: 0.12 });
-  const soleMat = new THREE.MeshStandardMaterial({ color: 0xc6a25a, roughness: 0.38, metalness: 0.55 });
 
   const club = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.009, 0.86, 8), shaftMat);
-  shaft.position.y = -0.5;
+  const shaftLen = -HEAD_Y - 0.24;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.0045, shaftLen, 10), shaftMat);
+  shaft.position.y = -0.26 - shaftLen / 2;
   club.add(shaft);
-  const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.013, 0.28, 8), gripMat);
-  wrap.position.y = -0.16;
+  const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.0145, 0.3, 12), gripMat);
+  wrap.position.y = -0.15;
   club.add(wrap);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.018, 12, 8), gripMat);
+  cap.position.y = 0.012;
+  club.add(cap);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x3a342c, roughness: 0.7 });
+  [-0.06, -0.22].forEach((y) => {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.0025, 6, 14), ringMat);
+    ring.position.y = y;
+    ring.rotation.x = Math.PI / 2;
+    club.add(ring);
+  });
   const head = new THREE.Group();
   head.position.set(0, HEAD_Y, 0);
   head.rotation.z = LOFT;
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.048, 16, 12), headMat);
-  body.scale.set(1.15, 0.72, 1.25);
+  const hosel = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.01, 0.08, 8), shaftMat);
+  hosel.position.set(0.01, 0.01, -0.02);
+  hosel.rotation.z = 0.4;
+  hosel.rotation.x = 0.5;
+  head.add(hosel);
+  const crown = new THREE.Shape();
+  crown.moveTo(0.07, -0.04);
+  crown.lineTo(0.07, 0.07);
+  crown.quadraticCurveTo(0.055, 0.1, 0.01, 0.09);
+  crown.quadraticCurveTo(-0.035, 0.05, -0.02, 0.0);
+  crown.quadraticCurveTo(-0.03, -0.045, 0.015, -0.05);
+  crown.quadraticCurveTo(0.05, -0.05, 0.07, -0.04);
+  const crownGeo = new THREE.ExtrudeGeometry(crown, {
+    depth: 0.048,
+    bevelEnabled: true,
+    bevelThickness: 0.008,
+    bevelSize: 0.007,
+    bevelSegments: 2,
+    curveSegments: 10,
+  });
+  crownGeo.translate(0, 0, -0.024);
+  crownGeo.rotateX(Math.PI / 2);
+  const body = new THREE.Mesh(crownGeo, headMat);
   head.add(body);
-  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.038, 0.078), faceMat);
-  plate.position.set(0.03, 0.004, 0);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.012, PLATE_H, PLATE_W), faceMat);
+  plate.position.copy(PLATE_AT);
   head.add(plate);
-  const solePlate = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.01, 0.072), soleMat);
-  solePlate.position.set(-0.004, -0.02, 0);
-  head.add(solePlate);
   club.add(head);
-  club.position.set(-0.38, green.y + 0.07, 0.24);
+  club.position.set(-0.38, green.y + 0.08, 0.24);
   club.rotation.z = Math.PI / 2;
   club.traverse((child) => {
     if (child.isMesh) {
@@ -166,11 +211,12 @@ export function createGolf(scene, targets) {
   club.userData = {
     type: 'gear',
     gear: 'driver',
-    floorY: green.y + 0.07,
+    floorY: green.y + 0.08,
     holdPos: new THREE.Vector3(0, -0.02, -0.03),
-    holdRot: new THREE.Euler(1.0, 0, 0),
+    holdRot: new THREE.Euler().setFromQuaternion(HOLD_QUAT),
     restRot: club.rotation.clone(),
     carried: false,
+    offHand: null,
   };
   scene.add(club);
   targets.push(club);
@@ -197,8 +243,8 @@ export function createGolf(scene, targets) {
     n: { x: 1, y: 0, z: 0 },
     toe: { x: 0, y: 0, z: 1 },
     up: { x: 0, y: 1, z: 0 },
-    halfToe: 0.046,
-    halfUp: 0.022,
+    halfToe: PLATE_W / 2 + 0.006,
+    halfUp: PLATE_H / 2 + 0.004,
     v: { x: 0, y: 0, z: 0 },
     w: { x: 0, y: 0, z: 0 },
     sweep: 0,
@@ -222,7 +268,17 @@ export function createGolf(scene, targets) {
   const catchQ = new THREE.Quaternion();
   const worldQ = new THREE.Quaternion();
   const parentQ = new THREE.Quaternion();
-  const holdQuat = new THREE.Quaternion().setFromEuler(club.userData.holdRot);
+  const holdQuat = HOLD_QUAT.clone();
+  const leadPos = new THREE.Vector3();
+  const offPos = new THREE.Vector3();
+  const leadQ = new THREE.Quaternion();
+  const shaftDir = new THREE.Vector3();
+  const faceDir = new THREE.Vector3();
+  const yAxis = new THREE.Vector3();
+  const toeAxis = new THREE.Vector3();
+  const aimBasis = new THREE.Matrix4();
+  const aimWorld = new THREE.Quaternion();
+  let twoHand = false;
   const side = new THREE.Vector3();
   let havePrev = false;
   let pushArmed = true;
@@ -286,13 +342,48 @@ export function createGolf(scene, targets) {
     return worst;
   }
 
+  // Both fists on the grip: the shaft runs from the top hand through the lower hand.
+  // The tops of the two controllers roll the face.
+  function aimHands() {
+    const lead = club.parent;
+    const off = club.userData.offHand;
+    if (!club.userData.carried || !lead || !off || off === lead) return false;
+    lead.getWorldPosition(leadPos);
+    off.getWorldPosition(offPos);
+    shaftDir.copy(offPos).sub(leadPos);
+    if (shaftDir.lengthSq() < 0.0036) return false;
+    shaftDir.normalize();
+    lead.getWorldQuaternion(leadQ);
+    faceDir.set(0, 1, 0).applyQuaternion(leadQ);
+    off.getWorldQuaternion(leadQ);
+    worldA.set(0, 1, 0).applyQuaternion(leadQ);
+    faceDir.add(worldA);
+    faceDir.addScaledVector(shaftDir, -faceDir.dot(shaftDir));
+    if (faceDir.lengthSq() < 1e-6) return false;
+    faceDir.normalize();
+    yAxis.copy(shaftDir).negate();
+    toeAxis.crossVectors(faceDir, yAxis);
+    if (toeAxis.lengthSq() < 1e-8) return false;
+    toeAxis.normalize();
+    yAxis.crossVectors(toeAxis, faceDir).normalize();
+    aimWorld.setFromRotationMatrix(aimBasis.makeBasis(faceDir, yAxis, toeAxis));
+    lead.getWorldQuaternion(parentQ).invert();
+    club.quaternion.copy(parentQ).multiply(aimWorld);
+    club.position.copy(club.userData.holdPos);
+    return true;
+  }
+
   function syncPose(dt, motion, floorAt, waterY) {
-    if (club.userData.carried) {
+    if (!club.userData.carried || club.userData.offHand === club.parent) club.userData.offHand = null;
+    const aimed = aimHands();
+    if (aimed !== twoHand) havePrev = false;
+    twoHand = aimed;
+    if (club.userData.carried && !aimed) {
       club.quaternion.copy(holdQuat);
       club.position.copy(club.userData.holdPos);
     }
     readFace();
-    if (motion?.held && motion.v) {
+    if (!aimed && motion?.held && motion.v) {
       club.getWorldPosition(gripV);
       arm.set(face.c.x - gripV.x, face.c.y - gripV.y, face.c.z - gripV.z);
       const w = motion.w || { x: 0, y: 0, z: 0 };

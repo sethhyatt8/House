@@ -3415,6 +3415,7 @@ function onXrSqueeze(controller) {
     if (!aboard) boardCanoe();
     if (gripOar(controller)) return;
   }
+  if (gripClub(controller)) return;
   if (world.gear.tryGrip(controller, handPoints(controller), aimed?.owner)) return;
   if (held) return;
   if (aboard) {
@@ -3454,7 +3455,35 @@ function piecePoint() {
   return worldPoint;
 }
 
+function gripClub(controller) {
+  const club = world.golf?.club;
+  if (!club?.userData.carried || club.parent === controller) return false;
+  if (club.userData.offHand === controller) return true;
+  if (club.userData.offHand) return false;
+  club.updateWorldMatrix(true, true);
+  const butt = new THREE.Vector3(0, 0.01, 0);
+  const low = new THREE.Vector3(0, -0.3, 0);
+  club.localToWorld(butt);
+  club.localToWorld(low);
+  const span = low.clone().sub(butt);
+  const spanLen = span.lengthSq() || 1;
+  let near = false;
+  for (const point of handPoints(controller)) {
+    const t = THREE.MathUtils.clamp(point.clone().sub(butt).dot(span) / spanLen, 0, 1);
+    if (butt.clone().addScaledVector(span, t).distanceTo(point) < 0.2) near = true;
+  }
+  if (!near) return false;
+  club.userData.offHand = controller;
+  pulseController(controller, 0.4, 24);
+  return true;
+}
+
 function onXrRelease(controller) {
+  const club = world.golf?.club;
+  if (club?.userData.offHand === controller) {
+    club.userData.offHand = null;
+    return;
+  }
   if (releaseGlider(controller)) return;
   if (world.gear.releaseDraw(controller)) return;
   world.canoe.release?.(controller);
