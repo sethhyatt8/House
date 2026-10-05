@@ -78,6 +78,10 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
     if ((overFloor || inCell) && feetY > -1) return standHeight(x, z, feetY, 0);
     const liftFloor = world.lift?.floorAt(x, z, feetY);
     if (liftFloor != null) return liftFloor;
+    const porch = world.lift?.door?.porch;
+    if (porch && x >= porch.x0 && x <= porch.x1 && z >= porch.z0 && z <= porch.z1 && feetY >= -0.4) {
+      return 0;
+    }
     const yard = world.yard;
     if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
       return standHeight(x, z, feetY, yard.y);
@@ -102,13 +106,13 @@ function staticColliders({ world, startCell, cliffX, roof }) {
   list.push({ x0: 1.8, x1: 2.5, z0: 0.9, z1: 2.2, y0: 0, y1: 0.85, why: 'room wall' });
   const lift = world.lift;
   if (lift?.shaft) {
-    const back = startCell.back;
-    // the gate and the whole shaft. The car is not a room you can enter.
+    const s = lift.shaft;
+    // the shaft only. It no longer reaches back into the start room.
     list.push({
-      x0: back.gateX - 0.28,
-      x1: lift.shaft.x1,
-      z0: Math.min(back.z0, lift.shaft.z0),
-      z1: Math.max(back.z1, lift.shaft.z1),
+      x0: s.x0 - 0.08,
+      x1: s.x1,
+      z0: s.z0,
+      z1: s.z1,
       y0: -16,
       y1: 2.6,
       why: 'lift shaft',
@@ -153,9 +157,9 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
       if (hitsBox(box, x, z, feet, r)) return 'door boards';
     }
     const lift = world.lift;
-    if (lift) {
-      const back = startCell.back;
-      box.x0 = back.gateX - 0.2; box.x1 = lift.shaft.x0 + 0.08; box.z0 = back.z0; box.z1 = back.z1; box.y0 = -0.2; box.y1 = 2.4;
+    if (lift?.door) {
+      const d = lift.door;
+      box.x0 = d.x0; box.x1 = d.x1; box.z0 = d.z0; box.z1 = d.z1; box.y0 = d.y0; box.y1 = d.y1;
       if (hitsBox(box, x, z, feet, r)) return 'lift gate';
       for (const stop of (lift.stops || []).slice(1)) {
         const atStop = !lift.moving && Math.abs(lift.floorY - stop) < 0.05;

@@ -14,10 +14,72 @@ const ACCEL = 0.7;    // m/s^2 start
 const DECEL = 0.6;    // m/s^2 braking
 const CREEP = 0.05;   // m/s minimum so the car always lands
 const JERK = 2.2;     // m/s^3, softens the start of acceleration
-// The paint-gallery tunnel (world.js createCliff -> gallery.tunnel, x 4.25..11.25, z 1.23..2.42, floor y -7.92).
-// The old lift put a room of the -7.2 floor right across it. Rooms that touch this box are skipped.
-const AVOID = [{ x0: 4.1, x1: 11.4, y0: -8.3, y1: -4.6, z0: 1.05, z1: 2.6 }];
+// The shaft used to sit on the back wall of the start room, and its -7.2 floor cut the paint-gallery tunnel
+// (x 4.25..11.25, z 1.23..2.42, floor y -7.92). The whole complex is shifted south of that tunnel.
+const SOUTH = 5.7;
+const WEST = -1.63;
 const LAMP_COUNT = 5;
+
+// A barred door across the shaft mouth, chained and locked. There is no key, so it never opens.
+function chainedDoor(scene, shaft) {
+  const iron = new THREE.MeshStandardMaterial({ color: 0x5c656e, metalness: 0.88, roughness: 0.45 });
+  const group = new THREE.Group();
+  group.name = 'lift_door';
+  const x = shaft.x0 - 0.06;
+  const z0 = shaft.z0 + 0.05;
+  const z1 = shaft.z1 - 0.05;
+  const h = 2.02;
+  const bar = (w, ht, d, px, py, pz) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, ht, d), iron);
+    mesh.position.set(px, py, pz);
+    mesh.castShadow = true;
+    group.add(mesh);
+  };
+  bar(0.05, h, 0.05, x, h / 2, z0);
+  bar(0.05, h, 0.05, x, h / 2, z1);
+  bar(0.04, 0.05, z1 - z0, x, h - 0.03, (z0 + z1) / 2);
+  bar(0.04, 0.05, z1 - z0, x, 0.06, (z0 + z1) / 2);
+  const leaves = 5;
+  for (let i = 1; i < leaves; i += 1) {
+    const z = z0 + ((z1 - z0) * i) / leaves;
+    bar(0.02, h - 0.12, 0.02, x, h / 2, z);
+  }
+  const strand = (y, sag) => {
+    const n = 8;
+    for (let i = 0; i < n; i += 1) {
+      const t = i / (n - 1);
+      const z = z0 + 0.12 + (z1 - z0 - 0.24) * t;
+      const link = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.007, 5, 8), iron);
+      link.position.set(x - 0.02, y - Math.sin(t * Math.PI) * sag, z);
+      link.rotation.y = Math.PI / 2;
+      link.castShadow = true;
+      group.add(link);
+    }
+  };
+  strand(0.78, 0.1);
+  strand(1.28, 0.08);
+  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.04), iron);
+  lock.position.set(x - 0.03, 1.02, (z0 + z1) / 2);
+  lock.castShadow = true;
+  group.add(lock);
+  const sill = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(0.2, shaft.x0 - 3.15), 0.08, (shaft.z1 - shaft.z0) + 0.4),
+    new THREE.MeshStandardMaterial({ color: 0x6e675e, roughness: 0.95 }),
+  );
+  sill.position.set((3.15 + shaft.x0) / 2, 0.04, (shaft.z0 + shaft.z1) / 2);
+  sill.receiveShadow = true;
+  scene.add(sill);
+  scene.add(group);
+  return {
+    x0: x - 0.08,
+    x1: shaft.x0 + 0.02,
+    z0: shaft.z0,
+    z1: shaft.z1,
+    y0: 0,
+    y1: h,
+    porch: { x0: 3.15, x1: shaft.x0 + 0.08, z0: shaft.z0 - 0.2, z1: shaft.z1 + 0.2 },
+  };
+}
 
 const lampUniforms = {
   uLampPos: { value: Array.from({ length: LAMP_COUNT }, () => new THREE.Vector3(0, -999, 0)) },
@@ -96,8 +158,8 @@ function worldUv(geo, tile) {
 
 export function createLift(scene, back, targets, { assets = null, addGate, rockWall = null, rockFloor = null, timber = null } = {}) {
   const stops = LIFT_STOPS;
-  const shaft = { x0: 5.18, x1: 6.58, z0: -0.52, z1: 0.76 };
-  const carBox = { x0: 5.2, x1: 6.4, z0: -0.4, z1: 0.64 };
+  const shaft = { x0: 5.18 + WEST, x1: 6.58 + WEST, z0: -0.52 + SOUTH, z1: 0.76 + SOUTH };
+  const carBox = { x0: 5.2 + WEST, x1: 6.4 + WEST, z0: -0.4 + SOUTH, z1: 0.64 + SOUTH };
   const mid = (a, b) => (a + b) / 2;
   const t = 0.1;
   const crown = 2.35;
@@ -155,10 +217,8 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     box(g, m, t, y1 - y0, z1 - z0, x, mid(y0, y1), mid(z0, z1));
   };
   const S = shaftGroup;
-  // shaft walls (same openings as the old lift: the cell gate on the west at the top, the landings on the east)
-  wallX(S, 'rock', shaft.x0 - t / 2, shaft.z0, back.z0, 0, crown);
-  wallX(S, 'rock', shaft.x0 - t / 2, back.z1, shaft.z1, 0, crown);
-  wallX(S, 'rock', shaft.x0 - t / 2, back.z0, back.z1, 2.02, crown);
+  // west face: solid below ground and above the door. The door itself is the chained gate, not a hole into the start room.
+  wallX(S, 'rock', shaft.x0 - t / 2, shaft.z0, shaft.z1, 2.02, crown);
   wallX(S, 'rock', shaft.x0 - t / 2, shaft.z0, shaft.z1, pit, 0);
   const levels = stops.slice(1).sort((a, b) => a - b);
   const east = shaft.x1 + t / 2;
@@ -185,19 +245,20 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
   });
 
   // ---- floor rooms (old layout; rooms that would cut the gallery tunnel are skipped) ----
-  const vestibule = { x0: shaft.x1, x1: 7.9, z0: shaft.z0, z1: shaft.z1 };
-  const doorX0 = 6.95;
-  const doorX1 = 7.75;
-  const clashes = (r, y) => AVOID.some((a) => r.x0 < a.x1 && r.x1 > a.x0 && r.z0 < a.z1 && r.z1 > a.z0 && y < a.y1 && y + roomH > a.y0);
+  const vestibule = { x0: shaft.x1, x1: 7.9 + WEST, z0: shaft.z0, z1: shaft.z1 };
+  const sideX0 = 6.75 + WEST;
+  const sideX1 = 9.2 + WEST;
+  const doorX0 = 6.95 + WEST;
+  const doorX1 = 7.75 + WEST;
   const lampSpots = [];
   stops.slice(1).forEach((y, i) => {
     const G = floorGroups[i + 1];
     const shells = [
       vestibule,
-      { x0: 6.75, x1: 9.2, z0: vestibule.z1, z1: vestibule.z1 + 2.35 },
-      { x0: 6.75, x1: 9.2, z0: vestibule.z0 - 2.35, z1: vestibule.z0 },
+      { x0: sideX0, x1: sideX1, z0: vestibule.z1, z1: vestibule.z1 + 2.35 },
+      { x0: sideX0, x1: sideX1, z0: vestibule.z0 - 2.35, z1: vestibule.z0 },
     ];
-    const keep = shells.map((room) => !clashes(room, y));
+    const keep = [true, true, true];
     shells.forEach((room, index) => {
       if (!keep[index]) return;
       floors.push({ x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y });
@@ -243,7 +304,7 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     box(G, 'paint', 0.08, 2.08, 0.1, shaft.x1 + 0.06, y + 1.04, shaft.z0 + 0.05, 0.5);
     box(G, 'paint', 0.08, 2.08, 0.1, shaft.x1 + 0.06, y + 1.04, shaft.z1 - 0.05, 0.5);
     box(G, 'paint', 0.08, 0.12, shaft.z1 - shaft.z0, shaft.x1 + 0.06, y + 2.08 + 0.06, mid(shaft.z0, shaft.z1), 0.5);
-    lampSpots.push({ stop: i + 1, pos: new THREE.Vector3(7.25, y + 1.78, vestibule.z1 - 0.02), yaw: Math.PI, light: new THREE.Vector3(7.25, y + 1.72, vestibule.z1 - 0.25) });
+    lampSpots.push({ stop: i + 1, pos: new THREE.Vector3(vestibule.x1 - 0.65, y + 1.78, vestibule.z1 - 0.02), yaw: Math.PI, light: new THREE.Vector3(vestibule.x1 - 0.65, y + 1.72, vestibule.z1 - 0.25) });
   });
   for (const { group, mat, geos } of buckets.values()) {
     const merged = mergeGeometries(geos, false);
@@ -271,11 +332,6 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
   const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1, 6).translate(0, 0.5, 0), M.steel);
   cable.position.set(carMid.x, 2.4, carMid.z); cable.raycast = () => {};
   scene.add(cable); // world-space, rescaled every move
-  const hinge = new THREE.Group();
-  hinge.position.set(back.gateX, 0, back.z0);
-  car.add(hinge);
-  addGate?.(hinge, back);
-  hinge.traverse((o) => { if (o.isMesh) { o.layers.set(0); o.material = M.paint; } });
   // lever (role 'go'): invisible proxy keeps the old pick box; a visual lever rotates when pulled
   const lever = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.36, 0.06), new THREE.MeshBasicMaterial({ visible: false }));
   lever.position.set(carBox.x0 + 0.14, 1.1, carBox.z1 - 0.1);
@@ -289,12 +345,7 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
   const leverStand = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.26, 0.022).translate(0, 0.13, 0), M.paint);
   leverStand.raycast = () => {};
   leverPivot.add(leverStand);
-  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.06), M.paint);
-  handle.position.set(4.58, 1.12, -0.55);
-  handle.userData.type = 'lift';
-  handle.userData.role = 'open';
-  scene.add(handle);
-  targets.push(handle);
+  const handle = new THREE.Group();
 
   // ---- lamps (emissive fixtures + material-local light) ----
   const lampFixtures = [];
@@ -366,6 +417,7 @@ export function createLift(scene, back, targets, { assets = null, addGate, rockW
     speed: 0,
     accel: 0,
     shaft,
+    door: chainedDoor(scene, shaft),
     carBox,
     floors,
     stops,

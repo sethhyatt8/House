@@ -1,14 +1,11 @@
-// Field hockey for Eloise's room. Not placed in the main hall; that room is the way through the house.
+// Field hockey for one room on the first elevator floor down. The pitch is sized to that room.
 // The ball solver lives in hockeyball.js (spin, bounce, strike, push pass).
 import * as THREE from 'three';
 import { BALL_R, createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
 
-const CX = -0.8;
-const HALF_W = 0.62;
-const GOAL_H = 2.02;
+const HALF_W = 0.55;
+const GOAL_H = 1.8;
 const POST = 0.05;
-const NORTH_Z = -1.9;
-const SOUTH_Z = 1.35;
 const FACE_LOCAL = new THREE.Vector3(0.016, -0.8, 0.02);
 const FACE_N = new THREE.Vector3(1, 0, 0);
 const FACE_TOE = new THREE.Vector3(0, 0, 1);
@@ -42,38 +39,43 @@ function woodSign(text) {
   return new THREE.MeshStandardMaterial({ map, roughness: 0.72 });
 }
 
-function addPost(posts, x, z) {
+function addPost(posts, x, z, floorY) {
   posts.push({
     x0: x - POST / 2,
     x1: x + POST / 2,
     z0: z - POST / 2,
     z1: z + POST / 2,
-    y0: 0,
-    y1: GOAL_H,
+    y0: floorY,
+    y1: floorY + GOAL_H,
     why: 'goal',
   });
 }
 
-export function createHockey(scene, targets) {
+export function createHockey(scene, targets, at) {
+  const floorY = at.y;
+  const CX = at.x;
+  const NORTH_Z = at.z - 0.55;
+  const SOUTH_Z = at.z + 0.55;
   const posts = [];
-  const northZ0 = NORTH_Z - 0.34;
-  const southZ1 = SOUTH_Z + 0.34;
-  addPost(posts, CX - HALF_W, (NORTH_Z + northZ0) / 2);
-  addPost(posts, CX + HALF_W, (NORTH_Z + northZ0) / 2);
-  addPost(posts, CX - HALF_W, (SOUTH_Z + southZ1) / 2);
-  addPost(posts, CX + HALF_W, (SOUTH_Z + southZ1) / 2);
+  const northZ0 = NORTH_Z - 0.28;
+  const southZ1 = SOUTH_Z + 0.28;
+  addPost(posts, CX - HALF_W, (NORTH_Z + northZ0) / 2, floorY);
+  addPost(posts, CX + HALF_W, (NORTH_Z + northZ0) / 2, floorY);
+  addPost(posts, CX - HALF_W, (SOUTH_Z + southZ1) / 2, floorY);
+  addPost(posts, CX + HALF_W, (SOUTH_Z + southZ1) / 2, floorY);
 
   const solids = [];
   const addBox = (x0, x1, y0, y1, z0, z1, e = 0.52, mu = 0.4) => {
     solids.push({ x0, x1, y0, y1, z0, z1, e, mu });
   };
-  addBox(CX - HALF_W, CX + HALF_W, GOAL_H - 0.04, GOAL_H + 0.02, northZ0, NORTH_Z, 0.46, 0.35);
-  addBox(CX - HALF_W, CX + HALF_W, GOAL_H - 0.04, GOAL_H + 0.02, SOUTH_Z, southZ1, 0.46, 0.35);
-  addBox(CX - HALF_W, CX + HALF_W, 0, GOAL_H, northZ0 - 0.04, northZ0, 0.2, 0.5);
-  addBox(CX - HALF_W, CX + HALF_W, 0, GOAL_H, southZ1, southZ1 + 0.04, 0.2, 0.5);
-  // the hall ceiling and the start-room ceiling, so a high ball comes back down
-  addBox(0.46, 3.25, 2.64, 3.26, -3.28, 3.28, 0.4, 0.35);
-  addBox(3.33, 4.88, 2.26, 2.42, -0.9, 1.14, 0.35, 0.4);
+  addBox(CX - HALF_W, CX + HALF_W, floorY + GOAL_H - 0.04, floorY + GOAL_H + 0.02, northZ0, NORTH_Z, 0.46, 0.35);
+  addBox(CX - HALF_W, CX + HALF_W, floorY + GOAL_H - 0.04, floorY + GOAL_H + 0.02, SOUTH_Z, southZ1, 0.46, 0.35);
+  addBox(CX - HALF_W, CX + HALF_W, floorY, floorY + GOAL_H, northZ0 - 0.04, northZ0, 0.2, 0.5);
+  addBox(CX - HALF_W, CX + HALF_W, floorY, floorY + GOAL_H, southZ1, southZ1 + 0.04, 0.2, 0.5);
+  if (at.room) {
+    const room = at.room;
+    addBox(room.x0, room.x1, floorY + 2.02, floorY + 2.2, room.z0, room.z1, 0.35, 0.4);
+  }
 
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.55 });
   const tape = new THREE.MeshStandardMaterial({ color: 0x2a241c, roughness: 0.84 });
@@ -95,16 +97,16 @@ export function createHockey(scene, targets) {
     const postH = GOAL_H;
     [-HALF_W, HALF_W].forEach((x) => {
       const mesh = new THREE.Mesh(new THREE.CylinderGeometry(POST / 2, POST / 2, postH, 8), pipe);
-      mesh.position.set(CX + x, postH / 2, (zLine + zBack) / 2);
+      mesh.position.set(CX + x, floorY + postH / 2, (zLine + zBack) / 2);
       mesh.castShadow = true;
       group.add(mesh);
     });
     const bar = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2 + POST, 0.045, POST), pipe);
-    bar.position.set(CX, GOAL_H, (zLine + zBack) / 2);
+    bar.position.set(CX, floorY + GOAL_H, (zLine + zBack) / 2);
     bar.castShadow = true;
     group.add(bar);
     const net = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2, GOAL_H), netMat);
-    net.position.set(CX, GOAL_H / 2, zBack);
+    net.position.set(CX, floorY + GOAL_H / 2, zBack);
     group.add(net);
     scene.add(group);
   }
@@ -112,7 +114,8 @@ export function createHockey(scene, targets) {
   goal(SOUTH_Z, 1);
 
   const sign = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.22, 0.03), woodSign('ELOISE'));
-  sign.position.set(CX, 1.35, NORTH_Z - 0.2);
+  sign.position.set(at.room ? at.room.x1 - 0.08 : CX, floorY + 1.15, at.z);
+  sign.rotation.y = Math.PI / 2;
   sign.castShadow = true;
   scene.add(sign);
 
@@ -140,7 +143,7 @@ export function createHockey(scene, targets) {
   const palm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.04), skin);
   grip.add(palm);
   stick.add(grip);
-  stick.position.set(1.55, 0.02, 0.2);
+  stick.position.set(CX + 0.35, floorY + 0.02, at.z + 0.2);
   stick.rotation.z = Math.PI / 2;
   stick.traverse((child) => {
     if (child.isMesh) {
@@ -172,7 +175,7 @@ export function createHockey(scene, targets) {
   ballMesh.add(seam2);
   scene.add(ballMesh);
 
-  const spawn = { x: CX, y: BALL_R, z: -0.15 };
+  const spawn = { x: CX, y: floorY + BALL_R, z: at.z };
   const ball = createBallState(spawn.x, spawn.y, spawn.z);
   const face = {
     c: { x: 0, y: 0, z: 0 },
@@ -309,7 +312,7 @@ export function createHockey(scene, targets) {
   }
 
   function inMouth(x, y) {
-    return x > CX - HALF_W + POST && x < CX + HALF_W - POST && y > BALL_R && y < GOAL_H - 0.05;
+    return x > CX - HALF_W + POST && x < CX + HALF_W - POST && y > floorY + BALL_R && y < floorY + GOAL_H - 0.05;
   }
 
   function update(dt, { colliders = [], groundUnder = null, waterY = -8, motion = null } = {}) {
@@ -318,9 +321,9 @@ export function createHockey(scene, targets) {
       if (y >= 3.05 || y < -0.8) return groundUnder(x, z, y);
       return groundUnder(x, z, 0.2);
     };
-    if (!stick.visible || stick.position.y < -5) havePrev = false;
+    if (!stick.visible || stick.position.y < -20) havePrev = false;
     else syncPose(dt, motion, floorAt, waterY);
-    const useFace = stick.visible && stick.position.y > -5;
+    const useFace = stick.visible && stick.position.y > -20;
     const boxes = colliders.length ? solids.concat(colliders) : solids;
     const events = stepBall(ball, dt, {
       face: useFace ? face : null,

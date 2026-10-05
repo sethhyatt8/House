@@ -926,15 +926,16 @@ function headSample() {
 
 function guardLiftDoor() {
   const lift = world.lift;
-  if (!lift || !renderer.xr.isPresenting || !xrFrame) return;
+  if (!lift?.shaft || !renderer.xr.isPresenting || !xrFrame) return;
   const head = headSample();
   const shaft = lift.shaft;
-  const inShaft = head.x > 5.02
+  const inShaft = head.x > shaft.x0 - 0.02
     && head.x < shaft.x1 - 0.08
-    && head.z > shaft.z0 - 0.05
-    && head.z < shaft.z1 + 0.05;
+    && head.z > shaft.z0 + 0.02
+    && head.z < shaft.z1 - 0.02;
   if (!inShaft) return;
-  shiftPlayer(4.45 - head.x, -xrOffset.y, START_CELL.spawnZ - head.z);
+  const midZ = (shaft.z0 + shaft.z1) / 2;
+  shiftPlayer(shaft.x0 - 0.75 - head.x, -xrOffset.y, midZ - head.z);
 }
 
 function updateLift(dt) {

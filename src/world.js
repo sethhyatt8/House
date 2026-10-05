@@ -20,6 +20,7 @@ import { cliffRoute, NOTCHES } from './notches.js';
 import { createBackCrag } from './crag.js';
 import { createGlider } from './glider.js';
 import { createGolf } from './golf.js';
+import { createHockey } from './hockey.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -4221,12 +4222,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   addRock(annexX1 - annexX0, annexH, annexT, (annexX0 + annexX1) / 2, annexH / 2, annexZ1 - annexT / 2);
   const back = START_CELL.back;
   const backX = annexX1 - annexT / 2;
-  const backSouth = back.z0 - annexZ0;
-  const backNorth = annexZ1 - back.z1;
-  const backLintel = annexH - back.h;
-  addRock(annexT, annexH, backSouth, backX, annexH / 2, annexZ0 + backSouth / 2);
-  addRock(annexT, annexH, backNorth, backX, annexH / 2, back.z1 + backNorth / 2);
-  addRock(annexT, backLintel, back.z1 - back.z0, backX, back.h + backLintel / 2, (back.z0 + back.z1) / 2);
+  addRock(annexT, annexH, annexZ1 - annexZ0, backX, annexH / 2, (annexZ0 + annexZ1) / 2);
   addRock(annexX1 - annexX0 + annexT, annexT, annexZ1 - annexZ0, (annexX0 + annexX1) / 2, annexH - annexT / 2, (annexZ0 + annexZ1) / 2);
   addRock(1.1, 1.15, 0.8, 1.15, 0.58, -2.15);
   addRock(0.7, 0.85, 1.3, 2.15, 0.42, 1.55);
@@ -4266,11 +4262,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ0 + liner / 2);
   addCell(cellX1 - cellX0, cellTop, liner, (cellX0 + cellX1) / 2, cellTop / 2, cellZ1 - liner / 2);
   const backLinerX = cellX1 - liner / 2;
-  const linerSouth = back.z0 - cellZ0;
-  const linerNorth = cellZ1 - back.z1;
-  addCell(liner, cellTop, linerSouth, backLinerX, cellTop / 2, cellZ0 + linerSouth / 2);
-  addCell(liner, cellTop, linerNorth, backLinerX, cellTop / 2, back.z1 + linerNorth / 2);
-  addCell(liner, Math.max(0.02, cellTop - back.h), back.z1 - back.z0, backLinerX, back.h + Math.max(0.02, cellTop - back.h) / 2, (back.z0 + back.z1) / 2);
+  addCell(liner, cellTop, cellZ1 - cellZ0, backLinerX, cellTop / 2, (cellZ0 + cellZ1) / 2);
   const liftLegacy = new URLSearchParams(location.search).get('lift') === 'legacy';
   const lift = liftLegacy
     ? addLegacyLift(scene, back, targets)
@@ -4499,6 +4491,15 @@ export function createWorld({ assets, renderer = null } = {}) {
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
   const golf = createGolf(scene, targets);
+  const eloose = lift.floors?.find((room) => Math.abs(room.y + 3.6) < 0.01 && room.z1 <= lift.shaft.z0 + 0.02);
+  const hockey = eloose
+    ? createHockey(scene, targets, {
+      x: (eloose.x0 + eloose.x1) / 2,
+      y: eloose.y,
+      z: (eloose.z0 + eloose.z1) / 2,
+      room: eloose,
+    })
+    : null;
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   if (croc) gear.setCroc(croc);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
@@ -4545,6 +4546,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     },
     gear,
     golf,
+    hockey,
     yard,
     crates,
     canoe,
