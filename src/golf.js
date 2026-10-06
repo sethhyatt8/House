@@ -120,8 +120,8 @@ function makeTrail() {
   return { mesh, pos, alpha, geo };
 }
 
-export function createGolf(scene, targets) {
-  const green = { ...GREEN };
+export function createGolf(scene, targets, deckY = GREEN.y) {
+  const green = { ...GREEN, y: deckY };
   const turf = new THREE.Mesh(
     new THREE.BoxGeometry(green.x1 - green.x0, 0.05, green.z1 - green.z0),
     new THREE.MeshStandardMaterial({ map: turfTexture(), color: 0xffffff, roughness: 0.96 }),

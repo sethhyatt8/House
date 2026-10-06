@@ -110,6 +110,26 @@ export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTo
   return { ladder, shelf, step, meshes };
 }
 
+// Same recesses and lips as the cliff route. `holds` are { y, z } in world space, on a west-facing surface.
+export function notchClimb({ scene, targets, surfaceX, holds, userData }) {
+  const ladder = new THREE.Group();
+  const rx = surfaceX + 0.22;
+  ladder.position.set(rx, 0, 0);
+  const cuts = [];
+  const lips = [];
+  const rungs = [];
+  holds.forEach(({ y, z }, index) => {
+    const zz = z + (index % 2 ? 0.13 : -0.13);
+    holdParts(cuts, lips, surfaceX - rx, y, zz, 0.11);
+    proxy(ladder, surfaceX - rx - 0.07, y, zz, rungs);
+  });
+  [mergedMesh(cuts, cutMat, 'sidenotches_cut'), mergedMesh(lips, wornMat, 'sidenotches_worn')].forEach((m) => m && ladder.add(m));
+  ladder.userData = { rungs, notches: true, ...userData };
+  scene.add(ladder);
+  targets.push(ladder);
+  return ladder;
+}
+
 // main.js: is the player on (or falling along) a notch line? Falls there are a controlled slide.
 export function nearNotches(routes, x, z) {
   for (const r of routes) {

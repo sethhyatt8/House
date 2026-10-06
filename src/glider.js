@@ -76,7 +76,7 @@ const _y = new THREE.Vector3();
 const _z = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
 
-export function createGlider(scene) {
+export function createGlider(scene, deckY = 11.5) {
   const sailMat = new THREE.MeshStandardMaterial({ color: 0xd7d0c2, roughness: 0.92, side: THREE.DoubleSide });
   const noseMat = new THREE.MeshStandardMaterial({ color: 0x8c3b34, roughness: 0.8 });
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a2e32, roughness: 0.42, metalness: 0.55 });
@@ -140,7 +140,7 @@ export function createGlider(scene) {
   });
 
   // On the walkable crown of the point, bar about chest height, nose toward the sea.
-  group.position.set(-1.35, 12.62, 0);
+  group.position.set(-1.35, deckY + 1.12, 0);
   group.rotation.y = Math.PI;
   scene.add(group);
 

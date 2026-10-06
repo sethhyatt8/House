@@ -4333,7 +4333,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   });
   if (cliff.notches) cliff.notches.routes.push({ ladder: crag.ladder });
   else cliff.notches = { routes: [{ ladder: crag.ladder }], shelf: null, step: null };
-  const glider = createGlider(scene);
+  const glider = createGlider(scene, crag.deckY);
   const reef = createReef(scene, { assets, waterY: WATER_Y, rocks: SEA_OUTCROPS });
   function shallowFloor(x, z) {
     const shelf = cliff.cave.shallows;
@@ -4490,7 +4490,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
-  const golf = createGolf(scene, targets);
+  const golf = createGolf(scene, targets, crag.deckY);
   const eloose = lift.floors?.find((room) => Math.abs(room.y + 3.6) < 0.01 && room.z1 <= lift.shaft.z0 + 0.02);
   const hockey = eloose
     ? createHockey(scene, targets, {
