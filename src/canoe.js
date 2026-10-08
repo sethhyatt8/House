@@ -20,6 +20,12 @@ export const ROW_MODE = (params.get('rowing') === 'old' || legacy('row')) ? 'old
 export const PADDLE_MODE = ROW_MODE === 'paddle';
 export const OAR_MODE = ROW_MODE === 'oars';
 const OARS_OLD_EARLY = params.get('oars') === 'old';
+// swim/boat/reef pass: rowing feel. ?rowgain= scales oar thrust (alias of ?oargain=), ?rowdrag= scales the hull's
+// forward drag (1 = a stroke coasts ~10 s). ?row=old = the ground-pass blade depth / force curve / drag.
+const ROW_OLD = OARS_OLD_EARLY || params.get('row') === 'old' || params.get('rowing') === 'old' || legacy('row');
+const pnum = (key) => { const v = Number(params.get(key)); return params.has(key) && Number.isFinite(v) && v > 0 ? v : null; };
+const ROW_GAIN = pnum('rowgain') ?? pnum('oargain') ?? 1;
+const ROW_DRAG = pnum('rowdrag') ?? 1;
 const OARS = {
   len: 2.1,                 // handle end to blade tip (the paddle.glb model stretched to oar length)
   // ground/boat pass: rings on short brackets 10 cm outside the gunwale and a 0.5 m inboard, so the two handle ends
@@ -28,11 +34,17 @@ const OARS = {
   pivot: { x: OARS_OLD_EARLY ? 0.45 : 0.55, y: 0.34, z: -0.35 },  // ring centre, boat frame (a little ahead of the seat: the hands sweep around it)
   bladeLen: 0.7,
   samples: [0.12, 0.33, 0.54], // blade sample points, metres in from the tip
-  neutralDepth: 0.08,       // where the blade centre sits when you take hold (handle height is calibrated on grab)
-  gain: Number(params.get('oargain')) || 1,
-  k: 38,                    // N per (m/s)^2 per sample (blade ~0.7 x 0.25 m, 3 samples; tuned for ~1.3 m/s cruising)
-  lin: 10,
-  maxForce: OARS_OLD_EARLY ? 380 : 600, // ground/boat pass: 380 clipped a brisk stroke, so hard and soft felt the same
+  // swim/boat/reef pass: the blade sat 8 cm deep at the grab height and was fully out 13 cm higher, i.e. the hands
+  // only had to settle ~5 cm below where they took hold for the blade to leave the water (on the headset: "barely
+  // moves"). Now it sits 18 cm deep and stays (partly) in until the hands drop ~10 cm: a deliberate recovery.
+  neutralDepth: ROW_OLD ? 0.08 : 0.18, // where the blade centre sits when you take hold (handle height is calibrated on grab)
+  wetBand: ROW_OLD ? [0.1, 0.5] : [0.12, 0.6], // wet = clamp(depth / a + b): old -5..+5 cm, new -7..+5 cm
+  gain: ROW_GAIN,
+  // force per blade sample = wet x (k |v| + lin) x v. Old: mostly quadratic (a small, slow Quest stroke gave ~1/4 of a
+  // brisk emulator stroke). New: mostly linear in blade speed (area x speed), a little quadratic so hard > soft.
+  k: ROW_OLD ? 38 : 9.5,    // N per (m/s)^2 per sample
+  lin: ROW_OLD ? 10 : 32,   // N per m/s per sample (tuned with the ~10 s glide: a headset-size stroke = ~3 m)
+  maxForce: OARS_OLD_EARLY ? 380 : (ROW_OLD ? 600 : 1000), // ground/boat pass: 380 clipped a brisk stroke, so hard and soft felt the same
   maxTorque: 300,
   feather: params.get('feather') !== '0', // ?oars=old only: wrist roll about the shaft feathers the blade (25 deg dead zone)
 };
@@ -83,6 +95,12 @@ export function createBoatSim(aboard = true) {
 function dragAccel(speed) {
   return 0.35 * speed + 0.3 * speed * Math.abs(speed);
 }
+// swim/boat/reef pass: forward glide drag, mostly quadratic with a small linear term (the old 0.35 v + 0.3 v^2 lost
+// most of the speed within ~2 s). From 0.8 m/s a hull now coasts ~10 s (to < 0.1 m/s) and ~3 m. Sideways stays at the
+// old x10 (keel: it tracks straight), yaw damping 1.8 -> 1.5/s.
+function glideDrag(speed) {
+  return ROW_DRAG * (0.13 * speed + 0.22 * speed * Math.abs(speed));
+}
 
 export function stepBoat(sim, dt, input = {}) {
   const cos = Math.cos(sim.yaw);
@@ -106,7 +124,7 @@ export function stepBoat(sim, dt, input = {}) {
     forceZ += input.push.z;
     torque += input.push.torque || 0;
   }
-  const long = dragAccel(localZ);
+  const long = ROW_OLD ? dragAccel(localZ) : glideDrag(localZ);
   const lat = dragAccel(localX) * 10;
   let ax = forceX / sim.mass - lat;
   let az = forceZ / sim.mass - long;
@@ -126,7 +144,7 @@ export function stepBoat(sim, dt, input = {}) {
   }
   sim.vx += (ax * cos + az * sin) * dt;
   sim.vz += (ax * -sin + az * cos) * dt;
-  sim.yawRate += (torque / sim.inertia - 1.8 * sim.yawRate) * dt;
+  sim.yawRate += (torque / sim.inertia - (ROW_OLD ? 1.8 : 1.5) * sim.yawRate) * dt;
   sim.yawRate = THREE.MathUtils.clamp(sim.yawRate, -1.2, 1.2);
   sim.yaw += sim.yawRate * dt;
 }
@@ -761,7 +779,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
         group.localToWorld(oaPoint);
         const prev = o.prev[i];
         const depth = surfaceAt(oaPoint.x, oaPoint.z) - oaPoint.y;
-        const wet = THREE.MathUtils.clamp(depth / 0.1 + 0.5, 0, 1);
+        const wet = THREE.MathUtils.clamp(depth / OARS.wetBand[0] + OARS.wetBand[1], 0, 1);
         wetSum += wet;
         if (prev && wet > 0) {
           oaVel.subVectors(oaPoint, prev).multiplyScalar(1 / dt);
@@ -787,14 +805,14 @@ export function createCanoe(scene, targets, cave, assets, water) {
       const tip = oaPoint.copy(o.end).addScaledVector(o.axis, OARS.len - 0.35);
       group.localToWorld(tip);
       if (o.wet > 0.25 && !o.wasWet) {
-        onHaptic?.(o.hand, 0.45, 30);
+        onHaptic?.(o.hand, ROW_OLD ? 0.45 : 0.75, ROW_OLD ? 30 : 50); // the catch
         water.ripple?.(tip.x, tip.z, 0.6);
         onSplash?.('catch', tip, Math.min(1, 0.3 + force / 180));
       } else if (o.wet < 0.08 && o.wasWet) {
         onHaptic?.(o.hand, 0.12, 12);
         onSplash?.('exit', tip, 0.3);
       } else if (o.wet > 0.25 && force > 5) {
-        onHaptic?.(o.hand, 0.05 + 0.35 * Math.min(1, force / 180), 25);
+        onHaptic?.(o.hand, ROW_OLD ? 0.05 + 0.35 * Math.min(1, force / 180) : 0.12 + 0.5 * Math.min(1, force / 220), 25); // load through the drive
       }
       if (o.wet > 0.25 !== o.wasWet) o.wasWet = o.wet > 0.25;
     }

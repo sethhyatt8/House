@@ -12,6 +12,7 @@ const FEATURE_FOR = {
   rock_cliff: 'rock',
   rock_floor: 'rock',
   sea_boulder: 'searocks',
+  sea_boulder_lod: 'searocks',
   pines: 'trees',
   forest_kit: 'trees',
   sky_backdrop: 'sky',

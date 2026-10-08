@@ -156,6 +156,11 @@ export function createUnderwater(scene, { waterY, reef = null, water = null, moo
     const geo = new THREE.PlaneGeometry(size, size, seg, seg);
     geo.rotateX(-Math.PI / 2);
     const cx = -34;
+    // contact shading round each sea outcrop (x, z, radius, strength): the sand goes dark and silty at the rock foot
+    const rockAO = Array.from({ length: 6 }, (_, i) => {
+      const r = reef?.rocks?.[i];
+      return r && new URLSearchParams(location.search).get('rockbase') !== 'old' ? new THREE.Vector4(r[0], r[1], r[2], 1) : new THREE.Vector4(0, 0, 1, 0);
+    });
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i += 1) {
       const x = pos.getX(i) + cx;
@@ -164,7 +169,7 @@ export function createUnderwater(scene, { waterY, reef = null, water = null, moo
     }
     geo.computeVertexNormals();
     const mat = new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uT: { value: 0 }, uLight: { value: lightDir }, uWaterY: { value: waterY }, uUwCaus: { value: null } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uT: { value: 0 }, uLight: { value: lightDir }, uWaterY: { value: waterY }, uUwCaus: { value: null }, uRockAO: { value: rockAO } }]),
       fog: true,
       defines: { UW_CAUSTICS: CAUSTICS ? 1 : 0 },
       vertexShader: /* glsl */`
@@ -177,7 +182,7 @@ export function createUnderwater(scene, { waterY, reef = null, water = null, moo
       fragmentShader: /* glsl */`
         #include <common>
         #include <fog_pars_fragment>
-        uniform float uT; uniform vec3 uLight; uniform float uWaterY;
+        uniform float uT; uniform vec3 uLight; uniform float uWaterY; uniform vec4 uRockAO[6];
         varying vec3 vW; varying vec3 vN;
         ${CAUSTIC_GLSL}
         float h2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -201,6 +206,13 @@ export function createUnderwater(scene, { waterY, reef = null, water = null, moo
           float depth = max(uWaterY - vW.y, 0.0);
           float lit = max(dot(n, -uLight), 0.0);
           vec3 col = sand * (vec3(0.07, 0.13, 0.15) + vec3(0.34, 0.46, 0.48) * lit * exp(-depth * 0.2));
+          float ao = 0.0;
+          for (int i = 0; i < 6; i++) {
+            float d = length(p - uRockAO[i].xy) / uRockAO[i].z;
+            ao = max(ao, uRockAO[i].w * (1.0 - smoothstep(0.75, 1.75, d + (n2(p * 1.7) - 0.5) * 0.25)));
+          }
+          col *= 1.0 - 0.55 * ao;
+          lit *= 1.0 - 0.6 * ao;
           #if UW_CAUSTICS
             float c = uwCaustic(p, uT) * exp(-depth * 0.16) * (0.6 + 0.4 * lit);
             col += vec3(0.42, 0.66, 0.68) * c * 1.35 * sand;
@@ -274,7 +286,8 @@ export function createUnderwater(scene, { waterY, reef = null, water = null, moo
         o.getMatrixAt(i, m);
         m.decompose(p, q, s);
         const r = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * 0.5 * s.x * 0.82;
-        rockColliders.push({ x: p.x, z: p.z, r, top: p.y + bb.max.y * s.y, bottom: p.y + bb.min.y * s.y });
+        const baseBottom = o.userData.baseBottom?.[i]; // world.js createSeaRockBases(): the skirt reaches the bed
+        rockColliders.push({ x: p.x, z: p.z, r, top: p.y + bb.max.y * s.y, bottom: Math.min(p.y + bb.min.y * s.y, baseBottom ?? Infinity) });
       }
     }
     if (!wreck && o.isGroup && Math.abs(o.position.x + 45.5) < 0.01 && Math.abs(o.position.z - 12.5) < 0.01) wreck = o;

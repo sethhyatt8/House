@@ -15,6 +15,7 @@ import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './w
 import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
 import { wireBear } from './bearfight.js';
+import { createMusic } from './music.js';
 import { createTopout } from './topout.js';
 import { createSfx } from './sfx.js';
 import { nearNotches } from './notches.js';
@@ -76,7 +77,7 @@ const DEFERRED = ['rock_cliff', 'rock_floor', 'boulder', 'lift_kit', 'chest', 'f
 const lazyBoot = pageParams.get('zones') !== '0';
 if (lazyBoot) assets.deferMaterials(['rock_cliff', 'rock_floor']);
 await assets.preload([
-  'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
+  'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'sea_boulder_lod', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe', 'canoe_cedar', 'paddle',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
   'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals', 'club_driver', 'hockey_stick', 'crag_kit',
@@ -1205,6 +1206,8 @@ const bearFight = world.bear && !watching ? wireBear({
   bear: world.bear, health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf,
   player: crocPlayer, head: crocHead, debug: crocDebug, tickHealth: !croc,
 }) : null;
+// swim/boat/reef pass: ominous procedural score near the overlook woods / the bear fight, quiet bed in the cave (?music=0)
+const music = !watching ? createMusic({ audio, renderer, camera, bear: world.bear, cave: world.cave }) : null;
 
 // Underwater pass: visuals (src/underwater.js), swimming + breath/air + shark scare (src/swim.js), the scuba kit on
 // the roof (src/scuba.js). ?underwater=0 removes all of it; ?swim=0 keeps the visuals and brings back the water bite.
@@ -4431,6 +4434,7 @@ function frame(time, frame) {
     health?.update(dt);
   }
   bearFight?.update(dt);
+  music?.update(dt);
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
   checkStepOut();
@@ -4537,6 +4541,7 @@ if (pageParams.get('testhooks') === '1') {
       teleportIndex,
       status: statusEl?.textContent || '',
       swim: swim?.debug?.() ?? null,
+      music: music?.state?.() ?? null,
       scuba: scuba ? { loaded: scuba.loaded, mask: scuba.has('mask'), tank: scuba.has('tank'), fins: scuba.has('fins') } : null,
     }),
     place(x, feet, z) { // move the player's feet to (x, feet, z) keeping the head offset (test setup only)
@@ -4546,6 +4551,7 @@ if (pageParams.get('testhooks') === '1') {
     },
     cameraMatrix: () => renderer.xr.getCamera().matrixWorld.toArray(),
     chopDoor() { (world.gear.doorBoards || []).forEach((b) => { b.userData.dead = true; b.visible = false; }); },
+    forceMusic(phase) { music?.force?.(phase); },
     // ground pass: what the headless ground-truth survey (ground/harness) needs
     THREE,
     renderer,

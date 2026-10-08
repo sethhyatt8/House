@@ -51,6 +51,13 @@
       "tileM": 2,
       "note": "Same layout as rock_cliff. For beach, pad and ladder courses/rungs."
     },
+    "sea_boulder_lod": {
+      "url": "models/nature/namaqualand_boulder_04_lod.glb",
+      "source": "Decimated from https://polyhaven.com/a/namaqualand_boulder_04 (scripts/ground tools: three SimplifyModifier, 2000 -> 632 tris)",
+      "license": "CC0",
+      "tris": 632,
+      "note": "Geometry only (uv kept). world.js mirrors it into the buried skirt under each sea boulder, drawn with the sea_boulder material."
+    },
     "sea_boulder": {
       "url": "models/nature/namaqualand_boulder_04.glb",
       "source": "https://polyhaven.com/a/namaqualand_boulder_04",

@@ -6,9 +6,11 @@
   if (H.world.croc) H.world.croc.update = () => {}; // keep the croc out of the measurements
   const r = H.renderer; const cam = H.world.camera;
   if (!window.__RENDER) r.render = () => { r.xr.updateCamera(cam); }; // physics only: skip drawing (swiftshader is ~1 fps)
+  window.__vt = performance.now();
   T.q = []; T.onFrame = []; T.nFrame = 0;
   H.setFrameHook(() => {
     T.nFrame += 1;
+    if (window.__vt != null) window.__vt += 1000 / 72; // virtual clock: every XR frame is exactly 1/72 s of game time
     for (const h of T.onFrame.slice()) { try { h(); } catch (e) { T.err = String(e); } }
     for (const task of T.q.splice(0)) { try { task.resolve(task.fn()); } catch (e) { task.reject(e); } }
   });

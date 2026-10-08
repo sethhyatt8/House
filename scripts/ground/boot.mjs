@@ -23,6 +23,7 @@ export async function boot(dist, query = '', { port = 8790 + Math.floor(Math.ran
   await pg.evaluateOnNewDocument(iwer + `
 ;(() => { const cfg = { ...IWER.metaQuest3, supportedSessionModes: ['inline', 'immersive-vr'] };
   const d = new IWER.XRDevice(cfg); d.stereoEnabled = false; d.installRuntime({ forceInstall: true }); window.__xr = d;
+  const rn = performance.now.bind(performance); performance.now = () => (window.__vt != null ? window.__vt : rn());
   const RS = window.XRReferenceSpace.prototype; const orig = RS.getOffsetReferenceSpace;
   RS.getOffsetReferenceSpace = function (t) { return orig.call(this, t && t.matrix ? t.matrix : t); }; })();`);
   await pg.goto(`http://localhost:${port}/?testhooks=1&shadow=256&xrscale=0.25&${query}`);

@@ -2,13 +2,21 @@
 // Falling or wading into the sea no longer means the instant shark bite: you swim. ?swim=0 brings the old bite back.
 // - Entering: landing in open water (the old bite trigger), walking off the shallows / the rock shelf with the stick
 //   (hold toward the water), stepping out over open water, or leaning far out of the floating canoe.
-// - Arm strokes: squeeze a grip (or the trigger) and pull: you glide the opposite way the hands move (pull both hands
-//   back = forward along your hands, push down = up). Hands only push while they're in the water. Glide decays
-//   (drag 0.9/s, fins 0.6/s), top speed 1.6 m/s (fins 2.4). ?strokegrip=0 lets open-hand strokes count too.
-// - Left stick: slow swim (0.8 m/s, fins 1.2) toward where you look (level on the surface). Snap turn as on land.
+// - Arm strokes (swim/boat/reef pass): just move your hands through the water, no button needed. Each hand is a
+//   paddle: you glide the opposite way it moves relative to your body (pull both hands back = forward, push down =
+//   up, pull up = down). An open hand slices: moving it forward (the recovery) only bites 20%, lifting it up 50%.
+//   Under water (or looking steeply down at the surface) the forward part of a pull follows your gaze: look down
+//   and breaststroke to dive, look up to come up.
+//   Squeeze a grip / the trigger to cup the hand: then it bites fully in every direction. One good breaststroke
+//   (both hands ~0.6 m back in ~0.5 s) carries you ~1 m. Glide decays (drag 0.9/s, fins 0.6/s), top speed 1.6 m/s
+//   (fins 2.4). ?swimgain= scales strokes, ?strokegrip=1 = strokes only while squeezing (the old rule),
+//   ?swim=old = the whole previous stroke/buoyancy model.
+// - Left stick: slow swim (0.8 m/s, fins 1.2) toward where you look (level on the surface). Right stick up/down:
+//   rise/sink (0.7 m/s). Snap turn as on land.
 // - Buoyancy: you float with your eyes just above the waves. Without the tank you can duck-dive to 2.5 m on a breath
 //   (?breath= s, default 25) and you drift back up; with the tank you're near neutral below 0.6 m and can go to the
-//   seabed on ?air= s of air (default 180). Out of breath/air: the view closes in, then a drowning fade and respawn.
+//   seabed on ?air= s of air (default 180). The tank leaves you very slightly buoyant (you drift up ~0.1 m/s
+//   unless you stroke or stick down) and you hover 0.75 m over the sand instead of lying on it. Out of breath/air: the view closes in, then a drowning fade and respawn.
 // - Exits: swim into the shallows, the cave pad or the rock shelf and you stand up; squeeze with a hand on the floating
 //   canoe's hull to climb in; grab a ladder rung / notch as on land.
 // - Sharks are scenery now: no bite in the sea. Underwater, now and then a white shark glides out of the murk past you
@@ -25,14 +33,19 @@ const num = (key, fallback) => {
   return params.has(key) && Number.isFinite(v) && v > 0 ? v : fallback;
 };
 export const SWIM = params.get('swim') !== '0';
-const STROKE_GRIP = params.get('strokegrip') !== '0';
+const SWIM_OLD = params.get('swim') === 'old';
+const STROKE_GRIP = SWIM_OLD ? params.get('strokegrip') !== '0' : params.get('strokegrip') === '1';
+const SWIM_GAIN = num('swimgain', 1);
 const SCARE = params.get('sharkscare') !== '0';
 const SCARE_SOON = params.get('sharkscare') === 'now';
 const BREATH = num('breath', 25);
 const AIR = num('air', 180);
 const FREEDIVE = 2.5;     // m: deepest the head goes without the tank
 const FLOAT = 0.1;        // eyes above the surface when floating
-const K_HAND = 1.5;       // stroke gain (1/s): m/s of hand speed -> m/s^2 of push
+const K_HAND = SWIM_OLD ? 1.5 : 1.75 * SWIM_GAIN; // stroke gain (1/s): m/s of hand speed -> m/s^2 of push
+const TANK_LIFT = SWIM_OLD ? 0 : 0.12; // m/s^2: with the tank you drift up slowly (never stuck on the bottom)
+const BED_CLEAR = SWIM_OLD ? 0.35 : 0.75; // head height kept over the seabed
+const RISE_SPEED = 0.7;   // right stick up/down
 const MAX_SPEED = 1.6;
 const STICK_SPEED = 0.8;
 const BOUNDS = { x0: -62, z0: -30, z1: 30 };
@@ -331,8 +344,8 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
     enterHold = 0;
     if (why !== 'quiet') {
       api.setStatus?.(scuba?.has('tank')
-        ? 'In the sea. Squeeze both grips and pull back to swim. Pull down to dive.'
-        : 'In the sea. Squeeze both grips and pull back to swim. Hold your breath to duck under; get the dive kit on the roof to go deep.');
+        ? (SWIM_OLD ? 'In the sea. Squeeze both grips and pull back to swim. Pull down to dive.' : 'In the sea. Pull both hands back to swim, push down to rise, pull up to dive. Right stick: up/down.')
+        : (SWIM_OLD ? 'In the sea. Squeeze both grips and pull back to swim. Hold your breath to duck under; get the dive kit on the roof to go deep.' : 'In the sea. Pull both hands back to swim, push down to rise. Hold your breath to duck under; the dive kit on the roof lets you go deep.'));
     }
   }
   function exit(why) {
@@ -468,13 +481,16 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
       }
     }
     // seabed
-    const fl = floorAt(p.x, p.z) + 0.35;
+    const fl = floorAt(p.x, p.z) + BED_CLEAR;
     if (p.y < fl) { p.y = fl; v.y = Math.max(v.y, 0); }
   }
 
   // ---------------- main update ----------------
   const target = new THREE.Vector3();
   const stickMove = new THREE.Vector3();
+  const bodyFwd = new THREE.Vector3();
+  const look3 = new THREE.Vector3();
+  const lvl = new THREE.Vector3();
   function update(dt, frame) {
     if (!renderer.xr.isPresenting || !frame) {
       if (active) exit('session');
@@ -531,6 +547,11 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
     let pulling = 0;
     let power = 0;
     strokeCool = Math.max(0, strokeCool - dt);
+    // body forward (look direction; level near the surface): an open hand moving this way is a recovery, not a pull
+    bodyFwd.set(0, 0, -1).applyQuaternion(quat);
+    if (depth < 0.35) bodyFwd.y = 0;
+    if (bodyFwd.lengthSq() < 1e-6) bodyFwd.set(0, 0, -1);
+    bodyFwd.normalize();
     for (const c of controllers) {
       const h = handState(c);
       const p = gripPose(frame, ref, c);
@@ -542,9 +563,21 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
       let sp = Math.hypot(vx, vy, vz);
       if (sp > 5) continue; // tracking glitch
       const grip = c.userData.squeezeDown || c.userData.triggerDown;
-      const wet = p.y < surfaceAt(p.x, p.z) + 0.12;
-      if (!wet || (STROKE_GRIP ? !grip : sp < 0.6) || world.gear?.isHolding?.(c)) continue;
-      thrust.x -= vx; thrust.y -= vy; thrust.z -= vz;
+      const wet = p.y < surfaceAt(p.x, p.z) + (SWIM_OLD ? 0.12 : 0.15);
+      if (SWIM_OLD) {
+        if (!wet || (STROKE_GRIP ? !grip : sp < 0.6) || world.gear?.isHolding?.(c)) continue;
+        thrust.x -= vx; thrust.y -= vy; thrust.z -= vz;
+      } else {
+        if (!wet || sp < 0.25 || (STROKE_GRIP && !grip) || world.gear?.isHolding?.(c)) continue; // < 0.25 m/s: drift / jitter
+        let ax = vx; let ay = vy; let az = vz;
+        if (!grip) { // open hand: slices forward (recovery) and up, bites on the pull
+          const along = ax * bodyFwd.x + ay * bodyFwd.y + az * bodyFwd.z;
+          if (along > 0) { ax -= bodyFwd.x * along * 0.8; ay -= bodyFwd.y * along * 0.8; az -= bodyFwd.z * along * 0.8; }
+          if (ay > 0) ay *= 0.5;
+        }
+        const bite = THREE.MathUtils.clamp(0.7 + 0.3 * sp, 0.8, 1.4); // a brisk pull bites harder (drag ~ v^2)
+        thrust.x -= ax * bite; thrust.y -= ay * bite; thrust.z -= az * bite;
+      }
       pulling += 1;
       power += sp;
       if (sp > 0.7) {
@@ -559,6 +592,17 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
     if (pulling) {
       const gain = K_HAND * (fins ? 1.6 : 1) * (pulling === 2 ? 0.5 : 0.8); // two hands average; one hand pulls a bit less
       thrust.multiplyScalar(gain);
+      if (!SWIM_OLD) {
+        // a pull that drives you forward goes where you look once you're under (or look steeply down at the surface:
+        // a duck dive), the way a real breaststroke follows your body
+        look3.set(0, 0, -1).applyQuaternion(quat);
+        lvl.set(look3.x, 0, look3.z);
+        if (lvl.lengthSq() > 1e-4 && (depth > 0.35 || look3.y < -0.42)) {
+          lvl.normalize();
+          const tf = thrust.dot(lvl);
+          if (tf > 0) thrust.addScaledVector(lvl, -tf).addScaledVector(look3, tf);
+        }
+      }
       vel.addScaledVector(thrust, dt);
       if (power > 2.2 && strokeCool <= 0) {
         strokeCool = 0.45;
@@ -568,13 +612,25 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
       }
     }
 
+    // right stick up/down: rise / sink (swim/boat/reef pass)
+    let riseIn = 0;
+    if (!SWIM_OLD) {
+      for (const c of controllers) {
+        const src = c.userData.inputSource;
+        if (src?.handedness !== 'right' || !src.gamepad || world.gear?.isHolding?.(c)) continue;
+        const ry = -(src.gamepad.axes?.[3] ?? 0);
+        if (Math.abs(ry) > 0.25) riseIn = Math.sign(ry) * (Math.abs(ry) - 0.25) / 0.75;
+      }
+    }
+
     // ---- buoyancy / gravity / drag ----
     const top = surf + FLOAT;
     const airborne = head.y > top + 0.25;
     if (airborne) vel.y -= 9.8 * dt;
     else {
-      if (depth < 0.6 && !(pulling && thrust.y < 0)) vel.y += (top - head.y) * (tank ? 2.5 : 4) * dt; // float at the surface (not while pulling down: duck dive)
-      else if (!tank) vel.y += 0.9 * dt; // lungs full: you drift up. With the tank you hang neutral.
+      if (depth < 0.6 && !(pulling && thrust.y < (SWIM_OLD ? 0 : -0.5)) && !(riseIn < -0.25)) vel.y += (top - head.y) * (tank ? 2.5 : 4) * dt; // float at the surface (not while pulling down / stick down: duck dive)
+      else if (!tank) vel.y += 0.9 * dt; // lungs full: you drift up.
+      else vel.y += TANK_LIFT * dt; // tank: (almost) neutral
       if (outT >= 0 && !tank) vel.y += 3 * dt; // blacking out: you float up
       if (!tank && depth > FREEDIVE) { vel.y = Math.max(vel.y, 0) + (depth - FREEDIVE) * 4 * dt; }
       const dragH = fins ? 0.6 : 0.9;
@@ -605,6 +661,9 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
       if (dir.lengthSq() > 1e-6) dir.normalize();
       stickMove.addScaledVector(dir, STICK_SPEED * (fins ? 1.5 : 1) * k * dt);
     }
+
+    if (!tank && riseIn < 0 && depth > FREEDIVE - 0.1) riseIn = 0; // no tank: the freedive limit holds
+    if (riseIn) stickMove.y += riseIn * RISE_SPEED * (fins ? 1.3 : 1) * dt;
 
     // ---- move + collide ----
     target.copy(head).addScaledVector(vel, dt).add(stickMove);

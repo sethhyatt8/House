@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { applyPlacements, proxyMaterial } from './assets.js';
 import { createCanoe as createPhysicalCanoe } from './canoe.js';
 import { legacy } from './flags.js';
@@ -2675,6 +2676,60 @@ const SEA_OUTCROPS = [
   [-29, 2.4, 1.25, 7.3],
 ];
 export const SEA_PERCH_Y = [];
+// swim/boat/reef pass: ?rockbase=old keeps the old sea-rock bases (cut-off bottoms floating over the bed, no wet band)
+const ROCKBASE_OLD = new URLSearchParams(location.search).get('rockbase') === 'old';
+let SEA_ROCK_BASE = null; // filled by createSeaRocks(), used by createSeaRockBases() once the reef bed exists
+
+// Wet band at the waterline, algae / barnacle crust and depth darkening below it, for the sea boulders, their buried
+// skirts and the scatter stones. World-space, so it lines up across instances.
+function patchSeaRockMaterial(material, waterY) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, r) => {
+    prev?.call(material, shader, r);
+    shader.uniforms.uRockWaterY = { value: waterY };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRockW;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+      {
+        vec4 rw = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          rw = instanceMatrix * rw;
+        #endif
+        vRockW = (modelMatrix * rw).xyz;
+      }`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+      varying vec3 vRockW;
+      uniform float uRockWaterY;
+      float rkH(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+      float rkN(vec3 p) {
+        vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(rkH(i), rkH(i + vec3(1, 0, 0)), f.x), mix(rkH(i + vec3(0, 1, 0)), rkH(i + vec3(1, 1, 0)), f.x), f.y),
+                   mix(mix(rkH(i + vec3(0, 0, 1)), rkH(i + vec3(1, 0, 1)), f.x), mix(rkH(i + vec3(0, 1, 1)), rkH(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+      }
+      float rkWet = 0.0;`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      {
+        float h = vRockW.y - uRockWaterY;
+        float n = rkN(vRockW * 2.3) * 0.65 + rkN(vRockW * 7.1) * 0.35;
+        // wet band: darker and glossier up to ~0.5 m above the waterline (splash), ragged top edge
+        rkWet = 1.0 - smoothstep(0.15, 0.7, h - (n - 0.5) * 0.3);
+        diffuseColor.rgb *= mix(1.0, 0.5, rkWet);
+        // below the waterline: green-brown algae film, barnacle/crust speckle, darker with depth and toward the bed
+        float under = 1.0 - smoothstep(-0.35, 0.05, h);
+        float algae = under * smoothstep(0.35, 0.75, n) * 0.75;
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.2, 0.11), algae * 0.7);
+        float band = under * (1.0 - smoothstep(0.2, 1.6, -h)); // barnacles crowd the upper ~1.5 m
+        diffuseColor.rgb *= 1.0 - 0.45 * band * step(0.7, rkH(floor(vRockW * 24.0))) - 0.2 * band * n;
+        diffuseColor.rgb *= mix(1.0, 0.5, smoothstep(0.3, 3.0, -h)); // depth: the base and skirt go dark
+      }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+      roughnessFactor = mix(roughnessFactor, 0.42, rkWet * 0.8);`);
+  };
+  const key = material.customProgramCacheKey?.bind(material);
+  material.customProgramCacheKey = () => `${key ? key() : ''}-seark`;
+  material.needsUpdate = true;
+}
 
 function createSeaRocks(scene, assets) {
   const gltf = assets?.feature('searocks') ? assets.gltf('sea_boulder') : null;
@@ -2689,16 +2744,20 @@ function createSeaRocks(scene, assets) {
     const size = bb.getSize(new THREE.Vector3());
     const rocks = new THREE.InstancedMesh(geo, src.material, SEA_OUTCROPS.length * STONES.length);
     const dummy = new THREE.Object3D();
+    if (!ROCKBASE_OLD) patchSeaRockMaterial(src.material, WATER_Y);
+    SEA_ROCK_BASE = ROCKBASE_OLD ? null : { rocks, geo, material: src.material, size, bb, list: [] };
     let index = 0;
     for (const [x, z, scale, seed] of SEA_OUTCROPS) {
       for (const [k, dx, dz, salt] of STONES) {
         const s = (2 * scale * k) / Math.max(size.x, size.z);
-        const top = k === 1 ? WATER_Y + scale * 0.95 : WATER_Y + scale * k * 0.55;
+        // new bases: the two small stones sit 0.25 * their size lower (their skirts carry them to the bed)
+        const top = (k === 1 ? WATER_Y + scale * 0.95 : WATER_Y + scale * k * 0.55) - (ROCKBASE_OLD || k === 1 ? 0 : scale * k * 0.25);
         dummy.position.set(x + dx * scale, top - bb.max.y * s, z + dz * scale);
         dummy.rotation.set(0, hash01(seed + salt + 3) * 6.2, 0);
         dummy.scale.setScalar(s);
         dummy.updateMatrix();
         rocks.setMatrixAt(index, dummy.matrix);
+        SEA_ROCK_BASE?.list.push({ x: dummy.position.x, z: dummy.position.z, bottom: dummy.position.y + bb.min.y * s, s, rot: dummy.rotation.y, half: (s * Math.max(size.x, size.z)) / 2, seed: seed + salt, outcrop: scale });
         index += 1;
       }
     }
@@ -2726,6 +2785,148 @@ function createSeaRocks(scene, assets) {
     vertexColors: true,
   });
   SEA_OUTCROPS.forEach(([x, z, scale, seed]) => addSeaOutcrop(scene, material, x, z, scale, seed));
+}
+
+// Sea-rock bases: a mirrored, decimated copy of each boulder under its cut-off bottom (same material, so the wet /
+// algae shading carries on down), reaching 0.45 m into the bed; plus half-buried scatter stones round each base and
+// along the end of the cave shallows slab. Needs the reef's bed height, so it runs after createReef().
+// Yard rim boulders: a soft contact shadow on the slab and a few pebbles and grit round the foot, so the rock sits in
+// the ground instead of on a hard intersection line.
+let yardContactTex = null;
+let yardPebbleMat = null;
+function yardRockContact(scene, x, z, radius, index, material) {
+  if (!yardContactTex) {
+    yardContactTex = canvasTexture(128, 128, (ctx, w, h) => {
+      const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      g.addColorStop(0, 'rgba(0,0,0,0.78)');
+      g.addColorStop(0.45, 'rgba(0,0,0,0.55)');
+      g.addColorStop(0.75, 'rgba(0,0,0,0.18)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    }).texture;
+  }
+  const disc = new THREE.Mesh(
+    new THREE.PlaneGeometry(radius * 3.1, radius * 3.1),
+    new THREE.MeshBasicMaterial({ map: yardContactTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.set(x, 0.004, z);
+  disc.renderOrder = 1;
+  disc.raycast = () => {};
+  scene.add(disc);
+  const nug = new THREE.DodecahedronGeometry(1, 0);
+  const n = 6;
+  yardPebbleMat ||= new THREE.MeshStandardMaterial({ color: 0x4e4943, roughness: 1, flatShading: true });
+  const pebbles = new THREE.InstancedMesh(nug, yardPebbleMat, n);
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < n; i += 1) {
+    const a = hash01(index * 7 + i * 2.9) * Math.PI * 2;
+    const d = radius * (0.95 + hash01(index * 3 + i * 5.3) * 0.5);
+    const size = 0.025 + hash01(index * 11 + i * 1.3) * 0.045;
+    dummy.position.set(x + Math.cos(a) * d, size * 0.35, z + Math.sin(a) * d);
+    dummy.rotation.set(a, a * 1.7, 0);
+    dummy.scale.set(size, size * 0.65, size);
+    dummy.updateMatrix();
+    pebbles.setMatrixAt(i, dummy.matrix);
+  }
+  pebbles.raycast = () => {};
+  pebbles.receiveShadow = true;
+  scene.add(pebbles);
+}
+
+function createSeaRockBases(scene, assets, reef, shallows) {
+  const base = SEA_ROCK_BASE;
+  if (!base || !reef?.floorY) return null;
+  // the seabed the swimmer sees (same as underwater.js floorAt: reef bed + dunes)
+  const bedAt = (x, z) => {
+    const r = reef.floorY(x, z);
+    const dune = Math.sin(x * 0.21 + z * 0.13) * 0.18 + Math.sin(x * 0.07 - z * 0.19) * 0.3;
+    const shore = THREE.MathUtils.smoothstep(x, -12, -4.6);
+    return THREE.MathUtils.lerp(r + dune * (1 - shore) - 0.05, WATER_Y - 0.7, shore);
+  };
+  let lod = null;
+  const lodGltf = assets?.gltf ? assets.gltf('sea_boulder_lod') : null;
+  lodGltf?.scene.traverse((o) => { if (!lod && o.isMesh) lod = o.geometry; });
+  const g = (lod || base.geo).clone();
+  g.scale(1, -1, 1); // mirror: the cut face is now the top, the rounded crown points down into the sand
+  const idx = g.index.array;
+  for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+  g.computeBoundingBox();
+  const H = g.boundingBox.max.y - g.boundingBox.min.y;
+  const skirt = new THREE.InstancedMesh(g, base.material, base.list.length);
+  skirt.name = 'sea_rock_skirts';
+  const dummy = new THREE.Object3D();
+  const bottoms = [];
+  base.list.forEach((p, i) => {
+    let lo = bedAt(p.x, p.z);
+    for (let a = 0; a < 8; a += 1) lo = Math.min(lo, bedAt(p.x + Math.cos(a * 0.785) * p.half, p.z + Math.sin(a * 0.785) * p.half));
+    const top = p.bottom + 0.08 * p.s; // overlaps up into the stone, so there is no seam to see
+    const depth = top - (lo - 0.45);
+    const sy = Math.max(0.05, depth) / H;
+    dummy.position.set(p.x, top - g.boundingBox.max.y * sy, p.z);
+    dummy.rotation.set(0, p.rot, 0);
+    dummy.scale.set(p.s * 1.03, sy, p.s * 1.03);
+    dummy.updateMatrix();
+    skirt.setMatrixAt(i, dummy.matrix);
+    bottoms.push(lo - 0.45);
+  });
+  base.rocks.userData.baseBottom = bottoms; // underwater.js: the swim colliders now reach the bed
+  skirt.raycast = () => {};
+  scene.add(skirt);
+  skirt.computeBoundingSphere();
+
+  // scatter stones: a jittered low-poly nugget, half buried, same rock material
+  // rounded, lumpy nugget (80 tris, smooth normals) so the stones read like worn rock next to the scanned boulders
+  const nug = mergeVertices(new THREE.IcosahedronGeometry(0.5, 1).deleteAttribute('normal').deleteAttribute('uv'));
+  {
+    const pos = nug.attributes.position;
+    const v = new THREE.Vector3();
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i += 1) {
+      v.fromBufferAttribute(pos, i);
+      const k = 1 + 0.16 * Math.sin(v.x * 7.1 + v.z * 3.3) + 0.1 * Math.sin(v.y * 9.7 + v.x * 4.1);
+      pos.setXYZ(i, v.x * k, v.y * k * 0.62, v.z * k);
+      uv[i * 2] = v.x + 0.5; uv[i * 2 + 1] = v.z + 0.5;
+    }
+    nug.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    nug.computeVertexNormals();
+  }
+  const stones = [];
+  SEA_OUTCROPS.forEach(([x, z, scale, seed]) => {
+    const n = Math.round(9 + scale * 4);
+    for (let i = 0; i < n; i += 1) {
+      const a = hash01(seed * 11 + i * 1.7) * Math.PI * 2;
+      const d = scale * (0.95 + hash01(seed * 5 + i * 3.1) * 0.75);
+      const sx = x + Math.cos(a) * d;
+      const sz = z + Math.sin(a) * d;
+      const size = 0.1 + hash01(seed * 3 + i * 7.3) ** 2 * 0.32 * Math.min(1.4, scale / 2);
+      stones.push([sx, bedAt(sx, sz) - size * 0.28, sz, size, hash01(seed + i * 9.9) * 6.28]);
+    }
+  });
+  if (shallows) {
+    // the square end of the shallows slab: a ragged line of stones hides it
+    for (let i = 0; i < 12; i += 1) {
+      const t = (i + hash01(i * 4.1) * 0.6) / 12;
+      const sz = shallows.z0 - 0.3 + t * (shallows.z1 - shallows.z0 + 0.6);
+      const sx = shallows.x0 - 0.05 - hash01(i * 2.3) * 0.5;
+      const size = 0.22 + hash01(i * 6.7) * 0.32;
+      stones.push([sx, Math.min(shallows.floorY, bedAt(sx, sz)) - size * 0.3, sz, size, hash01(i * 8.1) * 6.28]);
+    }
+  }
+  const scatter = new THREE.InstancedMesh(nug, base.material, stones.length);
+  scatter.name = 'sea_rock_scatter';
+  stones.forEach(([sx, sy, sz, size, rot], i) => {
+    dummy.position.set(sx, sy, sz);
+    dummy.rotation.set(rot * 0.3, rot, rot * 0.2);
+    dummy.scale.set(size * 2, size * 2, size * 2);
+    dummy.updateMatrix();
+    scatter.setMatrixAt(i, dummy.matrix);
+  });
+  scatter.raycast = () => {};
+  scene.add(scatter);
+  scatter.computeBoundingSphere();
+  return { skirt, scatter, stats: { skirtTris: (g.index.count / 3) * base.list.length, scatterTris: (nug.index.count / 3) * stones.length, stones: stones.length } };
 }
 
 function canoeHullGeometry() {
@@ -3616,6 +3817,7 @@ function createCrateYard(scene, targets, rockMap, assets) {
     boulder.receiveShadow = true;
     boulder.userData = { placeId: `yard-boulder-${index}` };
     scene.add(boulder);
+    if (!ROCKBASE_OLD) yardRockContact(scene, x, z, radius, index, rim);
   });
 
   const crateTex = canvasTexture(256, 256, (ctx, w, h) => {
@@ -4342,6 +4544,8 @@ export function createWorld({ assets, renderer = null } = {}) {
   else cliff.notches = { routes: [{ ladder: crag.ladder }], shelf: null, step: null };
   const glider = createGlider(scene, crag.deckY);
   const reef = createReef(scene, { assets, waterY: WATER_Y, rocks: SEA_OUTCROPS });
+  const rockBases = createSeaRockBases(scene, assets, reef, cliff.cave?.shallows);
+  if (reef) reef.rocks = SEA_OUTCROPS; // underwater.js: seabed contact shading round each outcrop
   function shallowFloor(x, z) {
     const shelf = cliff.cave.shallows;
     if (!shelf || z < shelf.z0 || z > shelf.z1) return null;
@@ -4560,6 +4764,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     crates,
     canoe,
     reef,
+    rockBases,
     forest,
     croc,
     bear,

@@ -628,6 +628,7 @@ export function createBear(scene, { assets, crag, golf = null, gear = null, targ
     root, zones, update, hit, chop, safeShove, onDeck, prefetch,
     on(type, fn) { (listeners[type] ||= []).push(fn); return api; },
     state: () => s.state,
+    den: () => DEN,
     hp: () => s.hp,
     maxHp: MAX_HP,
     alive: () => s.state !== 'dead' && s.state !== 'gone',
