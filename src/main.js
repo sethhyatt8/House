@@ -66,14 +66,14 @@ const loadingEl = document.getElementById('loading');
 const loadingBar = document.getElementById('loading-bar');
 const assets = createAssetManager(renderer);
 await assets.loadManifest('models/scene-manifest.json');
-const DEFERRED = ['rock_cliff', 'rock_floor', 'boulder', 'lift_kit', 'chest', 'fire_pit', 'paint_can'];
+const DEFERRED = ['rock_cliff', 'rock_floor', 'boulder', 'lift_kit', 'chest', 'fire_pit', 'paint_can', 'crag_kit'];
 const lazyBoot = pageParams.get('zones') !== '0';
 if (lazyBoot) assets.deferMaterials(['rock_cliff', 'rock_floor']);
 await assets.preload([
   'crate', 'boulder', 'hatchet', 'rock_cliff', 'rock_floor', 'sea_boulder', 'pines', 'sky_backdrop', 'sky_env', 'water_normal',
   'shark_white', 'swordfish', 'angelfish', 'gull_fly', 'gull_perch', 'shipwreck', 'canoe', 'canoe_cedar', 'paddle',
   'chest', 'torch', 'brush', 'bow', 'arrow', 'bag', 'crab', 'rough_wood',
-  'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals',
+  'finds', 'ladder_kit', 'table', 'fire_pit', 'paint_can', 'croc', 'reef_corals', 'club_driver', 'hockey_stick', 'crag_kit',
   ...(FOREST_LEGACY ? [] : ['forest_kit']),
 ].filter((id) => !lazyBoot || !DEFERRED.includes(id)), ({ loaded, total }) => {
   if (loadingBar && total > 0) loadingBar.style.width = `${Math.round((loaded / total) * 100)}%`;

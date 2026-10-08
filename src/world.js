@@ -4330,6 +4330,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     targets,
     rock: assets?.feature('rock') ? assets.material('rock_cliff') : null,
     roof,
+    assets,
   });
   if (cliff.notches) cliff.notches.routes.push({ ladder: crag.ladder });
   else cliff.notches = { routes: [{ ladder: crag.ladder }], shelf: null, step: null };
@@ -4490,7 +4491,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   const bite = createBite(scene, sharks.white, assets);
   createAnimalCase(scene, targets, sharks.sword, sharks.white, cliff.cave, assets);
   const croc = createCroc(scene, { assets, cave: cliff.cave, waterY: WATER_Y, targets, shallowFloor, zMax: -0.55 });
-  const golf = createGolf(scene, targets, crag.deckY);
+  const golf = createGolf(scene, targets, crag.deckY, assets);
   const eloose = lift.floors?.find((room) => Math.abs(room.y + 3.6) < 0.01 && room.z1 <= lift.shaft.z0 + 0.02);
   const hockey = eloose
     ? createHockey(scene, targets, {
@@ -4498,7 +4499,7 @@ export function createWorld({ assets, renderer = null } = {}) {
       y: eloose.y,
       z: (eloose.z0 + eloose.z1) / 2,
       room: eloose,
-    })
+    }, assets)
     : null;
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   if (croc) gear.setCroc(croc);
