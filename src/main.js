@@ -14,6 +14,7 @@ import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './w
 import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
 import { wireBear } from './bearfight.js';
+import { createTopout } from './topout.js';
 import { createSfx } from './sfx.js';
 import { nearNotches } from './notches.js';
 import { barFrame, stepGlide } from './glider.js';
@@ -308,6 +309,7 @@ function teleportNext() {
 }
 
 let climb = null;
+let mantle = null; // overlook pass: the scripted haul over the crag lip (src/topout.js)
 let boatGrip = null;
 let oarGrip = null;
 let aboard = false;
@@ -489,7 +491,7 @@ function pushOutOf(x, z, box, radius) {
 }
 
 function containPlayer() {
-  if (cellPhase < 2 || watching || aboard || biteHold || !renderer.xr.isPresenting || !xrFrame) return;
+  if (cellPhase < 2 || watching || aboard || biteHold || mantle || !renderer.xr.isPresenting || !xrFrame) return;
   const ref = renderer.xr.getReferenceSpace();
   const pose = ref && xrFrame.getViewerPose(ref);
   if (!pose) return;
@@ -499,6 +501,7 @@ function containPlayer() {
   for (let pass = 0; pass < 6; pass += 1) {
     let hit = false;
     for (const box of boxes) {
+      if (climb && box.climbThrough) continue; // overlook pass: the slot edge doesn't shove you while you hang in it
       const push = pushOutOf(x, z, box, 0.2);
       if (!push) continue;
       if (!shiftPlayer(push.dx, 0, push.dz)) return;
@@ -574,10 +577,7 @@ function rungFromController(controller) {
 
 function standAtLadder(ladder) {
   if (!renderer.xr.isPresenting || !xrFrame || !ladder) return;
-  const ref = renderer.xr.getReferenceSpace();
-  const pose = ref && xrFrame.getViewerPose(ref);
-  if (!pose) return;
-  const head = pose.transform.position;
+  const head = headSample(); // overlook pass: also called from squeeze/select events (stale XRFrame)
   const dx = (ladder.position.x - 0.42) - head.x;
   const dz = (ladder.userData.zAt ? ladder.userData.zAt(xrOffset.y + 1.2) : ladder.position.z) - head.z;
   if (Math.hypot(dx, dz) > 0.55) shiftPlayer(dx, 0, dz);
@@ -595,7 +595,7 @@ function pulseBoth(intensity, ms) {
 
 function attachClimb(controller, hit) {
   const ladder = hit.owner.userData.ladder;
-  if (!ladder || aboard) return;
+  if (!ladder || aboard || mantle) return;
   const same = climb && climb.ladder === ladder;
   const lifted = same ? climb.lifted : 0;
   const feet = same && climb.feet != null ? climb.feet : xrOffset.y;
@@ -605,6 +605,7 @@ function attachClimb(controller, hit) {
   beginClimb(ladder, hit.point.y, index);
   climb.hand = controller;
   climb.lifted = lifted;
+  climb.onLip = !!hit.owner.userData.lip;
   if (ladder.userData.shaft) {
     climb.feet = feet;
     climb.lowest = Math.min(low, feet);
@@ -613,8 +614,10 @@ function attachClimb(controller, hit) {
   standAtLadder(ladder);
   controller.getWorldPosition(handPoint);
   climb.handY = handPoint.y;
-  pulseController(controller);
-  setStatus(ladder.userData.crag
+  pulseController(controller, climb.onLip ? 0.9 : 0.7, climb.onLip ? 70 : 50);
+  setStatus(climb.onLip
+    ? 'Holding the lip. Pull down hard to haul yourself over the top.'
+    : ladder.userData.crag
     ? 'Holding a rock edge. Pull down to climb, push up to go down. Swap hands as you go.'
     : ladder.userData.notches
     ? 'Holding a notch. Pull down to climb, push up to go down. Swap hands as you go.'
@@ -858,6 +861,31 @@ function leaveClimb() {
   controls.enabled = !renderer.xr.isPresenting;
 }
 
+// Overlook pass: the top-out. Holding the lip and pulling your head over it, any hold with your head 20 cm over it,
+// or leaning over the top while still on the line hauls you onto the summit: a short eased lift (up, then
+// forward), haptics, and the climb is fully released so the stick and snap turn work straight away.
+const topout = createTopout({
+  getClimb: () => climb,
+  head: headSample,
+  feet: () => xrOffset.y,
+  shiftPlayer,
+  leaveClimb() { leaveClimb(); fallVy = 0; },
+  pulse: pulseBoth,
+  setStatus,
+  controllers: () => controllers,
+  setActive(v) { mantle = v; },
+});
+function updateTopout(dt) { topout.update(dt); releaseStandingClimb(); }
+// Standing on a floor with no hand on a hold ends the climb. It used to stay set (only a fall in updatePlayerFall
+// cleared it) and pollMove needs !climb for the stick: walking over the top and letting go left you stuck.
+// Kept out of updatePlayerFall on purpose (the ground/boat pass rewrites that function).
+function releaseStandingClimb() {
+  if (!climb || climb.hand || topout.active?.()) return;
+  const head = headSample();
+  const feetY = xrOffset.y;
+  if (feetY - groundUnder(head.x, head.z, feetY) <= 0.12) leaveClimb();
+}
+
 // rowing pass: the ground model lives in walk.js (same rules), shared with stick locomotion and the reachability test
 const groundModel = createGround({ world, roof, startCell: START_CELL, cliffX: CLIFF_X, waterY: WATER_Y });
 const walker = createWalker({ world, ground: groundModel, startCell: START_CELL, cliffX: CLIFF_X, roof, waterY: WATER_Y });
@@ -922,9 +950,13 @@ let ridingLift = false;
 
 function headSample() {
   if (renderer.xr.isPresenting && xrFrame) {
-    const ref = renderer.xr.getReferenceSpace();
-    const pose = ref && xrFrame.getViewerPose(ref);
-    if (pose) return pose.transform.position;
+    // overlook pass: input events (squeeze/select) fire between frames, when the stored XRFrame is no longer active and
+    // getViewerPose throws; fall back to the last head pose three copied into the camera
+    try {
+      const ref = renderer.xr.getReferenceSpace();
+      const pose = ref && xrFrame.getViewerPose(ref);
+      if (pose) return pose.transform.position;
+    } catch { /* stale frame */ }
   }
   return camera.position;
 }
@@ -954,7 +986,7 @@ function updateLift(dt) {
 
 function updatePlayerFall(dt) {
   if (watching || biteHold || aboard || swim?.active || !renderer.xr.isPresenting || !xrFrame) return;
-  if (climb?.hand || boatGrip || glide.flying) {
+  if (climb?.hand || boatGrip || glide.flying || mantle) {
     fallVy = 0;
     return;
   }
@@ -1233,6 +1265,7 @@ function setupController(index) {
   });
   controller.addEventListener('selectend', () => {
     controller.userData.triggerDown = false;
+    if (!controller.userData.squeezeDown) controller.userData.noRegrab = false;
     if (controller.userData.pegDrag) controller.userData.pegDrag = false;
     if (climb?.hand === controller && !controller.userData.squeezeDown) {
       climb.hand = null;
@@ -1245,6 +1278,7 @@ function setupController(index) {
   });
   controller.addEventListener('squeezeend', () => {
     controller.userData.squeezeDown = false;
+    if (!controller.userData.triggerDown) controller.userData.noRegrab = false;
     onXrRelease(controller);
   });
   scene.add(controller);
@@ -3558,7 +3592,7 @@ function canoeHolds(controller) {
 
 function pollMove(dt) {
   exitCooldown = Math.max(0, exitCooldown - dt);
-  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold) {
+  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold || mantle) {
     liftFeel.setComfort?.(0);
     return;
   }
@@ -4367,6 +4401,7 @@ function frame(time, frame) {
     if (renderer.xr.isPresenting && climb.hand) pullXrClimb();
     if (!renderer.xr.isPresenting) applyClimbView();
   }
+  if (renderer.xr.isPresenting) updateTopout(dt);
   updateLift(dt);
   updateGlider(dt);
   pollMove(dt);
@@ -4382,7 +4417,7 @@ function frame(time, frame) {
         && (world.canoe.paddleMode || world.canoe.nearOar?.(handPoints(controller)))) {
         gripOar(controller);
       }
-      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !gliderHand(controller) && !world.gear.isHolding(controller)) {
+      if (renderer.xr.isPresenting && controller.userData.squeezeDown && heldFrom !== controller && !climb?.hand && !boatGrip && !aboard && !gliderHand(controller) && !world.gear.isHolding(controller) && !controller.userData.noRegrab && !mantle) {
         const grabbedBoat = legacy('canoe') && gripBoatEnd(controller);
         if (!grabbedBoat) {
           const near = rungFromController(controller);
@@ -4427,6 +4462,8 @@ startRelay();
 
 // Test hooks for the headless WebXR checks (?testhooks=1 only; nothing is exposed otherwise).
 if (pageParams.get('testhooks') === '1') {
+  // XRFrame poses are only valid inside the frame callback; in XR three copies the last head pose into `camera`
+  const hookHead = () => camera.position;
   window.__house = {
     world,
     state: () => ({
@@ -4434,7 +4471,7 @@ if (pageParams.get('testhooks') === '1') {
       climb: !!climb,
       offset: xrOffset.toArray(),
       yaw: xrYaw,
-      head: headSample().toArray?.() ?? [headSample().x, headSample().y, headSample().z],
+      head: hookHead().toArray(),
       torch: !!world.gear.handHolding?.('torch'),
       canoe: world.canoe.debug?.(),
       seat: world.canoe.seatPoint.toArray(),
@@ -4447,7 +4484,7 @@ if (pageParams.get('testhooks') === '1') {
     }),
     place(x, feet, z) { // move the player's feet to (x, feet, z) keeping the head offset (test setup only)
       leaveCanoe();
-      const head = headSample();
+      const head = hookHead();
       shiftPlayer(x - head.x, feet - xrOffset.y, z - head.z);
     },
     cameraMatrix: () => renderer.xr.getCamera().matrixWorld.toArray(),
