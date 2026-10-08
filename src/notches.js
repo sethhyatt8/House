@@ -111,23 +111,35 @@ export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTo
 }
 
 // Same recesses and lips as the cliff route. `holds` are { y, z } in world space, on a west-facing surface.
-export function notchClimb({ scene, targets, surfaceX, holds, userData }) {
+// Clubs/cliff pass: a hold may carry its own side offset `dz` (default alternates +-0.13), `standOff` moves the
+// ladder origin (the player stands at ladder.x - 0.42; the grab proxies stay 7 cm proud of surfaceX either way), and
+// dress: false builds only the proxies so the caller can dress the line with rock (notchDress is the fallback).
+export function notchClimb({ scene, targets, surfaceX, holds, userData, standOff = 0.22, dress = true }) {
   const ladder = new THREE.Group();
-  const rx = surfaceX + 0.22;
+  const rx = surfaceX + standOff;
   ladder.position.set(rx, 0, 0);
-  const cuts = [];
-  const lips = [];
   const rungs = [];
-  holds.forEach(({ y, z }, index) => {
-    const zz = z + (index % 2 ? 0.13 : -0.13);
-    holdParts(cuts, lips, surfaceX - rx, y, zz, 0.11);
+  const placed = [];
+  holds.forEach(({ y, z, dz }, index) => {
+    const zz = z + (dz ?? (index % 2 ? 0.13 : -0.13));
+    placed.push({ y, z: zz });
     proxy(ladder, surfaceX - rx - 0.07, y, zz, rungs);
   });
-  [mergedMesh(cuts, cutMat, 'sidenotches_cut'), mergedMesh(lips, wornMat, 'sidenotches_worn')].forEach((m) => m && ladder.add(m));
-  ladder.userData = { rungs, notches: true, ...userData };
+  ladder.userData = { rungs, notches: true, holds: placed, surfaceX, ...userData };
+  if (dress) notchDress(ladder);
   scene.add(ladder);
   targets.push(ladder);
   return ladder;
+}
+
+// The cut-and-lip look for a notchClimb line (its userData.holds, world space).
+export function notchDress(ladder) {
+  const { holds, surfaceX } = ladder.userData;
+  const rx = ladder.position.x;
+  const cuts = [];
+  const lips = [];
+  holds.forEach(({ y, z }) => holdParts(cuts, lips, surfaceX - rx, y, z, 0.11));
+  [mergedMesh(cuts, cutMat, 'sidenotches_cut'), mergedMesh(lips, wornMat, 'sidenotches_worn')].forEach((m) => m && ladder.add(m));
 }
 
 // main.js: is the player on (or falling along) a notch line? Falls there are a controlled slide.

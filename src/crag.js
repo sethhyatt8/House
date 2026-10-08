@@ -1,10 +1,15 @@
 // Inland cliff on the east edge of the roof. The climb is the same notch hardware as the cave route,
 // on the north side of the face. The nose is a level overhang pointing west, out over the sea.
 import * as THREE from 'three';
-import { notchClimb } from './notches.js';
+import { notchClimb, notchDress } from './notches.js';
 import { applyWorldUv } from './uv.js';
+import { legacy } from './flags.js';
+import { dressCrag, faceSkin } from './cragrock.js';
 
-export function createBackCrag({ scene, targets, rock, roof }) {
+// Clubs/cliff pass: rock holds on a displaced rock skin (cragrock.js). ?legacy=crag keeps the cut notch line.
+export const CRAG_ROCK = !legacy('crag');
+
+export function createBackCrag({ scene, targets, rock, roof, assets = null }) {
   const faceMat = rock || new THREE.MeshStandardMaterial({ color: 0x8a8176, roughness: 1 });
 
   const group = new THREE.Group();
@@ -56,26 +61,45 @@ export function createBackCrag({ scene, targets, rock, roof }) {
   ];
   buildNose(spine, add, faceMat);
   // North shoulder, clear of the nose, where the notch line arrives.
-  box(1.9, 0.55, 2.0, 2.5, deckY - 0.275, -1.85);
+  // Rock mode: the climber now hangs 20 cm further out than the old slab allowed (head at x ~3.2), so the shoulder
+  // keeps a slot (x 2.95..3.5, z < -2.0) where the line tops out; a collider stops walking into the slot from above.
+  const slot = { x0: 2.95, x1: 3.5, z0: -2.85, z1: -2.0 };
+  if (CRAG_ROCK) {
+    box(1.4, 0.55, 2.0, 2.25, deckY - 0.275, -1.85);
+    box(0.5, 0.55, 1.15, 3.2, deckY - 0.275, -1.425);
+  } else box(1.9, 0.55, 2.0, 2.5, deckY - 0.275, -1.85);
 
+  const faceX0 = CRAG_ROCK ? 3.42 : 3.5; // the rock skin stands up to 8 cm proud of the boxes at walking height
   const colliders = [
-    { x0: 3.5, x1: 5.4, z0: -3.5, z1: -0.85, y0: roof.y - 0.2, y1: deckY + 2.2, why: 'back cliff' },
-    { x0: 3.5, x1: 5.6, z0: 0.4, z1: 3.2, y0: roof.y - 0.2, y1: deckY + 2.2, why: 'back cliff' },
-    { x0: 3.5, x1: 5.1, z0: -0.95, z1: 0.7, y0: roof.y - 0.2, y1: deckY + 1.6, why: 'back cliff' },
+    { x0: faceX0, x1: 5.4, z0: -3.5, z1: -0.85, y0: roof.y - 0.2, y1: deckY + 2.2, why: 'back cliff' },
+    { x0: faceX0, x1: 5.6, z0: 0.4, z1: 3.2, y0: roof.y - 0.2, y1: deckY + 2.2, why: 'back cliff' },
+    { x0: faceX0, x1: 5.1, z0: -0.95, z1: 0.7, y0: roof.y - 0.2, y1: deckY + 1.6, why: 'back cliff' },
   ];
+  if (CRAG_ROCK) colliders.push({ ...slot, y0: deckY - 0.3, y1: deckY + 1.8, why: 'cliff edge' });
 
   // Notch line on the north side of the face, beside the nose, not up through it.
+  // Rock mode: holds every 0.28 m (was 0.23), alternating 15 cm either side with a little jitter.
   const y0 = roof.y + 0.95;
   const y1 = deckY - 0.45;
   const zLine = (y) => -2.05 + ((y - y0) / (y1 - y0)) * -0.4;
   const holds = [];
-  for (let y = y0; y <= y1; y += 0.23) holds.push({ y, z: zLine(y) });
+  if (CRAG_ROCK) {
+    const n = Math.round((y1 - y0) / 0.28);
+    for (let i = 0; i <= n; i += 1) {
+      const y = y0 + ((y1 - y0) * i) / n;
+      const jitter = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+      holds.push({ y, z: zLine(y), dz: (i % 2 ? 0.15 : -0.15) + jitter * 0.03 });
+    }
+  } else for (let y = y0; y <= y1; y += 0.23) holds.push({ y, z: zLine(y) });
   const ladder = notchClimb({
     scene,
     targets,
     surfaceX: 3.5,
     holds,
+    standOff: CRAG_ROCK ? 0.12 : 0.22,
+    dress: !CRAG_ROCK,
     userData: {
+      crag: CRAG_ROCK,
       roofY: deckY,
       shaft: { top: deckY - 0.2, base: roof.y },
       path: { zBase: -2.7, zTop: -1.7 },
@@ -87,8 +111,21 @@ export function createBackCrag({ scene, targets, rock, roof }) {
     },
   });
 
+  let dressing = null;
+  if (CRAG_ROCK) {
+    group.add(faceSkin({ material: faceMat, roofY: roof.y, deckY, zLine, lineY0: y0, lineY1: y1 }));
+    // the scanned holds stream in after boot (crag_kit is a deferred model); the cut notches are the fallback
+    const kitReady = assets?.enabled ? assets.whenReady('crag_kit') : Promise.resolve(null);
+    dressing = kitReady.then((kit) => {
+      const done = kit ? dressCrag({ group, kit, ladder, roofY: roof.y, deckY, zLine }) : null;
+      if (!done) notchDress(ladder);
+      return done;
+    });
+  }
+
   const shoulder = { x0: 1.55, x1: 3.5, z0: -2.85, z1: -0.85 };
   function deckAt(x, z) {
+    if (CRAG_ROCK && x > slot.x0 && x <= slot.x1 && z >= slot.z0 && z < slot.z1) return null;
     if (x >= shoulder.x0 && x <= shoulder.x1 && z >= shoulder.z0 && z <= shoulder.z1) return deckY;
     if (x < spine[0].x || x > spine[spine.length - 1].x) return null;
     let i = 1;
@@ -101,7 +138,7 @@ export function createBackCrag({ scene, targets, rock, roof }) {
     return deckY;
   }
 
-  return { ladder, colliders, deckAt, deckY };
+  return { ladder, colliders, deckAt, deckY, dressing };
 }
 
 // Tapered promontory. The crown is the walkable line; the sides and belly bulge past it, and the west end comes to a point.
