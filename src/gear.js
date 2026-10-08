@@ -107,6 +107,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   let menuOpen = false;
   let bladeReady = false;
   let croc = null;
+  const foes = []; // other enemies with bone hit zones (userData.foeZone/foe): the overlook bear
   let bladeLogged = false;
   let onPickup = null;
   let onChop = null;
@@ -842,8 +843,9 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       for (const hit of hits) {
         if (hit.distance > arrowRay.far) break;
         const zone = hit.object.userData?.crocZone;
-        if (zone) {
-          const result = croc ? croc.hit(zone, hit.point, 'arrow') : null;
+        const foeZone = hit.object.userData?.foeZone;
+        if (zone || foeZone) {
+          const result = zone ? (croc ? croc.hit(zone, hit.point, 'arrow') : null) : hit.object.userData.foe?.hit(foeZone, hit.point, 'arrow') ?? null;
           if (!result) continue;
           arrow.position.copy(hit.point).addScaledVector(arrowAim, -0.6);
           hit.object.attach(arrow);
@@ -1512,6 +1514,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
         if (speed > 2.1) {
           swingHit(bladePrev, bladeNow);
           croc?.chop(bladePrev, bladeNow);
+          for (const foe of foes) foe.chop(bladePrev, bladeNow, speed);
         }
       }
       bladePrev.copy(bladeNow);
@@ -1707,6 +1710,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
 
   return {
     setCroc(next) { croc = next; arrowMask = null; },
+    addFoe(foe) { if (foe && !foes.includes(foe)) foes.push(foe); arrowMask = null; },
     bakeIcons(renderer) {
       if (legacy('icons') || !renderer) return null;
       const items = [hatchet, bow, torch, brush, ...sprayCans].filter(Boolean);

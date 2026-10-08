@@ -13,6 +13,7 @@ import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
+import { wireBear } from './bearfight.js';
 import { createSfx } from './sfx.js';
 import { nearNotches } from './notches.js';
 import { barFrame, stepGlide } from './glider.js';
@@ -1101,7 +1102,7 @@ world.lift?.on('door', ({ open }) => sfx.play(open ? 'door_open' : 'door_close',
 
 const croc = world.croc ?? null;
 const crocDebug = pageParams.get('crocdebug') === '1';
-const health = croc && !watching ? createPlayerHealth({
+const health = (croc || world.bear) && !watching ? createPlayerHealth({
   scene: world.scene,
   camera,
   onDown: playerDown,
@@ -1166,6 +1167,12 @@ if (croc) {
   croc.on('death', (e) => { playCrocDeath(e.position); pulseBoth(0.6, 300); });
   croc.on('reward', () => playClear());
 }
+
+// overlook bear (src/bear.js + src/bearfight.js): wakes when you top out of the east crag climb
+const bearFight = world.bear && !watching ? wireBear({
+  bear: world.bear, health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf,
+  player: crocPlayer, head: crocHead, debug: crocDebug, tickHealth: !croc,
+}) : null;
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -4299,6 +4306,7 @@ function frame(time, frame) {
     else if (!biteHold && (!world.zones?.enabled || world.zones.isAwake('cave') || world.zones.isAwake('sea'))) croc.update(dt, crocPlayer());
     health?.update(dt);
   }
+  bearFight?.update(dt);
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
   checkStepOut();

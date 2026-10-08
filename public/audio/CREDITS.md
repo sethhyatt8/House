@@ -42,3 +42,15 @@ All files are mono Ogg Vorbis made for House (ffmpeg + numpy: mono, trimmed, pea
 | creak.ogg | RPG Audio | creak1.ogg |
 | ui_click.ogg | Interface Sounds | click_002.ogg |
 | ui_confirm.ogg | Interface Sounds | confirmation_001.ogg |
+
+## OpenGameArt (CC0 1.0), overlook bear
+
+Source: "Bear Growls" (https://opengameart.org/content/bear-growls), uploaded by AntumDeluge. The recordings come from the U.S. Fish & Wildlife Service (public domain); the pack is released as CC0. Used by src/bearfight.js, not by src/sfx.js.
+
+| File | Original | Edit |
+|---|---|---|
+| bear_roar.ogg | bear_02 + bear_01 | bear_02 at 0.80x speed mixed with bear_01 at 0.72x (+280 ms), low-shelf boost, loudness-normalised to -14 LUFS, 1.76 s |
+| bear_growl.ogg | bear_01 | 0.88x speed (pitched down), 1.21 s |
+| bear_death.ogg | bear_02 | 0.62x speed (pitched down), 1.91 s |
+
+The bear's huffs, snorts and paw thumps are made in WebAudio (noise bursts and a falling sine) in src/bearfight.js; they are not sample files.

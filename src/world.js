@@ -6,6 +6,7 @@ import { legacy } from './flags.js';
 import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createCroc } from './croc.js';
+import { createBear } from './bear.js';
 import { createOcean, legacyWater } from './water.js';
 import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
@@ -4503,6 +4504,8 @@ export function createWorld({ assets, renderer = null } = {}) {
     : null;
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   if (croc) gear.setCroc(croc);
+  const bear = createBear(scene, { assets, crag, golf, gear, targets });
+  if (bear) gear.addFoe(bear);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
   const forest = createForest(scene, assets);
@@ -4554,6 +4557,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     reef,
     forest,
     croc,
+    bear,
     cave: cliff.cave,
     shaft: cliff.shaft,
     notches: cliff.notches,

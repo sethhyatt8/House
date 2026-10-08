@@ -1216,6 +1216,27 @@
         }
       },
       "note": "Used by src/cragrock.js (east crag climb) unless ?legacy=crag or ?crag=0. hold_*: top at y +0.02, outer tip at x -0.06, centred on z, wall-normal -X (holds point west). ledge_a/crag_*: outermost point at x 0, base at y 0. One material: 1024 colour atlas (ETC1S, colour-matched to dark_rock) + 512 normal (UASTC) baked from the 2k scans; COLOR_0 = chalk/cavity tint."
+    },
+    "bear": {
+      "url": "models/enemies/bear.glb",
+      "kind": "skinned",
+      "source": "https://gitea.wildfiregames.com/0ad/0ad (art/meshes/skeletal/bear.dae, art/animation/quadraped/bear/*.dae, art/textures/skins/skeletal/animal_bear_brown.png)",
+      "author": "Wildfire Games (0 A.D.)",
+      "license": "CC-BY-SA 3.0",
+      "tris": 2530,
+      "joints": 75,
+      "bytes": 454860,
+      "texVramMB": 0.17,
+      "bboxMin": [-0.513, 0, -0.916],
+      "bboxMax": [0.513, 1.359, 1.335],
+      "clips": { "Death": 1.667, "Idle": 2, "Lunge": 1, "Paw": 2.667, "Rear": 2, "Run": 1, "Swipe": 1, "Walk": 1.292 },
+      "params": {
+        "faces": "+Z, metres (2.25 m long). Root between the legs at the feet (y 0), nose z 1.335, tail z -0.916.",
+        "mouthAhead": 1.15,
+        "jaw": "Ursidae_Jaw_01 (procedural roar gape)",
+        "den": [-1.85, 0]
+      },
+      "note": "Edited for House (still CC-BY-SA 3.0): scaled x0.44, 8 clips kept (Paw = idle_04, Lunge = attack_01, Rear = attack_02, Swipe = attack_03), keys shifted to 0 and resampled, static channels baked into the rest pose, COLOR_0 dropped, 512 ETC1S + Draco. Not preloaded: src/bear.js prefetches it during the east crag climb. ?bear=0 turns it off."
     }
   },
   "placements": [
@@ -1524,6 +1545,7 @@
     "reef": ["reef_corals"],
     "liftkit": ["lift_kit"],
     "clubs": ["club_driver", "hockey_stick"],
-    "crag": ["crag_kit"]
+    "crag": ["crag_kit"],
+    "bear": ["bear"]
   }
 }

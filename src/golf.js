@@ -560,5 +560,5 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     return out;
   }
 
-  return { update, club, green, ball: ballMesh };
+  return { update, club, green, ball: ballMesh, face, ballState: ball };
 }

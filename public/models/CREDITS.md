@@ -74,3 +74,14 @@ Changes made for House (Blender 4.2.3 + gltf-transform + KTX-Software 4.4.2, scr
 - club_driver: modelled from a subdivided cage (crown, skirt, sole, face with scorelines, hosel, ferrule, graphite shaft, rubber grip), 3,460 tris, one material; 512 colour atlas + 256 normal/ORM generated procedurally (no third-party textures). KTX2 (ETC1S colour, UASTC normal/ORM), Draco.
 - hockey_stick: swept D-section along a shaft + J-hook centreline, 1,088 tris; 1024x256 colour (carbon body, teal/white shaft panels, towelling grip), 512x128 normal, 256x64 ORM, procedural. KTX2 + Draco.
 - crag_kit: the 2k glTF scans were scaled to hold size (0.23-0.27 m) or crag size (0.95-2.2 m), PCA-ish oriented (longest axis along the wall), decimated (holds 150-200 tris, ledge 480, crags 300/900), smart-UV'd into one 1024 atlas, and the scans' colour and normal detail baked onto the low-poly pieces in Cycles. The atlas is colour-matched toward Poly Haven "dark_rock" (the cliff material) and carries a chalk/cavity vertex tint. Colour ETC1S 1024, normal UASTC 512, Draco. 2,748 tris in all. Built with clubs/build/cragkit.py (outside this repo).
+
+## Overlook bear (CC-BY-SA 3.0)
+
+| File | Asset | Author | License | Source |
+|---|---|---|---|---|
+| models/enemies/bear.glb | Brown bear: mesh `art/meshes/skeletal/bear.dae`, skin `art/textures/skins/skeletal/animal_bear_brown.png`, animations `art/animation/quadraped/bear/*.dae` | Wildfire Games (0 A.D.) | CC-BY-SA 3.0 | https://gitea.wildfiregames.com/0ad/0ad (0 A.D. art is licensed CC-BY-SA 3.0: https://creativecommons.org/licenses/by-sa/3.0/) |
+
+- **bear.glb is an adapted work and stays under CC-BY-SA 3.0** (share-alike). It is not CC0 like the rest of the House-made models. If you remix it, keep the attribution "Wildfire Games (0 A.D.)" and the CC-BY-SA 3.0 licence. The licence covers only this file. The code that drives it (src/bear.js, src/bearfight.js) is ordinary House code.
+- Changes from the 0 A.D. originals: DAE imported in Blender 4.2.3 with the brown-bear skin, and the whole model scaled x0.44 to a 2.25 m adult. Wrapped in a `Bear` root so the clips' armature scale keys no longer override the scale. 8 of the 0 A.D. clips were kept and renamed: Idle = bear_idle_01, Paw = bear_idle_04, Walk, Run, Lunge = bear_attack_01, Rear = bear_attack_02, Swipe = bear_attack_03, Death = bear_death_01. Keys were shifted to 0 and resampled (tolerance 0.0005), channels that are static across all clips were baked into the rest pose, COLOR_0 was dropped, the texture was resized to 512 and ETC1S KTX2 compressed, and the geometry is Draco. Result: 2,530 tris, 75 joints, one skinned mesh, 455 KB.
+- The roar's open jaw is procedural (src/bear.js rotates `Ursidae_Jaw_01`); there is no extra clip.
+- The bear-claw trophy left at the den after a kill is built in code (src/bear.js) and is CC0 like the rest of the project.
