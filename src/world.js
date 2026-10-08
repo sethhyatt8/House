@@ -3135,8 +3135,11 @@ function createCliff(scene, targets, assets) {
     if (floorRock) applyWorldUv(slab, 2.0);
     const rampLen = Math.hypot(cave.x0 - -2.25, beachTop - shallowY);
     const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampLen, 0.16, spanZ), shallowMat);
-    ramp.position.set((cave.x0 + -2.25) / 2, (beachTop + shallowY) / 2, cave.z);
     ramp.rotation.z = Math.atan2(beachTop - shallowY, cave.x0 - -2.25);
+    // ground/boat pass: the box was centred on the walk line, so its top sat 0.08 / cos(51 deg) = 12.7 cm above the
+    // ramp the feet follow (shallowFloor) and you waded "into" it. Drop it so the top face is the walk line.
+    const rampSink = legacy('ground') || new URLSearchParams(location.search).get('ground') === 'old' ? 0 : 0.08 / Math.cos(ramp.rotation.z);
+    ramp.position.set((cave.x0 + -2.25) / 2, (beachTop + shallowY) / 2 - rampSink, cave.z);
     ramp.receiveShadow = true;
     ramp.userData.shore = true;
     scene.add(ramp);
@@ -3604,7 +3607,9 @@ function createCrateYard(scene, targets, rockMap, assets) {
   slab.receiveShadow = true;
   scene.add(slab);
   const rim = new THREE.MeshStandardMaterial({ color: 0x7c756c, roughness: 1 });
+  yard.rocks = []; // ground/boat pass: walk.js colliders, so the feet don't go into the rim rocks
   [[yard.x0 + 0.55, yard.z1 - 0.7, 0.48], [yard.x1 - 0.6, yard.z1 - 0.85, 0.4], [yard.x1 - 0.5, 3.35, 0.32]].forEach(([x, z, radius], index) => {
+    yard.rocks.push({ x, z, r: radius, top: radius * 1.42 });
     const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 1), rim);
     boulder.position.set(x, radius * 0.42, z);
     boulder.castShadow = true;

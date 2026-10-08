@@ -23,8 +23,14 @@ export const MOVE_SPEED = num('movespeed', 1.6);   // m/s at full stick
 export const SNAP_DEG = num('snapdeg', 30);
 export const SMOOTH_TURN_DEG = num('turnspeed', 110); // deg/s
 export const RADIUS = 0.2;      // body radius for walls
-export const STEP_UP = 0.42;    // highest step you walk up
+export const STEP_UP = 0.42;    // highest step you walk up (also the highest crate top you stand on)
 export const DROP = 0.5;        // deepest step you walk down; deeper is a ledge
+// Ground/boat pass: one ground-follow rule for every frame the rig is on its feet (followGround below).
+// ?ground=old restores the previous behaviour (12 cm hover band, crate tops only up to +0.40, no rim-rock colliders).
+export const GROUND_OLD = params.get('ground') === 'old';
+export const SNAP_DOWN = 0.26;  // a floor this close under the feet is followed (stairs, ramps, crate edges): no hover
+export const GRAVITY = 9.2;
+export const FALL_MAX = 16;
 
 export function inBox(box, x, z) {
   return !!box && x >= box.x0 && x <= box.x1 && z >= box.z0 && z <= box.z1;
@@ -38,7 +44,9 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
       if (Math.abs(x - crate.position.x) > crate.userData.hx) continue;
       if (Math.abs(z - crate.position.z) > crate.userData.hz) continue;
       const top = crate.position.y + crate.userData.hy;
-      if (top > feetY + 0.4) continue;
+      // was feetY + 0.4 while the walker only blocks tops above feetY + STEP_UP (0.42): 0.42 m crates were neither
+      // stood on nor blocked, so you walked through them with your feet 42 cm inside
+      if (top > feetY + (GROUND_OLD ? 0.4 : STEP_UP + 0.005)) continue;
       if (top > best) best = top;
     }
     return best;
@@ -106,6 +114,13 @@ function staticColliders({ world, startCell, cliffX, roof }) {
   list.push({ x0: 1.8, x1: 2.5, z0: 0.9, z1: 2.2, y0: 0, y1: 0.85, why: 'room wall' });
   for (const w of world.lift?.colliders || []) list.push({ ...w, why: 'lift wall' });
   for (const block of world.crag?.colliders || []) list.push(block);
+  if (!GROUND_OLD) {
+    // ground/boat pass: the yard rim boulders and the paint-room fire pit had no collider, so the feet went into them
+    // (rock boxes reach 0.6 m over the top so you can't step down into one off a crate either)
+    for (const rock of world.yard?.rocks || []) list.push({ x0: rock.x - rock.r, x1: rock.x + rock.r, z0: rock.z - rock.r, z1: rock.z + rock.r, y0: -0.1, y1: rock.top + 0.6, why: 'rock' });
+    const pit = world.gallery?.pit;
+    if (pit) list.push({ x0: pit.x - pit.r, x1: pit.x + pit.r, z0: pit.z - pit.r, z1: pit.z + pit.r, y0: pit.y - 0.1, y1: pit.y + 0.5, why: 'fire pit' });
+  }
   const cave = world.cave;
   if (cave) {
     const y0 = cave.floor - 0.2;
@@ -270,4 +285,24 @@ export function stickToWorld(orientation, sx, sy, out = { x: 0, z: 0, mag: 0 }) 
   out.z = (fwd.z * -sy + rz * sx) * k;
   out.mag = mag <= dead ? 0 : (mag - dead) / (1 - dead);
   return out;
+}
+
+// Ground/boat pass: the one ground-follow step. Feet (rig y, = the floor you stand on; the headset adds your real eye
+// height on top) follow the floor under the head:
+//   floor above the feet (step up, or the floor rose under you)  -> snap up onto it
+//   floor 0..SNAP_DOWN below (stairs, ramps, a crate edge)         -> snap down onto it (no hover band)
+//   floor further below                                            -> gravity fall, land on it
+// Returns { feet, vy, landed: impact speed when this frame landed (or 0), moved: dy applied }.
+export function followGround(feet, ground, vy, dt, { slide = null } = {}) {
+  const gap = feet - ground;
+  if (GROUND_OLD) {
+    if (gap <= 0.12) return { feet: gap < -0.01 ? ground : feet, vy: 0, landed: vy < 0 ? -vy : 0, moved: gap < -0.01 ? -gap : 0, rest: true };
+  } else if (gap <= (vy < -0.5 ? 0.0 : SNAP_DOWN)) {
+    return { feet: ground, vy: 0, landed: vy < 0 ? -vy : 0, moved: -gap };
+  }
+  let v = Math.max(-FALL_MAX, vy - GRAVITY * dt);
+  if (slide != null) v = Math.max(slide, v);
+  const next = feet + v * dt;
+  if (next <= ground) return { feet: ground, vy: 0, landed: -v, moved: ground - feet };
+  return { feet: next, vy: v, landed: 0, moved: next - feet };
 }

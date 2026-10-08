@@ -9,6 +9,7 @@ import { brickLocalPosition, canPlaceAssembly, columnTop, connectedBricks, creat
 import { hostRoomCode, openRoom, watchCodeFromUrl } from './watch.js';
 import { createAssetManager } from './assets.js';
 import { legacy } from './flags.js';
+import { GROUND_OLD, followGround } from './walk.js'; // ground/boat pass
 import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 import { createLiftFeel } from './liftfeel.js';
@@ -246,7 +247,8 @@ if (world.cave?.tunnel && world.cave?.room) {
   [
     { x: cave.standX + 0.5, z: cave.standZ, look: new THREE.Vector3(cave.standX - 3, cave.floor + 1.0, cave.standZ), status: 'Cave floor, by the water.' },
     { x: cave.tunnel.x0 - 0.45, z: tz, look: new THREE.Vector3(cave.tunnel.x1, cave.floor + 1.2, tz), status: 'Mouth of the tunnel.' },
-    { x: roomX, z: roomZ, look: new THREE.Vector3(cave.room.x1, cave.floor + 1.1, roomZ), status: 'In the paint room.' },
+    // ground/boat pass: the spot was the room centre = the middle of the fire pit (now solid); stand 0.9 m west of it
+    { x: roomX - (GROUND_OLD ? 0 : 0.9), z: roomZ, look: new THREE.Vector3(cave.room.x1, cave.floor + 1.1, roomZ), status: 'In the paint room.' },
   ].forEach((spot) => {
     caveSpots.push(teleportSpots.length);
     addTeleportSpot({ ...spot, floor: cave.floor, underground: true, eye: new THREE.Vector3(spot.x, cave.floor + 1.55, spot.z) });
@@ -634,10 +636,12 @@ function arriveOnRoof() {
   if (pose) {
     const head = pose.transform.position;
     const roof = ladder.userData.roofY;
+    // ground/boat pass: rig y = the roof (the headset supplies the eye height). It used to place the HEAD at
+    // max(1.4, eye): crouched or seated players arrived floating and dropped.
     const eye = Math.max(1.4, head.y - climb.lifted);
     shiftPlayer(
       ladder.position.x + 0.85 - head.x,
-      roof + eye - head.y,
+      GROUND_OLD ? roof + eye - head.y : roof - xrOffset.y,
       ladder.position.z - head.z,
     );
   }
@@ -712,7 +716,11 @@ function snapShaft(spot, status) {
     if (pose) {
       const head = pose.transform.position;
       const eye = Math.max(1.25, head.y - xrOffset.y);
-      shiftPlayer(spot.x - head.x, spot.y + eye - head.y, spot.z - head.z);
+      // ground/boat pass: rig y = the spot's floor (was head-based with a 1.25 m minimum: crouching at the top-out
+      // put you up to 25 cm above the ledge)
+      // (the east crag top-out keeps its own placement: another pass owns it)
+      const headBased = GROUND_OLD || climb?.ladder?.userData?.crag;
+      shiftPlayer(spot.x - head.x, headBased ? spot.y + eye - head.y : spot.y - xrOffset.y, spot.z - head.z);
     }
   }
   leaveClimb();
@@ -996,40 +1004,26 @@ function updatePlayerFall(dt) {
   const head = pose.transform.position;
   const feetY = xrOffset.y;
   const ground = groundUnder(head.x, head.z, feetY);
-  const gap = feetY - ground;
-  if (gap <= 0.12) {
-    if (gap < -0.01) landShift(ground, feetY, head);
-    const wading = world.shallowFloor?.(head.x, head.z) != null;
-    if (!wading && fallVy < -1.2 && ground === WATER_Y) { // rowing pass: was <= WATER_Y + 0.05, which made the dry lift floors at -10.8 / -14.4 count as sea
-      fallVy = 0;
-      startWaterBite(head.x, head.z);
-      return;
-    }
-    fallVy = 0;
-    return;
-  }
-  if (climb) leaveClimb();
-  fallVy = Math.max(-16, fallVy - 9.2 * dt);
+  // ground/boat pass: one rule (walk.js followGround): snap up, snap down within SNAP_DOWN (the old 12 cm band was
+  // never closed, so you hovered after every small step down and all the way down ramps), else fall and land.
   // forest pass: letting go on a notch line is a controlled slide down the rock, not a free fall
   const sliding = world.notches && nearNotches(world.notches.routes, head.x, head.z);
-  if (sliding) fallVy = Math.max(-4.5, fallVy);
-  const next = feetY + fallVy * dt;
-  if (next <= ground) {
-    landShift(ground, feetY, head);
-    if (sliding && fallVy < -2.5 && ground !== WATER_Y) {
-      pulseBoth(0.6, 90);
-      setStatus('You slide down the rock and land on your feet.');
-    }
-    const wading = world.shallowFloor?.(head.x, head.z) != null;
-    if (!wading && ground === WATER_Y) {
-      fallVy = 0;
-      startWaterBite(head.x, head.z);
-      return;
-    }
-    fallVy = 0;
+  const step = followGround(feetY, ground, fallVy, dt, { slide: sliding ? -4.5 : null });
+  if (step.feet !== ground && !step.rest) { // in the air
+    if (climb) leaveClimb();
+    fallVy = step.vy;
+    shiftPlayer(0, step.moved, 0);
     return;
   }
-  shiftPlayer(0, fallVy * dt, 0);
+  if (Math.abs(step.feet - feetY) > 1e-4) landShift(step.feet, feetY, head);
+  fallVy = 0;
+  if (sliding && step.landed > 2.5 && ground !== WATER_Y) {
+    pulseBoth(0.6, 90);
+    setStatus('You slide down the rock and land on your feet.');
+  }
+  const wading = world.shallowFloor?.(head.x, head.z) != null;
+  // rowing pass: === WATER_Y only (the dry lift floors at -10.8 / -14.4 are below sea level)
+  if (!wading && ground === WATER_Y && (step.landed > (GROUND_OLD ? 1.2 : 0) || feetY - ground > 0.01)) startWaterBite(head.x, head.z);
 }
 
 const raycaster = new THREE.Raycaster();
@@ -1251,7 +1245,8 @@ window.addEventListener('pointerup', onPointerUp);
 window.addEventListener('keydown', onKeyDown);
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
 
-renderer.setAnimationLoop(frame);
+// ?testhooks=1: the headless checks run right after each frame, still inside the XR callback (live XRFrame)
+renderer.setAnimationLoop(pageParams.get('testhooks') === '1' ? (time, xr) => { frame(time, xr); testFrameHook?.(); } : frame);
 
 function setupController(index) {
   const controller = renderer.xr.getController(index);
@@ -2963,7 +2958,8 @@ function boardCanoe() {
     const pose = ref && xrFrame.getViewerPose(ref);
     if (pose) {
       const head = pose.transform.position;
-      shiftPlayer(seat.x - head.x, seat.y + 0.72 - head.y, seat.z - head.z);
+      seatEyeShift(head.y - xrOffset.y);
+      shiftPlayer(seat.x - head.x, seat.y + SEAT_EYE - head.y, seat.z - head.z);
       // rowing pass: sit facing the bow (oars and paddles), so pushing the handles forward reads as forward
       if (world.canoe.oarMode || world.canoe.paddleMode) {
         const o = pose.transform.orientation;
@@ -3064,6 +3060,39 @@ function tryStickExit(dirX, dirZ) {
     }
   }
   return false;
+}
+
+// Ground/boat pass: seated eye height in the canoe follows your real posture. Boarding puts the eyes SEAT_EYE above
+// the seat for whatever height you board at; sitting down (or standing up) for real afterwards used to move the eyes
+// 0.4-0.5 m (into the gunwale). Now a sustained real-height change (> 0.3 m for 1.5 s, no oar in hand, so a stroke's
+// lean never moves the hands) re-seats you smoothly. ?ground=old turns it off.
+const SEAT_EYE = 0.72;
+const seatPosture = { anchor: 0, slow: 0, held: 0, pending: 0 };
+function seatEyeShift(realH) { // realH: headset height above your real floor (local-floor) when you sat down
+  seatPosture.anchor = realH;
+  seatPosture.slow = realH;
+  seatPosture.held = 0;
+  seatPosture.pending = 0;
+}
+function updateSeatPosture(dt) {
+  if (GROUND_OLD || !aboard || !renderer.xr.isPresenting || !xrFrame) return;
+  const head = headSample();
+  const realH = head.y - xrOffset.y;
+  seatPosture.slow += (realH - seatPosture.slow) * (1 - Math.exp(-dt / 0.6));
+  const oarInHand = world.canoe.anyOar?.() || world.canoe.longOars?.some((o) => o.hand) || world.canoe.paddles?.some((pd) => pd.hand);
+  if (!seatPosture.pending && !oarInHand && Math.abs(seatPosture.slow - seatPosture.anchor) > 0.3) {
+    seatPosture.held += dt;
+    if (seatPosture.held > 1.5) {
+      seatPosture.pending = seatPosture.anchor - seatPosture.slow; // rig moves by this so the eyes return to the seat height
+      seatPosture.anchor = seatPosture.slow;
+      seatPosture.held = 0;
+    }
+  } else if (!seatPosture.pending) seatPosture.held = 0;
+  if (seatPosture.pending) {
+    const step = Math.sign(seatPosture.pending) * Math.min(Math.abs(seatPosture.pending), 0.9 * dt);
+    if (shiftPlayer(0, step, 0)) seatPosture.pending -= step;
+    if (Math.abs(seatPosture.pending) < 1e-3) seatPosture.pending = 0;
+  }
 }
 
 const lastSeat = new THREE.Vector3();
@@ -4298,8 +4327,34 @@ function sampleStickMotion() {
   return sampleGripMotion(world.hockey?.stick);
 }
 
+// Ground/boat pass: squeeze/select handlers run between animation frames, when the XRFrame we kept is no longer
+// active and getViewerPose()/getPose() throw InvalidStateError ("XRFrame access outside the callback..."). Off the boat,
+// every squeeze asks nearSeat() -> headSample() first, so the throw aborted the whole grab: no torch, rung or item
+// pickup after leaving the canoe. The wrapper answers outside the frame with the last pose this frame produced
+// (null if none), so callers fall back the way they already do when a pose is missing.
+const framePoses = new WeakMap();
+function liveFrame(raw) {
+  if (!raw) return null;
+  return {
+    raw,
+    session: raw.session,
+    getViewerPose(ref) {
+      try {
+        const pose = raw.getViewerPose(ref);
+        if (ref) framePoses.set(ref, pose);
+        return pose;
+      } catch (err) {
+        return (ref && framePoses.get(ref)) || null;
+      }
+    },
+    getPose(space, ref) {
+      try { return raw.getPose(space, ref); } catch (err) { return null; }
+    },
+  };
+}
+
 function frame(time, frame) {
-  xrFrame = frame ?? null;
+  xrFrame = liveFrame(frame);
   placeInCell();
   containPlayer();
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -4379,6 +4434,7 @@ function frame(time, frame) {
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
   checkStepOut();
+  updateSeatPosture(dt); // ground/boat pass: the canoe seat follows your real posture
   pullOar();
   for (const controller of controllers) updateLaser(controller);
   if (renderer.xr.isPresenting && !legacy('canoe') && world.canoe.hover) {
@@ -4460,6 +4516,7 @@ function frame(time, frame) {
 
 startRelay();
 
+let testFrameHook = null;
 // Test hooks for the headless WebXR checks (?testhooks=1 only; nothing is exposed otherwise).
 if (pageParams.get('testhooks') === '1') {
   // XRFrame poses are only valid inside the frame callback; in XR three copies the last head pose into `camera`
@@ -4489,5 +4546,20 @@ if (pageParams.get('testhooks') === '1') {
     },
     cameraMatrix: () => renderer.xr.getCamera().matrixWorld.toArray(),
     chopDoor() { (world.gear.doorBoards || []).forEach((b) => { b.userData.dead = true; b.visible = false; }); },
+    // ground pass: what the headless ground-truth survey (ground/harness) needs
+    THREE,
+    renderer,
+    groundModel,
+    walker,
+    waterY: WATER_Y,
+    roof,
+    spots: () => teleportSpots.map((spot) => ({ x: spot.x, z: spot.z, floor: spot.floor ?? 0, seat: !!spot.seat, status: spot.status })),
+    teleportTo,
+    boardCanoe,
+    leaveCanoe,
+    tryStickExit,
+    playerDown,
+    fall: () => fallVy,
+    setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };
 }

@@ -537,6 +537,7 @@ function stamp(wall, x, y, color, radiusPx, alpha) {
   }
 
   return {
+    pit: { x: midX, y: floorY, z: midZ, r: 0.36 }, // ground/boat pass: walk.js keeps your feet out of the fire pit
     tunnel: { x0: spec.mouthX - 0.15, x1: roomX0 + 0.25, z0: spec.z0 + 0.08, z1: spec.z1 - 0.08 },
     room: { x0: roomX0 - 0.1, x1: roomX1 - 0.28, z0: roomZ0 + 0.28, z1: roomZ1 - 0.28 },
     brushAt: { x: roomX0 + 0.55, y: floorY + 0.02, z: roomZ0 + 0.85 },

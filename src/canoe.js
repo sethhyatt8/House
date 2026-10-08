@@ -19,19 +19,44 @@ const params = typeof location !== 'undefined' ? new URLSearchParams(location.se
 export const ROW_MODE = (params.get('rowing') === 'old' || legacy('row')) ? 'old' : (params.get('rowing') === 'paddle' ? 'paddle' : 'oars');
 export const PADDLE_MODE = ROW_MODE === 'paddle';
 export const OAR_MODE = ROW_MODE === 'oars';
+const OARS_OLD_EARLY = params.get('oars') === 'old';
 const OARS = {
   len: 2.1,                 // handle end to blade tip (the paddle.glb model stretched to oar length)
-  inboard: 0.55,            // handle end to the ring
-  pivot: { x: 0.45, y: 0.34, z: -0.35 },  // ring centre, boat frame (a little ahead of the seat: the hands sweep around it)
+  // ground/boat pass: rings on short brackets 10 cm outside the gunwale and a 0.5 m inboard, so the two handle ends
+  // stay >= 10 cm apart across the whole sweep (they used to cross the centreline and pass through each other)
+  inboard: OARS_OLD_EARLY ? 0.55 : 0.5,  // handle end to the ring
+  pivot: { x: OARS_OLD_EARLY ? 0.45 : 0.55, y: 0.34, z: -0.35 },  // ring centre, boat frame (a little ahead of the seat: the hands sweep around it)
   bladeLen: 0.7,
   samples: [0.12, 0.33, 0.54], // blade sample points, metres in from the tip
   neutralDepth: 0.08,       // where the blade centre sits when you take hold (handle height is calibrated on grab)
   gain: Number(params.get('oargain')) || 1,
   k: 38,                    // N per (m/s)^2 per sample (blade ~0.7 x 0.25 m, 3 samples; tuned for ~1.3 m/s cruising)
   lin: 10,
-  maxForce: 380,
+  maxForce: OARS_OLD_EARLY ? 380 : 600, // ground/boat pass: 380 clipped a brisk stroke, so hard and soft felt the same
   maxTorque: 300,
-  feather: params.get('feather') !== '0', // wrist roll about the shaft feathers the blade (25 deg dead zone)
+  feather: params.get('feather') !== '0', // ?oars=old only: wrist roll about the shaft feathers the blade (25 deg dead zone)
+};
+// Ground/boat pass oar feel (default; ?oars=old restores the previous pose + feathering + blade-point torque):
+// - the oar turns only about its ring: bearing and pitch come from where the hand is relative to the ring (a lever),
+//   never from controller roll, so it cannot spin in the hand; the blade face stays square to the stroke.
+// - sweep / pitch are clamped so the handle never goes into the rower, under the hull floor or through the other oar
+//   (when the two handles overlap the starboard one rides over the port one, as in real sculling).
+// - thrust per blade sample = wet (submerged area) fraction x blade speed through the water (k|v|+lin) x coefficient,
+//   applied at the oarlock: hands push FORWARD with the blades in = boat FORWARD, pull BACK = boat BACKWARD,
+//   blades out = nothing, one oar = the bow turns away from that side.
+// - ?feather=1 adds a deliberate feather: twist the wrist past 55 deg about the shaft and the blade lies flat
+//   (no bite), back under 35 deg and it squares up again. Off by default.
+export const OARS_OLD = OARS_OLD_EARLY;
+const OAR_FEEL = {
+  aft: 0.45,      // bearing limit toward the rower (rad): handle end stays ~12 cm ahead of the seat
+  fore: -1.15,    // bearing limit toward the bow
+  dyMin: -0.24,   // handle end at least ~10 cm above the hull floor
+  dyMax: 0.3,     // blade no deeper than ~0.5 m
+  rate: 9,        // rad/s: a one-frame tracking jump can't flip the oar
+  near: 0.1,      // hand closer than this (horizontally) to the ring: keep the last bearing
+  gap: 0.05,      // handle-to-handle clearance (shaft radii + margin)
+  featherOn: 0.96, featherOff: 0.61,
+  feather: params.get('feather') === '1',
 };
 const PADDLE = {
   gain: Number(params.get('paddlegain')) || 1,
@@ -256,6 +281,13 @@ export function createCanoe(scene, targets, cave, assets, water) {
       hornA.raycast = () => {};
       hornB.raycast = () => {};
       group.add(ring, hornA, hornB);
+      if (!OARS_OLD_EARLY) { // outrigger bracket from the gunwale out to the ring
+        const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.025, 0.05), bronze);
+        bracket.position.set(side * (P.x - 0.08), P.y - 0.07, P.z);
+        bracket.castShadow = true;
+        bracket.raycast = () => {};
+        group.add(bracket);
+      }
       let model = assets?.feature('boats') ? assets.instance('paddle') : null;
       if (!model) {
         model = new THREE.Group();
@@ -351,6 +383,12 @@ export function createCanoe(scene, targets, cave, assets, water) {
 
   function floating() {
     return groundedFrac === 0 && group.position.x < cave.x0;
+  }
+  // ground/boat pass: oars only lose their bite when the whole hull is on the sand (or inside the cave). The boat's
+  // own rest spot has the stern on the shelf (groundedFrac 1/3), and with the old rule (any keel point aground ->
+  // oar force x0.15, against the grounded hull's static friction) you could sit there rowing forever without moving.
+  function beached() {
+    return OARS_OLD ? !floating() : (groundedFrac > 0.99 || group.position.x >= cave.x0);
   }
 
   function massNow() {
@@ -489,7 +527,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     return group.worldToLocal(out);
   }
   // twist of the controller about the oar shaft (boat frame), for feathering
-  function wristRoll(controller, axis) {
+  function wristRollOld(controller, axis) {
     controller.getWorldQuaternion(oarQ);
     group.getWorldQuaternion(oarQ2);
     oarQ.premultiply(oarQ2.invert());
@@ -502,7 +540,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
   // Pose one oar in the boat frame from the hand (or the rest pose). The handle end follows the hand's height
   // (minus the grab calibration) and its bearing around the ring; the oar always passes through the ring, so the
   // blade moves the other way, Lout/Lin = 2.8x as far.
-  function poseLongOar(o) {
+  function poseLongOarOld(o) {
     const { P, side } = o;
     const Lin = OARS.inboard;
     let dy;
@@ -540,6 +578,88 @@ export function createCanoe(scene, targets, cave, assets, water) {
     o.root.matrix.copy(o.basis);
     o.root.matrixWorldNeedsUpdate = true;
   }
+  // twist of the controller about the oar shaft (boat frame): the controller's X axis projected on the plane
+  // across the shaft. No axis switching (the old version swapped axes near 0.9 and jumped); null when undefined.
+  function wristRoll(controller, axis) {
+    if (OARS_OLD) return wristRollOld(controller, axis);
+    controller.getWorldQuaternion(oarQ);
+    group.getWorldQuaternion(oarQ2);
+    oarQ.premultiply(oarQ2.invert());
+    oarX.set(1, 0, 0).applyQuaternion(oarQ);
+    oarX.addScaledVector(axis, -oarX.dot(axis));
+    if (oarX.lengthSq() < 0.09) return null;
+    oarN0.crossVectors(oarUp, axis).normalize();
+    oarB0.crossVectors(axis, oarN0);
+    return Math.atan2(oarX.dot(oarB0), oarX.dot(oarN0));
+  }
+  // Pose one oar in the boat frame. The ring is fixed; the handle end sits on a sphere of radius `inboard` around it,
+  // aimed at the hand (bearing from the hand's XZ offset, pitch from its height minus the grab calibration). Clamped
+  // and rate-limited; the blade face is square to the sweep unless a deliberate feather is on.
+  function poseLongOar(o, dt = 0, lift = 0, keep = false) {
+    if (OARS_OLD) return poseLongOarOld(o);
+    const { P, side } = o;
+    const Lin = OARS.inboard;
+    let dy;
+    let ang;
+    let feather = 0;
+    if (o.hand) {
+      const h = handLocal(o.hand, handLocalV);
+      dy = h.y - o.dy0 - P.y;
+      const hx = h.x - P.x;
+      const hz = h.z - P.z;
+      const inb = -side * hx;
+      ang = o.ang ?? 0.1;
+      if (!keep && Math.hypot(hx, hz) > OAR_FEEL.near) ang = Math.atan2(hz, Math.max(0.05, inb)); // 0 = straight inboard, + = toward the stern
+      ang = THREE.MathUtils.clamp(ang, OAR_FEEL.fore, OAR_FEEL.aft);
+      if (!keep && dt > 0 && o.ang != null) ang = o.ang + THREE.MathUtils.clamp(ang - o.ang, -OAR_FEEL.rate * dt, OAR_FEEL.rate * dt);
+      feather = o.feather;
+    } else {
+      dy = 0.05;
+      ang = 0.12; // square in the lock, shaft through the ring, blade just out over the side
+      feather = 0.35;
+    }
+    o.ang = o.hand ? ang : null;
+    dy = THREE.MathUtils.clamp(dy + lift, OAR_FEEL.dyMin, OAR_FEEL.dyMax + lift);
+    const horiz = Math.sqrt(Math.max(0, Lin * Lin - dy * dy));
+    oarTmp.set(-side * Math.cos(ang) * horiz, dy, Math.sin(ang) * horiz).divideScalar(Lin); // ring -> handle end
+    o.end.copy(P).addScaledVector(oarTmp, Lin);
+    o.axis.copy(oarTmp).negate(); // handle -> blade
+    oarN0.crossVectors(oarUp, o.axis).normalize();
+    oarB0.crossVectors(o.axis, oarN0);
+    o.normal.copy(oarN0).multiplyScalar(Math.cos(feather)).addScaledVector(oarB0, Math.sin(feather));
+    const yAxis = oarTmp; // model +Y points from the blade back to the handle
+    oarX.crossVectors(yAxis, o.normal).normalize();
+    o.basis.makeBasis(oarX, yAxis, o.normal).setPosition(o.end);
+    o.root.matrix.copy(o.basis);
+    o.root.matrixWorldNeedsUpdate = true;
+  }
+  // closest distance between the two inboard shafts (ring -> handle end), boat frame
+  const segQ = new THREE.Line3();
+  const segC1 = new THREE.Vector3();
+  const segC2 = new THREE.Vector3();
+  function handleGap(a, b) {
+    segLine.set(a.P, a.end);
+    segQ.set(b.P, b.end);
+    let best = Infinity;
+    for (let i = 0; i <= 8; i += 1) {
+      segLine.at(i / 8, segC1);
+      segQ.closestPointToPoint(segC1, true, segC2);
+      best = Math.min(best, segC1.distanceTo(segC2));
+    }
+    return best;
+  }
+  // both oars: pose, then keep the handles apart (starboard over port)
+  function poseOarPair(dt) {
+    longOars.forEach((o) => poseLongOar(o, dt));
+    if (OARS_OLD || longOars.length < 2) return;
+    const star = longOars.find((o) => o.side > 0);
+    const port = longOars.find((o) => o.side < 0);
+    let lift = 0;
+    while (handleGap(star, port) < OAR_FEEL.gap && lift < 0.12) {
+      lift += 0.015;
+      poseLongOar(star, 0, lift, true);
+    }
+  }
   function nearLongOar(points, reach = 0.24) {
     let best = null;
     let bestDist = reach;
@@ -565,7 +685,9 @@ export function createCanoe(scene, targets, cave, assets, water) {
     // calibrate: wherever you take hold, the blade starts just under the surface (catch-ready)
     const pivotW = oarTmp.copy(o.P);
     group.localToWorld(pivotW);
-    const above = pivotW.y - surfaceAt(pivotW.x, pivotW.z);
+    // ground/boat pass: calibrate against the level boat (the 1-2 deg bob roll used to give the two oars different
+    // neutral depths, so equal strokes pulled to one side)
+    const above = (OARS_OLD ? pivotW.y : group.position.y + o.P.y) - surfaceAt(pivotW.x, pivotW.z);
     const outCentre = OARS.len - OARS.inboard - OARS.bladeLen / 2;
     const dyNeutral = (above + OARS.neutralDepth) * OARS.inboard / outCentre;
     const h = handLocal(controller, handLocalV);
@@ -575,8 +697,10 @@ export function createCanoe(scene, targets, cave, assets, water) {
     o.wet = 0;
     o.wasWet = false;
     o.feather = 0;
+    o.ang = null;
     poseLongOar(o);
-    o.roll0 = wristRoll(controller, o.axis);
+    o.roll0 = wristRoll(controller, o.axis) ?? 0;
+    o.feathered = false;
     oarGrips[o.name] = controller;
     onHaptic?.(controller, 0.8, 60);
     snapHand(controller, o.root);
@@ -595,18 +719,32 @@ export function createCanoe(scene, targets, cave, assets, water) {
   const oaVel = new THREE.Vector3();
   const oaNormal = new THREE.Vector3();
   const oaQuat = new THREE.Quaternion();
+  const oarLock = new THREE.Vector3();
   function oarForces(dt) {
     const out = { x: 0, z: 0, torque: 0 };
     group.updateMatrixWorld(true);
     group.getWorldQuaternion(oaQuat);
     for (const o of longOars) {
-      if (o.hand && OARS.feather) {
+      if (o.hand && OARS_OLD && OARS.feather) {
         const roll = wristRoll(o.hand, o.axis) - o.roll0;
         const r = Math.atan2(Math.sin(roll), Math.cos(roll));
         const dead = 0.44;
         o.feather = Math.abs(r) <= dead ? 0 : THREE.MathUtils.clamp((r - Math.sign(r) * dead) * 1.6, -Math.PI / 2, Math.PI / 2);
+      } else if (o.hand && !OARS_OLD) {
+        // square blade unless ?feather=1 and a deliberate twist (hysteresis, binary: square or flat)
+        const roll = OAR_FEEL.feather ? wristRoll(o.hand, o.axis) : null;
+        if (roll != null) {
+          const r = Math.abs(Math.atan2(Math.sin(roll - o.roll0), Math.cos(roll - o.roll0)));
+          if (!o.feathered && r > OAR_FEEL.featherOn) o.feathered = true;
+          else if (o.feathered && r < OAR_FEEL.featherOff) o.feathered = false;
+        }
+        if (!OAR_FEEL.feather) o.feathered = false;
+        o.feather = o.feathered ? Math.PI / 2 : 0;
       }
-      poseLongOar(o);
+    }
+    if (OARS_OLD) longOars.forEach((o) => poseLongOar(o));
+    else poseOarPair(dt);
+    for (const o of longOars) {
       const shown = gripHands[o.name];
       if (!o.hand) { shown.visible = false; continue; }
       o.root.updateMatrixWorld(true);
@@ -633,7 +771,9 @@ export function createCanoe(scene, targets, cave, assets, water) {
             const fx = oaNormal.x * mag;
             const fz = oaNormal.z * mag;
             const f = boatFrame(fx, fz, yaw);
-            const r = boatFrame(oaPoint.x - group.position.x, oaPoint.z - group.position.z, yaw);
+            if (!OARS_OLD) { oarLock.copy(o.P); group.localToWorld(oarLock); } // force goes into the boat at the ring
+            const at = OARS_OLD ? oaPoint : oarLock;
+            const r = boatFrame(at.x - group.position.x, at.z - group.position.z, yaw);
             out.x += f.lat;
             out.z += f.along;
             out.torque += r.along * f.lat - r.lat * f.along;
@@ -661,7 +801,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const fl = Math.hypot(out.x, out.z);
     if (fl > OARS.maxForce) { out.x *= OARS.maxForce / fl; out.z *= OARS.maxForce / fl; }
     out.torque = THREE.MathUtils.clamp(out.torque, -OARS.maxTorque, OARS.maxTorque);
-    if (!floating()) { out.x *= 0.15; out.z *= 0.15; out.torque *= 0.15; }
+    if (beached()) { out.x *= 0.15; out.z *= 0.15; out.torque *= 0.15; }
     lastPush = out;
     return out;
   }
@@ -813,7 +953,10 @@ export function createCanoe(scene, targets, cave, assets, water) {
       swellPitch += (targetPitch - swellPitch) * (1 - Math.exp(-dt / 0.35));
       group.rotation.x += swellPitch;
     }
-    group.rotation.z = 0.02 * Math.sin(1.1 * clock);
+    const bobRoll = 0.02 * Math.sin(1.1 * clock);
+    // ground/boat pass: the roll bob is cosmetic. It used to be on while the blades were sampled, so one blade sat
+    // ~3 cm deeper than the other and equal strokes curved; now the forces see a level hull and the bob goes on after.
+    group.rotation.z = OARS_OLD ? bobRoll : 0;
 
     const poseX = group.position.x;
     const poseZ = group.position.z;
@@ -829,6 +972,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     group.position.z += sim.vz * dt;
     if (drag) steerHeld(poseX, poseZ, poseYaw, dt);
     group.rotation.y = sim.yaw;
+    group.rotation.z = bobRoll;
     const softX = -16;
     if (group.position.x < softX) sim.vx += (-16.4 - group.position.x) * dt;
     const zLimit = 7;
@@ -978,7 +1122,7 @@ export function createCanoe(scene, targets, cave, assets, water) {
     const fl = Math.hypot(out.x, out.z);
     if (fl > PADDLE.maxForce) { out.x *= PADDLE.maxForce / fl; out.z *= PADDLE.maxForce / fl; }
     out.torque = THREE.MathUtils.clamp(out.torque, -PADDLE.maxTorque, PADDLE.maxTorque);
-    if (!floating()) { out.x *= 0.15; out.z *= 0.15; out.torque *= 0.15; } // blade on sand barely moves a grounded hull
+    if (beached()) { out.x *= 0.15; out.z *= 0.15; out.torque *= 0.15; } // blade on sand barely moves a grounded hull
     lastPush = out;
     return out;
   }
