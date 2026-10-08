@@ -2,6 +2,8 @@
 // The ball uses the hockey solver with golf size, loft, and a ribbon so the flight stays visible.
 import * as THREE from 'three';
 import { createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
+import { proxyMaterial } from './assets.js';
+import { legacy } from './flags.js';
 
 const BALL_R = 0.02135;
 const LOFT = 12 * Math.PI / 180;
@@ -29,6 +31,33 @@ const SOLE = [-0.03, 0.02, 0.07].map((z) => {
   p.y += HEAD_Y;
   return p;
 });
+const LEGACY_CLUB = {
+  face: FACE_LOCAL,
+  n: FACE_N,
+  toe: FACE_TOE,
+  up: FACE_UP,
+  shaftA: SHAFT_A,
+  shaftB: SHAFT_B,
+  sole: SOLE,
+  halfToe: PLATE_W / 2 + 0.006,
+  halfUp: PLATE_H / 2 + 0.004,
+};
+// models/gear/club_driver.glb (clubs pass): a 1.12 m driver modelled in the same frame as the procedural club
+// (grip hold point at the origin, shaft down -Y, face toward +X), but with a real 58 deg lie, so the head sits
+// out toward +Z/-Y and the toe runs along the ground at address. Loft 12 deg against the ground at address.
+// Numbers come from clubs/build/driver.py (driver_contact.json). ?legacy=driver (or clubs) keeps the old club.
+const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+const MODEL_CLUB = {
+  face: v3([0.0178, -1.0778, 0.0399]),
+  n: v3([0.9781, 0.1763, 0.1102]).normalize(),
+  toe: v3([0, -0.5299, 0.848]).normalize(),
+  up: v3([-0.2079, 0.8295, 0.5183]).normalize(),
+  shaftA: v3([0, -0.04, 0]),
+  shaftB: v3([0, -1.015, 0]),
+  sole: [v3([-0.012, -1.0768, -0.0075]), v3([-0.035, -1.099, 0.0243]), v3([-0.019, -1.1188, 0.0617])],
+  halfToe: 0.1 / 2 + 0.006,
+  halfUp: 0.05 / 2 + 0.004,
+};
 
 // One hand: point the controller and the shaft follows. The top of that controller is the face.
 const HOLD_QUAT = new THREE.Quaternion().setFromRotationMatrix(
@@ -120,7 +149,7 @@ function makeTrail() {
   return { mesh, pos, alpha, geo };
 }
 
-export function createGolf(scene, targets, deckY = GREEN.y) {
+export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
   const green = { ...GREEN, y: deckY };
   const turf = new THREE.Mesh(
     new THREE.BoxGeometry(green.x1 - green.x0, 0.05, green.z1 - green.z0),
@@ -200,17 +229,28 @@ export function createGolf(scene, targets, deckY = GREEN.y) {
   plate.position.copy(PLATE_AT);
   head.add(plate);
   club.add(head);
+  const model = !legacy('driver') && !legacy('clubs') && assets?.enabled ? assets.instance('club_driver') : null;
+  const K = model ? MODEL_CLUB : LEGACY_CLUB;
+  if (model) {
+    // the procedural parts stay as invisible raycast/grab proxies
+    club.traverse((child) => {
+      if (child.isMesh) child.material = proxyMaterial;
+    });
+    club.add(model);
+  }
   club.position.set(-0.38, green.y + 0.08, 0.24);
   club.rotation.z = Math.PI / 2;
   club.traverse((child) => {
     if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
+      const shown = child.material !== proxyMaterial;
+      child.castShadow = shown;
+      child.receiveShadow = shown;
     }
   });
   club.userData = {
     type: 'gear',
     gear: 'driver',
+    model: !!model,
     floorY: green.y + 0.08,
     holdPos: new THREE.Vector3(0, -0.02, -0.03),
     holdRot: new THREE.Euler().setFromQuaternion(HOLD_QUAT),
@@ -243,8 +283,8 @@ export function createGolf(scene, targets, deckY = GREEN.y) {
     n: { x: 1, y: 0, z: 0 },
     toe: { x: 0, y: 0, z: 1 },
     up: { x: 0, y: 1, z: 0 },
-    halfToe: PLATE_W / 2 + 0.006,
-    halfUp: PLATE_H / 2 + 0.004,
+    halfToe: K.halfToe,
+    halfUp: K.halfUp,
     v: { x: 0, y: 0, z: 0 },
     w: { x: 0, y: 0, z: 0 },
     sweep: 0,
@@ -291,24 +331,24 @@ export function createGolf(scene, targets, deckY = GREEN.y) {
 
   function readFace() {
     club.updateWorldMatrix(true, false);
-    worldA.copy(FACE_LOCAL).applyMatrix4(club.matrixWorld);
+    worldA.copy(K.face).applyMatrix4(club.matrixWorld);
     face.c.x = worldA.x;
     face.c.y = worldA.y;
     face.c.z = worldA.z;
-    worldDir(FACE_N, worldA);
+    worldDir(K.n, worldA);
     face.n.x = worldA.x;
     face.n.y = worldA.y;
     face.n.z = worldA.z;
-    worldDir(FACE_TOE, worldA);
+    worldDir(K.toe, worldA);
     face.toe.x = worldA.x;
     face.toe.y = worldA.y;
     face.toe.z = worldA.z;
-    worldDir(FACE_UP, worldA);
+    worldDir(K.up, worldA);
     face.up.x = worldA.x;
     face.up.y = worldA.y;
     face.up.z = worldA.z;
-    worldA.copy(SHAFT_A).applyMatrix4(club.matrixWorld);
-    worldB.copy(SHAFT_B).applyMatrix4(club.matrixWorld);
+    worldA.copy(K.shaftA).applyMatrix4(club.matrixWorld);
+    worldB.copy(K.shaftB).applyMatrix4(club.matrixWorld);
     face.shaft.a.x = worldA.x;
     face.shaft.a.y = worldA.y;
     face.shaft.a.z = worldA.z;
@@ -324,7 +364,7 @@ export function createGolf(scene, targets, deckY = GREEN.y) {
       club.updateWorldMatrix(true, false);
       club.getWorldPosition(gripV);
       let hit = null;
-      for (const local of SOLE) {
+      for (const local of K.sole) {
         soleW.copy(local).applyMatrix4(club.matrixWorld);
         const floorY = floorAt(soleW.x, soleW.z, soleW.y);
         if (floorY == null || floorY <= waterY + 0.05) continue;

@@ -2,6 +2,8 @@
 // The ball solver lives in hockeyball.js (spin, bounce, strike, push pass).
 import * as THREE from 'three';
 import { BALL_R, createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
+import { proxyMaterial } from './assets.js';
+import { legacy } from './flags.js';
 
 const HALF_W = 0.55;
 const GOAL_H = 1.8;
@@ -18,6 +20,21 @@ const SOLE = [
   new THREE.Vector3(0.016, -0.827, 0.02),
   new THREE.Vector3(0.016, -0.827, 0.125),
 ];
+const LEGACY_STICK = { face: FACE_LOCAL, n: FACE_N, toe: FACE_TOE, up: FACE_UP, shaftA: SHAFT_A, shaftB: SHAFT_B, sole: SOLE, halfToe: 0.105, halfUp: 0.027 };
+// models/gear/hockey_stick.glb (clubs pass): a 0.90 m composite stick with a J hook, in the procedural stick's frame
+// (grip at the origin, shaft down -Y, flat playing face toward +X, the hook curling toward +Z). The face is the flat
+// side of the D-section, so contact numbers barely move. From clubs/build/stick.py. ?legacy=stick (or clubs) keeps the old one.
+const MODEL_STICK = {
+  face: new THREE.Vector3(0.0125, -0.8, 0.035),
+  n: FACE_N,
+  toe: FACE_TOE,
+  up: FACE_UP,
+  shaftA: SHAFT_A,
+  shaftB: new THREE.Vector3(0, -0.74, 0),
+  sole: [new THREE.Vector3(0, -0.8214, 0.0006), new THREE.Vector3(0, -0.835, 0.04), new THREE.Vector3(0, -0.8214, 0.0794)],
+  halfToe: 0.072,
+  halfUp: 0.03,
+};
 
 function woodSign(text) {
   const canvas = document.createElement('canvas');
@@ -51,7 +68,7 @@ function addPost(posts, x, z, floorY) {
   });
 }
 
-export function createHockey(scene, targets, at) {
+export function createHockey(scene, targets, at, assets = null) {
   const floorY = at.y;
   const CX = at.x;
   const NORTH_Z = at.z - 0.55;
@@ -143,17 +160,25 @@ export function createHockey(scene, targets, at) {
   const palm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.04), skin);
   grip.add(palm);
   stick.add(grip);
+  const model = !legacy('stick') && !legacy('clubs') && assets?.enabled ? assets.instance('hockey_stick') : null;
+  const K = model ? MODEL_STICK : LEGACY_STICK;
+  if (model) {
+    for (const part of [shaft, wrap, back, playing, toe]) part.material = proxyMaterial;
+    stick.add(model);
+  }
   stick.position.set(CX + 0.35, floorY + 0.02, at.z + 0.2);
   stick.rotation.z = Math.PI / 2;
   stick.traverse((child) => {
     if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
+      const shown = child.material !== proxyMaterial;
+      child.castShadow = shown;
+      child.receiveShadow = shown;
     }
   });
   stick.userData = {
     type: 'gear',
     gear: 'stick',
+    model: !!model,
     floorY: 0.02,
     grip,
     holdPos: new THREE.Vector3(0, -0.02, -0.03),
@@ -182,8 +207,8 @@ export function createHockey(scene, targets, at) {
     n: { x: 1, y: 0, z: 0 },
     toe: { x: 0, y: 0, z: 1 },
     up: { x: 0, y: 1, z: 0 },
-    halfToe: 0.105,
-    halfUp: 0.027,
+    halfToe: K.halfToe,
+    halfUp: K.halfUp,
     v: { x: 0, y: 0, z: 0 },
     w: { x: 0, y: 0, z: 0 },
     sweep: 0,
@@ -218,24 +243,24 @@ export function createHockey(scene, targets, at) {
 
   function readFace() {
     stick.updateWorldMatrix(true, false);
-    worldA.copy(FACE_LOCAL).applyMatrix4(stick.matrixWorld);
+    worldA.copy(K.face).applyMatrix4(stick.matrixWorld);
     face.c.x = worldA.x;
     face.c.y = worldA.y;
     face.c.z = worldA.z;
-    worldDir(FACE_N, worldA);
+    worldDir(K.n, worldA);
     face.n.x = worldA.x;
     face.n.y = worldA.y;
     face.n.z = worldA.z;
-    worldDir(FACE_TOE, worldA);
+    worldDir(K.toe, worldA);
     face.toe.x = worldA.x;
     face.toe.y = worldA.y;
     face.toe.z = worldA.z;
-    worldDir(FACE_UP, worldA);
+    worldDir(K.up, worldA);
     face.up.x = worldA.x;
     face.up.y = worldA.y;
     face.up.z = worldA.z;
-    worldA.copy(SHAFT_A).applyMatrix4(stick.matrixWorld);
-    worldB.copy(SHAFT_B).applyMatrix4(stick.matrixWorld);
+    worldA.copy(K.shaftA).applyMatrix4(stick.matrixWorld);
+    worldB.copy(K.shaftB).applyMatrix4(stick.matrixWorld);
     face.shaft.a.x = worldA.x;
     face.shaft.a.y = worldA.y;
     face.shaft.a.z = worldA.z;
@@ -252,7 +277,7 @@ export function createHockey(scene, targets, at) {
       stick.updateWorldMatrix(true, false);
       stick.getWorldPosition(gripV);
       let dug = null;
-      for (const local of SOLE) {
+      for (const local of K.sole) {
         soleW.copy(local).applyMatrix4(stick.matrixWorld);
         const floorY = floorAt(soleW.x, soleW.z, soleW.y);
         if (floorY == null || floorY <= waterY + 0.05) continue;
