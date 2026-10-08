@@ -19,6 +19,9 @@ import { nearNotches } from './notches.js';
 import { barFrame, stepGlide } from './glider.js';
 import { FOREST_LEGACY } from './forest.js';
 import { MOVE, MOVE_SPEED, SMOOTH_TURN_DEG, SNAP_DEG, TELEPORT, TURN, createGround, createWalker, stickToWorld } from './walk.js';
+import { UNDERWATER, createUnderwater } from './underwater.js';
+import { SWIM, createSwim } from './swim.js';
+import { createScuba } from './scuba.js';
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -869,6 +872,7 @@ function groundUnder(x, z, feetY) {
 
 function startWaterBite(x, z) {
   if (biteHold || world.biteActive()) return;
+  if (swim?.takeFall(x, z)) { fallVy = 0; return; } // underwater pass: the sea is for swimming now (?swim=0: old bite)
   biteHold = true;
   fallVy = 0;
   if (climb) leaveClimb();
@@ -949,7 +953,7 @@ function updateLift(dt) {
 }
 
 function updatePlayerFall(dt) {
-  if (watching || biteHold || aboard || !renderer.xr.isPresenting || !xrFrame) return;
+  if (watching || biteHold || aboard || swim?.active || !renderer.xr.isPresenting || !xrFrame) return;
   if (climb?.hand || boatGrip || glide.flying) {
     fallVy = 0;
     return;
@@ -1134,6 +1138,8 @@ function crocPlayer() {
   p.canoe = p.aboard ? world.canoe.center : null;
   p.onBeach = !p.aboard && low && ((inZ && p.x >= cave.x0 - 0.05 && p.x <= cave.x1) || onPad);
   p.inWater = !p.aboard && !p.onBeach && low && inZ && p.x < cave.x0 && p.feetY > WATER_Y - 1.2;
+  // a swimmer's feet hang deeper than a wader's: same croc rules near the shallows
+  if (swim?.active && !p.aboard && inZ && p.x < cave.x0 && p.x > (cave.shallows?.x0 ?? -4.4) - 3) p.inWater = true;
   return p;
 }
 
@@ -1173,6 +1179,33 @@ const bearFight = world.bear && !watching ? wireBear({
   bear: world.bear, health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf,
   player: crocPlayer, head: crocHead, debug: crocDebug, tickHealth: !croc,
 }) : null;
+
+// Underwater pass: visuals (src/underwater.js), swimming + breath/air + shark scare (src/swim.js), the scuba kit on
+// the roof (src/scuba.js). ?underwater=0 removes all of it; ?swim=0 keeps the visuals and brings back the water bite.
+const underwater = UNDERWATER ? createUnderwater(scene, { waterY: WATER_Y, reef: world.reef, water: world.water }) : null;
+const scuba = UNDERWATER && SWIM && !watching ? createScuba({ scene, roof }) : null;
+const swim = UNDERWATER && SWIM && !watching ? createSwim({
+  renderer, scene, camera, world, underwater, scuba, sfx, audio, controllers, waterY: WATER_Y, assets,
+  api: {
+    shift: shiftPlayer,
+    rig: () => xrOffset,
+    yaw: () => xrYaw,
+    aboard: () => aboard,
+    climbing: () => !!climb,
+    busy: () => biteHold || glide.flying,
+    boardCanoe,
+    leaveCanoe,
+    respawn: () => teleportTo(1),
+    pulse: pulseController,
+    setStatus,
+    heartbeat: (low) => { playHeartbeat(low); pulseBoth(0.15, 40); },
+    groundUnder,
+    walker,
+  },
+}) : null;
+world.underwater = underwater;
+world.swim = swim;
+world.scuba = scuba;
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -3410,6 +3443,7 @@ function updateGlider(dt) {
 
 function onXrSqueeze(controller) {
   if (watching) return;
+  if (swim?.onSqueeze(controller)) return; // scuba kit pickup, canoe hull from the water, strokes
   if (held && heldFrom === controller) return;
   if (world.gear.tryDraw(controller)) return;
   const aimed = hitFromController(controller);
@@ -3556,6 +3590,7 @@ function pollMove(dt) {
       comfort = Math.max(comfort, 0.3 * k);
     }
   }
+  if (swim?.active) { liftFeel.setComfort?.(Math.max(comfort, swim.comfort)); return; } // swim.js owns the left stick in the sea
   // move
   if (MOVE && moveHand) {
     const pad = moveHand.userData.inputSource.gamepad;
@@ -4336,6 +4371,7 @@ function frame(time, frame) {
   updateGlider(dt);
   pollMove(dt);
   updatePlayerFall(dt);
+  swim?.update(dt, xrFrame);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
     pollGazeLock();
     for (const controller of controllers) {
@@ -4382,6 +4418,7 @@ function frame(time, frame) {
     const eye = headSample();
     world.zones.update(eye, dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
   }
+  underwater?.update(dt, headSample());
   renderer.render(scene, camera);
   notePerf(time);
 }
@@ -4405,6 +4442,8 @@ if (pageParams.get('testhooks') === '1') {
       spotsVisible: teleportSpots.filter((spot) => spot.group.visible).length,
       teleportIndex,
       status: statusEl?.textContent || '',
+      swim: swim?.debug?.() ?? null,
+      scuba: scuba ? { loaded: scuba.loaded, mask: scuba.has('mask'), tank: scuba.has('tank'), fins: scuba.has('fins') } : null,
     }),
     place(x, feet, z) { // move the player's feet to (x, feet, z) keeping the head offset (test setup only)
       leaveCanoe();

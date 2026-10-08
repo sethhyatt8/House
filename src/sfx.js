@@ -31,6 +31,7 @@ export function createSfx(getCtx, opts = {}) {
   const decoding = new Map();
   let master = null;
   let bus = null;
+  let muffler = null;
   const beds = {};
   let dripWait = 3;
   let gullWait = 12;
@@ -53,7 +54,12 @@ export function createSfx(getCtx, opts = {}) {
       master.gain.value = Number(params.get('sfxvol') ?? 1);
       master.connect(ctx.destination);
       bus = ctx.createGain();
-      bus.connect(master);
+      // underwater pass: everything sample-based runs through one low-pass (open = 20 kHz) so swim.js can muffle it
+      muffler = ctx.createBiquadFilter();
+      muffler.type = 'lowpass';
+      muffler.frequency.value = 20000;
+      bus.connect(muffler);
+      muffler.connect(master);
     }
     return ctx;
   }
@@ -184,5 +190,12 @@ export function createSfx(getCtx, opts = {}) {
   let started = false;
   function start() { started = true; ctxReady(); warm(); }
 
-  return { enabled, fetchAll, warm, play, update, start, buffers };
+  // 0 = open air, 1 = head under water (low-pass ~450 Hz)
+  function setMuffle(k) {
+    if (!muffler) return;
+    const f = 20000 * Math.pow(450 / 20000, Math.min(1, Math.max(0, k)));
+    if (Math.abs(muffler.frequency.value - f) > 1) muffler.frequency.value = f;
+  }
+
+  return { enabled, fetchAll, warm, play, update, start, buffers, setMuffle };
 }
