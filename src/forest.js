@@ -13,6 +13,12 @@ const COVER = params.get('cover') !== '0';
 const FIREFLIES = params.get('fireflies') !== '0';
 const HAZE = params.get('haze') !== '0';
 
+// Overlook pass: other modules created before the forest (crag.js: the wooded summit) can hand it extra trees and
+// cover at their own heights, plus an area to keep clear of ground trees (the summit's massif). Same instanced meshes
+// and merged cover, so no extra draw calls.
+const patches = [];
+export function patchForest(patch) { patches.push(patch); }
+
 const CENTER = { x: 2.5, z: 4 }; // middle of the clearing (yard + cell); every view of the forest is from around here
 const clock = { value: 0 };
 const hazeColor = { value: new THREE.Color(0x1b2738) };
@@ -55,7 +61,7 @@ export function forestGroundY(x, z) {
 
 // Shader patch shared by every forest material: wind sway (instanced trees use the instance matrix, merged cover uses
 // a per-vertex aSway weight) and a night-blue distance haze that sits under the scene's linear fog.
-function patchMaterial(material, { kind, sway = 0, flutter = 0, height = 8 }) {
+export function patchMaterial(material, { kind, sway = 0, flutter = 0, height = 8 }) {
   if (material.userData.forestPatched) return material;
   material.userData.forestPatched = true;
   material.onBeforeCompile = (shader) => {
@@ -247,7 +253,7 @@ function buildTrees(group, pines, spots) {
         const mesh = new THREE.InstancedMesh(part.geometry, mat, list.length);
         list.forEach((spot, index) => {
           const lean = 0.05;
-          dummy.position.set(spot.x, forestGroundY(spot.x, spot.z) - 0.06, spot.z);
+          dummy.position.set(spot.x, (spot.y ?? forestGroundY(spot.x, spot.z)) - 0.06, spot.z);
           dummy.rotation.set((hash(spot.x, spot.z + 9) - 0.5) * 2 * lean, spot.spin, (hash(spot.z, spot.x - 4) - 0.5) * 2 * lean, 'YXZ');
           dummy.scale.setScalar((spot.h / variant.h) * (0.92 + 0.16 * hash(spot.z * 3.1, spot.x)));
           dummy.updateMatrix();
@@ -273,7 +279,7 @@ function buildTrees(group, pines, spots) {
 
 // Ground cover: MegaKit ferns, plants, bushes, grass, rocks and mushrooms (one atlas, one material) merged into one
 // static mesh per quadrant, fallen logs included (bark cell of the atlas). Only within ~22 m of the clearing.
-function buildCover(group, kit, spots, near) {
+function buildCover(group, kit, spots, near, drop = () => false, extra = []) {
   const protos = {};
   for (const name of ['fern', 'plant', 'groundleaf', 'bush', 'grass', 'rock_a', 'rock_b', 'mushroom']) {
     const node = kit.getObjectByName(name);
@@ -307,7 +313,7 @@ function buildCover(group, kit, spots, near) {
   const m = new THREE.Matrix4();
   const quat = new THREE.Quaternion();
   const euler = new THREE.Euler();
-  const place = (name, x, z, seed) => {
+  const place = (name, x, z, seed, y = null) => {
     const proto = protos[name];
     if (!proto) return;
     const [s0, s1] = SIZE[name];
@@ -316,7 +322,7 @@ function buildCover(group, kit, spots, near) {
     euler.set((hash(x, seed) - 0.5) * tilt, hash(z, seed) * Math.PI * 2, (hash(seed, z) - 0.5) * tilt);
     quat.setFromEuler(euler);
     const sink = name.startsWith('rock') ? 0.18 * s : 0.03;
-    m.compose(new THREE.Vector3(x, forestGroundY(x, z) - sink, z), quat, new THREE.Vector3(s, s * (0.85 + 0.3 * hash(x + 1, z)), s));
+    m.compose(new THREE.Vector3(x, (y ?? forestGroundY(x, z)) - sink, z), quat, new THREE.Vector3(s, s * (0.85 + 0.3 * hash(x + 1, z)), s));
     const g = proto.geometry.clone().applyMatrix4(m);
     const local = proto.geometry.attributes.position;
     const sway = new Float32Array(local.count);
@@ -339,6 +345,7 @@ function buildCover(group, kit, spots, near) {
       const gap = clearingGap(px, pz);
       if (gap < 0.25 || gap > 24) continue;
       if (px < 6.9 && pz > -0.8 && pz < 1.1) continue; // the path out of the gate
+      if (drop(px, pz)) continue;
       let trunk = 99;
       near(px, pz, 2, (s, d) => { trunk = Math.min(trunk, d - s.trunk * 0.6); });
       const r = hash(px * 7.7, pz * 5.1);
@@ -358,6 +365,7 @@ function buildCover(group, kit, spots, near) {
       place(name, px, pz, r * 97.3);
     }
   }
+  for (const c of extra) place(c.name, c.x, c.z, c.seed, c.y);
   // fallen logs: 9-sided cylinders textured from the bark cell of the same atlas, merged with the cover (no extra call)
   const BARK = { x: 784 / 1024, y: 640 / 1024, w: 240 / 1024, h: 384 / 1024 };
   const logGeo = new THREE.CylinderGeometry(1, 1, 1, 9, 1, false);
@@ -375,7 +383,7 @@ function buildCover(group, kit, spots, near) {
     const x = 7 + hash(tries, 3.1) * 20;
     const z = -26 + hash(4.7, tries) * 62;
     const gap = clearingGap(x, z);
-    if (gap < 2.5 || gap > 18) continue;
+    if (gap < 2.5 || gap > 18 || drop(x, z)) continue;
     let clear = true;
     near(x, z, 2.6, (sp, d) => { if (d < 1.9) clear = false; });
     if (!clear) continue;
@@ -407,7 +415,7 @@ function buildCover(group, kit, spots, near) {
   return { tris, counts, calls };
 }
 
-function buildFireflies(group) {
+function buildFireflies(group, drop = () => false) {
   const N = 150;
   const pos = new Float32Array(N * 3);
   const phase = new Float32Array(N);
@@ -416,7 +424,7 @@ function buildFireflies(group) {
     const x = -1 + hash(i, 1.3) * 30;
     const z = -28 + hash(2.1, i) * 66;
     const gap = clearingGap(x, z);
-    if (gap < 0.8 || gap > 16) continue;
+    if (gap < 0.8 || gap > 16 || drop(x, z)) continue;
     pos[n * 3] = x;
     pos[n * 3 + 1] = forestGroundY(x, z) + 0.35 + hash(i, 7) * 1.8;
     pos[n * 3 + 2] = z;
@@ -461,17 +469,21 @@ void main() {
   return { count: n };
 }
 
-export function createForestNext(scene, assets, { pines, spots }) {
+export function createForestNext(scene, assets, { pines, spots: allSpots }) {
   const group = new THREE.Group();
   group.name = 'forest';
   group.userData.backdrop = true;
   const kit = assets?.gltf?.('forest_kit')?.scene || null;
+  const extra = patches.splice(0);
+  const drop = (x, z) => extra.some((p) => p.exclude?.(x, z));
+  const spots = extra.length ? allSpots.filter((sp) => !drop(sp.x, sp.z)) : allSpots;
   const near = nearestIndex(spots);
   const stats = {};
   stats.ground = buildGround(group, kit, near);
-  stats.trees = buildTrees(group, pines, spots);
-  if (COVER && kit) stats.cover = buildCover(group, kit, spots, near);
-  if (FIREFLIES) stats.fireflies = buildFireflies(group);
+  stats.trees = buildTrees(group, pines, [...spots, ...extra.flatMap((p) => p.trees || [])]);
+  if (COVER && kit) stats.cover = buildCover(group, kit, spots, near, drop, extra.flatMap((p) => p.cover || []));
+  if (FIREFLIES) stats.fireflies = buildFireflies(group, drop);
+  stats.dropped = allSpots.length - spots.length;
   scene.add(group);
   if (import.meta.env?.DEV) console.info('forest', stats);
   return {

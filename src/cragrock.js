@@ -74,10 +74,10 @@ function outline(points, step) {
   return out;
 }
 
-export function faceSkin({ material, roofY, deckY, zLine, lineY0, lineY1, tile = 2.42, step = 0.3 }) {
+export function faceSkin({ material, roofY, deckY, zLine, lineY0, lineY1, tile = 2.42, step = 0.3, top = null }) {
   const cols = outline([[5.1, -3.42], [3.62, -3.42], [3.5, -3.3], [3.5, 2.9], [3.62, 3.02], [5.3, 3.02]], step);
   const yBot = roofY - 0.3;
-  const yTop = deckY + 1.62;
+  const yTop = top ?? deckY + 1.62; // overlook pass: stops at the lip (the summit caps it)
   const rows = Math.ceil((yTop - yBot) / step);
   const nc = cols.length;
   const nr = rows + 2; // + the cap row folding back into the boxes
@@ -217,7 +217,7 @@ function place(src, { rot, scale, tipX, top = null, base = null, z, backX = null
   return g;
 }
 
-export function dressCrag({ group, kit, ladder, roofY, deckY, zLine, faceX = 3.5, chunk = 26 }) {
+export function dressCrag({ group, kit, ladder, roofY, deckY, zLine, faceX = 3.5, chunk = 26, ledges = null }) {
   const { parts, material } = kitParts(kit);
   if (!HOLDS.every((h) => parts[h]) || !material) return null;
   material.vertexColors = true;
@@ -237,13 +237,15 @@ export function dressCrag({ group, kit, ladder, roofY, deckY, zLine, faceX = 3.5
   // holds: one rock per grab proxy, its top edge 2.5 cm over the proxy centre, about 12 cm proud of the face
   const holds = ladder.userData.holds;
   let batch = [];
-  holds.forEach(({ y, z }, i) => {
+  holds.forEach(({ y, z, size, lip }, i) => {
     const r = (k) => hash(i * 3.7 + k, y * 1.3) - 0.5;
-    const variant = HOLDS[Math.floor(hash(i * 1.91, 4.2) * HOLDS.length) % HOLDS.length];
+    const variant = lip ? 'hold_a' : HOLDS[Math.floor(hash(i * 1.91, 4.2) * HOLDS.length) % HOLDS.length];
+    // overlook pass: holds carry a size (0.75 crimp .. 1.5 jug); proud-ness grows with it
+    const k = size ?? 1.0 + (r(4) + 0.5) * 0.3;
     batch.push(place(parts[variant], {
-      rot: [r(1) * 0.7, r(2) * 0.4, r(3) * 0.25],
-      scale: 1.0 + (r(4) + 0.5) * 0.3,
-      tipX: faceX - 0.13 + r(5) * 0.03,
+      rot: lip ? [0, r(2) * 0.3, 0] : [r(1) * 0.7, r(2) * 0.4, r(3) * 0.25],
+      scale: k,
+      tipX: faceX - 0.13 * Math.min(1.3, k) + r(5) * 0.03,
       top: y + 0.025,
       z,
       backX: faceX + 0.04,
@@ -253,7 +255,17 @@ export function dressCrag({ group, kit, ladder, roofY, deckY, zLine, faceX = 3.5
   flush(batch, `crag_holds_${meshes.length}`);
   // rest ledges beside the line and big crags off it: [piece, z (or line offset), height over the roof, scale, yaw, proud]
   const big = [];
-  [7.0, 13.6, 20.2, 26.4].forEach((h, k) => {
+  // overlook pass: two real rest ledges under the line (crag.js deckAt stands you on them), no decoys beside it
+  (ledges || []).forEach(({ y, z }, k) => {
+    const g = place(parts.ledge_a, { rot: [0, k % 2 ? 0.12 : -0.12, 0.03], scale: 1, tipX: faceX - 0.5, top: y + 0.02, z, backX: faceX + 0.15 });
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    const sz = 1.15 / Math.max(0.01, bb.max.z - bb.min.z);
+    const sy = Math.min(1, 0.4 / Math.max(0.01, bb.max.y - bb.min.y));
+    g.translate(0, -y, -z).scale(1, sy, sz).translate(0, y, z);
+    big.push(g);
+  });
+  (ledges ? [] : [7.0, 13.6, 20.2, 26.4]).forEach((h, k) => {
     const y = roofY + h;
     big.push(place(parts.ledge_a, {
       rot: [0, (k % 2 ? 0.25 : -0.25), 0.05],

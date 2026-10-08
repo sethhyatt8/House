@@ -120,10 +120,13 @@ export function notchClimb({ scene, targets, surfaceX, holds, userData, standOff
   ladder.position.set(rx, 0, 0);
   const rungs = [];
   const placed = [];
-  holds.forEach(({ y, z, dz }, index) => {
+  holds.forEach(({ y, z, dz, size, lip }, index) => {
     const zz = z + (dz ?? (index % 2 ? 0.13 : -0.13));
-    placed.push({ y, z: zz });
-    proxy(ladder, surfaceX - rx - 0.07, y, zz, rungs);
+    placed.push({ y, z: zz, size, lip });
+    const rung = proxy(ladder, surfaceX - rx - 0.07, y, zz, rungs);
+    // overlook pass: a hold's size scales its grab box along the face (crimps are narrower, jugs and the lip wider)
+    if (size) rung.scale.set(1, Math.min(1.3, size), Math.max(0.6, size));
+    if (lip) rung.userData.lip = true;
   });
   ladder.userData = { rungs, notches: true, holds: placed, surfaceX, ...userData };
   if (dress) notchDress(ladder);

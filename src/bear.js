@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { proxyMaterial } from './assets.js';
+import { DEN as WOODS_DEN } from './overlookshape.js';
 
 const SAVE_KEY = 'house.bear.v1';
 export const RESPAWN_H = 24;              // a killed bear stays gone for a day of real time, then it's back asleep
@@ -30,11 +31,15 @@ const ZONES = [
   ['paw', 'Ursidae_Paw_R', [-0.25, 0.1, 0.68], 0.13],
 ];
 const MOUTH = 1.15;                       // mouth distance ahead of the root
-const DEN = { x: -1.85, z: 0, yaw: Math.PI / 2 };  // nose tip, facing east along the crown
+const NOSE_DEN = { x: -1.85, z: 0, yaw: Math.PI / 2 };  // nose tip, facing east along the crown (?legacy=overlook)
 const GLIDER = { x: -1.35, r: 1.7 };      // no rearing up under the parked glider's wing
 
 export function createBear(scene, { assets, crag, golf = null, gear = null, targets = null }) {
   if (!assets?.feature('bear') || !crag?.deckAt) return null;   // ?bear=0 (or ?models=0)
+  // overlook pass: the den is a clearing in the summit woods; the bear walks out of the trees when it wakes
+  const woods = !!crag.summit;
+  const DEN = woods ? WOODS_DEN : NOSE_DEN;
+  const deckAt = crag.bearDeckAt || crag.deckAt;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.get('beardebug') === '1';
   const rawDmg = params.get('beardmg');
@@ -66,7 +71,7 @@ export function createBear(scene, { assets, crag, golf = null, gear = null, targ
   let claw = null;
   if (gone) {
     s.state = 'gone';
-    claw = spawnClaw(DEN.x + 0.6, DEN.z + 0.15);
+    claw = spawnClaw(DEN.x + Math.sin(DEN.yaw) * 0.6, DEN.z + 0.15);
   }
 
   // --- model (lazy: prefetched during the climb) -----------------------------
@@ -155,10 +160,10 @@ export function createBear(scene, { assets, crag, golf = null, gear = null, targ
   // --- arena -----------------------------------------------------------------
   const fwd = new THREE.Vector3();
   function onDeck(x, z, m) {
-    if (crag.deckAt(x, z) == null) return false;
+    if (deckAt(x, z) == null) return false;
     for (let k = 0; k < 8; k += 1) {
       const a = (k / 8) * Math.PI * 2;
-      if (crag.deckAt(x + Math.cos(a) * m, z + Math.sin(a) * m) == null) return false;
+      if (deckAt(x + Math.cos(a) * m, z + Math.sin(a) * m) == null) return false;
     }
     return true;
   }
@@ -235,7 +240,7 @@ export function createBear(scene, { assets, crag, golf = null, gear = null, targ
     if (!p) return false;
     P.x = p.x; P.z = p.z; P.headY = p.headY ?? p.feetY + 1.6; P.feetY = p.feetY ?? P.headY - 1.6;
     P.onDeck = Math.abs(P.feetY - deckY) < 0.35 && crag.deckAt(P.x, P.z) != null;
-    P.inZone = P.feetY > deckY - 2.5 && P.x > -4.5 && P.x < 5 && P.z > -4.5 && P.z < 3.5;
+    P.inZone = P.feetY > deckY - 2.5 && P.x > -4.5 && P.x < (woods ? 21.5 : 5) && P.z > (woods ? -9.5 : -4.5) && P.z < (woods ? 9 : 3.5);
     const climbing = P.x > 2.75 && P.z > -3.1 && P.z < -1.3 && P.feetY < deckY - 0.2 && P.feetY > climbBaseY - 0.5;
     if (climbing) s.lastClimb = s.clock;
     if ((climbing && P.feetY > deckY - 15) || P.inZone) prefetch();
@@ -334,7 +339,9 @@ export function createBear(scene, { assets, crag, golf = null, gear = null, targ
         if (close) { play('Idle', 0.3); break; }
         const run = d > 3.4;
         const speed = (run ? 2.4 : 1.05) * limp;
-        const moved = steer(P.x, P.z, speed, dt);
+        // woods den: from the summit, the shoulder (west of the climb slot) is reached over the crown, not across the slot
+        const viaCrown = woods && s.x > 3.0 && P.x < 3.0 && P.z < -0.9 && s.z < -0.4;
+        const moved = viaCrown ? steer(2.6, -0.15, speed, dt) : steer(P.x, P.z, speed, dt);
         play(moved ? (run ? 'Run' : 'Walk') : 'Walk', 0.3, moved ? (run ? 0.65 : 0.95 * limp) : 0.5);
         s.growlT = (s.growlT ?? 3) - dt;
         if (s.growlT <= 0) { s.growlT = 4 + Math.random() * 4; emit('growl', { position: mouth(new THREE.Vector3()) }); }
@@ -412,13 +419,15 @@ export function createBear(scene, { assets, crag, golf = null, gear = null, targ
         let home = Math.hypot(DEN.x - s.x, DEN.z - s.z);
         if (s.t > 25) { s.x = DEN.x; s.z = DEN.z; home = 0; }   // wedged somewhere while nobody watched: snap home
         if (home < 0.15) {
-          if (turnTo(DEN.x + 1, DEN.z, 1.6, dt) < 0.08) { setState('settle'); lieDown(0.8); }
+          if (turnTo(DEN.x + Math.sin(DEN.yaw), DEN.z + Math.cos(DEN.yaw), 1.6, dt) < 0.08) { setState('settle'); lieDown(0.8); }
           else play('Idle', 0.3);
           break;
         }
-        // head for the crown line first, then along it (the shoulder joins the nose at x > 1.6)
-        const tx = s.z < -0.9 ? Math.min(s.x, 2.2) : DEN.x;
-        const tz = s.z < -0.9 ? -0.3 : DEN.z;
+        // head for the crown line first, then along it (the shoulder joins the nose at x > 1.6); woods den: off the
+        // crown onto the summit at x 5, then up the path into the trees
+        let tx = s.z < -0.9 && s.x < 3.2 ? Math.min(s.x, 2.2) : DEN.x;
+        let tz = s.z < -0.9 && s.x < 3.2 ? -0.3 : DEN.z;
+        if (woods && !(s.z < -0.9 && s.x < 3.2) && s.x < 4.6) { tx = 5.2; tz = 0.1; }
         play('Walk', 0.4, 0.9);
         steer(tx, tz, Math.min(home / dt, 1.0), dt, 2.2);
         break;
