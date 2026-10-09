@@ -11,8 +11,10 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'applic
 export async function boot(dist, query = '', { port = 8790 + Math.floor(Math.random() * 200), headH = 1.6 } = {}) {
   const root = path.resolve(dist);
   const srv = http.createServer((q, r) => {
-    let p = path.join(root, decodeURIComponent(q.url.split('?')[0]));
-    if (p.endsWith('/')) p += 'index.html';
+    let rel = decodeURIComponent(q.url.split('?')[0]);
+    if (rel.endsWith('/')) rel += 'index.html';
+    let p = path.join(root, rel);
+    if (p.endsWith(path.sep)) p += 'index.html';
     fs.readFile(p, (e, d) => { if (e) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream' }); r.end(d); });
   }).listen(port);
   const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 1800000, args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });

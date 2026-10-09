@@ -10,7 +10,8 @@ const out = { checks: {} };
 await ev(() => T.x(() => __house.chopDoor()));
 out.start = await m();
 const den = await ev(() => T.x(() => { const b = __house.world.bear; const d = b.den(); return [d.x, b.root.position.y, d.z]; }));
-await ev((d) => T.x(() => __house.place(d[0] - 2.5, d[1] + 0.6, d[2])), den);
+// 8 m west of the den (on the arena): near enough for the woods bed, far enough not to walk into the raptor's den
+await ev((d) => T.x(() => __house.place(d[0] - 8, d[1] + 0.6, d[2])), den);
 out.w0 = await m(); await secs(1); out.w1 = await m(); await secs(6);
 out.woods = await m(); console.log(JSON.stringify([out.w0, out.w1]));
 out.checks.woodsFadeIn = out.woods?.mode === 'woods' && out.woods.woods > 0.2;

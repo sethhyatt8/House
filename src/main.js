@@ -15,6 +15,7 @@ import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './w
 import { createLiftFeel } from './liftfeel.js';
 import { createPlayerHealth } from './health.js';
 import { wireBear } from './bearfight.js';
+import { wireRaptor } from './raptorfight.js';
 import { createMusic } from './music.js';
 import { createTopout } from './topout.js';
 import { createSfx } from './sfx.js';
@@ -1201,11 +1202,12 @@ if (croc) {
   croc.on('reward', () => playClear());
 }
 
-// overlook bear (src/bear.js + src/bearfight.js): wakes when you top out of the east crag climb
-const bearFight = world.bear && !watching ? wireBear({
-  bear: world.bear, health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf,
-  player: crocPlayer, head: crocHead, debug: crocDebug, tickHealth: !croc,
-}) : null;
+// overlook boss: the raptor (src/raptor.js + src/raptorfight.js; calls from the woods when you top out of the east crag
+// climb, then comes out) or, with ?legacy=bear, the bear (src/bear.js + src/bearfight.js)
+const bossArgs = { health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf, player: crocPlayer, head: crocHead, debug: crocDebug, tickHealth: !croc };
+const bearFight = !world.bear || watching ? null
+  : world.bear.kind === 'raptor' ? wireRaptor({ raptor: world.bear, hockey: world.hockey, ...bossArgs })
+    : wireBear({ bear: world.bear, ...bossArgs });
 // swim/boat/reef pass: ominous procedural score near the overlook woods / the bear fight, quiet bed in the cave (?music=0)
 const music = !watching ? createMusic({ audio, renderer, camera, bear: world.bear, cave: world.cave }) : null;
 
@@ -4552,6 +4554,7 @@ if (pageParams.get('testhooks') === '1') {
     cameraMatrix: () => renderer.xr.getCamera().matrixWorld.toArray(),
     chopDoor() { (world.gear.doorBoards || []).forEach((b) => { b.userData.dead = true; b.visible = false; }); },
     forceMusic(phase) { music?.force?.(phase); },
+    bossSounds: () => bearFight?.sounds?.() ?? [], // raptor pass: last raptor sounds (name, time, position)
     // ground pass: what the headless ground-truth survey (ground/harness) needs
     THREE,
     renderer,

@@ -1244,6 +1244,25 @@
         "den": [-1.85, 0]
       },
       "note": "Edited for House (still CC-BY-SA 3.0): scaled x0.44, 8 clips kept (Paw = idle_04, Lunge = attack_01, Rear = attack_02, Swipe = attack_03), keys shifted to 0 and resampled, static channels baked into the rest pose, COLOR_0 dropped, 512 ETC1S + Draco. Not preloaded: src/bear.js prefetches it during the east crag climb. ?bear=0 turns it off."
+    },
+    "raptor": {
+      "url": "models/enemies/raptor.glb",
+      "kind": "skinned",
+      "source": "https://sketchfab.com/3d-models/pbr-velociraptor-animated-8f1744af7b0847a2aabe3df90be802f0",
+      "author": "Ferocious Industries (https://sketchfab.com/ferociousindustries.matthias)",
+      "license": "CC-BY 4.0",
+      "tris": 15098,
+      "joints": 137,
+      "bytes": 2492804,
+      "bboxMin": [-0.62, 0, -2.26],
+      "bboxMax": [0.56, 1.91, 1.37],
+      "clips": { "Call_Alert": 2.542, "Idle_01": 1.292, "Roar_01": 2.333, "Roar_02": 1.417, "Bite_01": 2.333, "Bite_02": 1.958, "Leap_01": 1, "Tackle": 1.458, "Hurt_01": 1.25, "Knocked Down": 2.208, "Death_01": 0.833, "Death_02": 0.917, "Walk": 1.292, "Jog": 1, "Sprint": 1 },
+      "params": {
+        "faces": "+Z, metres, 1:1 (3.63 m nose to tail, head 1.86 m, hips 1.15 m). Root at the feet (y 0).",
+        "rootMotion": "Leap_01 6.38 m, Tackle 3.55 m, Knocked Down -0.93 m (-2.24 at its lowest), Death_01 -1.80 m, Death_02 +1.90 m, Roar_02 +0.25 m along +Z on Root_02: src/raptor.js strips it at load and drives it itself (collision-checked).",
+        "den": [14.3, 1.5]
+      },
+      "note": "Modified (compressed, clips trimmed): metal/rough, 1k colour/AO/ORM (ETC1S) + 512 normals (UASTC), meshopt geometry/animation, 15 of the 25 clips kept (dropped Sniff, Eat Prey, Drink, the sleep set, Idle_02, Roar_03, Leap_02, Hurt_02, Action_Pose), animation channels on non-deforming bones dropped. Not preloaded: src/raptor.js prefetches it during the east crag climb. ?raptor=0 (or ?bear=0) turns it off; ?legacy=bear brings back the bear."
     }
   },
   "placements": [
@@ -1553,6 +1572,7 @@
     "liftkit": ["lift_kit"],
     "clubs": ["club_driver", "hockey_stick"],
     "crag": ["crag_kit"],
-    "bear": ["bear"]
+    "bear": ["bear"],
+    "raptor": ["raptor"]
   }
 }

@@ -85,3 +85,14 @@ Changes made for House (Blender 4.2.3 + gltf-transform + KTX-Software 4.4.2, scr
 - Changes from the 0 A.D. originals: DAE imported in Blender 4.2.3 with the brown-bear skin, and the whole model scaled x0.44 to a 2.25 m adult. Wrapped in a `Bear` root so the clips' armature scale keys no longer override the scale. 8 of the 0 A.D. clips were kept and renamed: Idle = bear_idle_01, Paw = bear_idle_04, Walk, Run, Lunge = bear_attack_01, Rear = bear_attack_02, Swipe = bear_attack_03, Death = bear_death_01. Keys were shifted to 0 and resampled (tolerance 0.0005), channels that are static across all clips were baked into the rest pose, COLOR_0 was dropped, the texture was resized to 512 and ETC1S KTX2 compressed, and the geometry is Draco. Result: 2,530 tris, 75 joints, one skinned mesh, 455 KB.
 - The roar's open jaw is procedural (src/bear.js rotates `Ursidae_Jaw_01`); there is no extra clip.
 - The bear-claw trophy left at the den after a kill is built in code (src/bear.js) and is CC0 like the rest of the project.
+
+## Overlook raptor (CC-BY 4.0)
+
+| File | Asset | Author | License | Source |
+|---|---|---|---|---|
+| models/enemies/raptor.glb | "PBR Velociraptor (Animated)" | Ferocious Industries (https://sketchfab.com/ferociousindustries.matthias) | CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/) | https://sketchfab.com/3d-models/pbr-velociraptor-animated-8f1744af7b0847a2aabe3df90be802f0 |
+
+- Attribution line: "PBR Velociraptor (Animated)" by Ferocious Industries, https://sketchfab.com/3d-models/pbr-velociraptor-animated-8f1744af7b0847a2aabe3df90be802f0, licensed CC BY 4.0. Modified (compressed, clips trimmed).
+- Changes: metal/rough material, colour/AO/ORM resized to 1k (ETC1S KTX2) and normals to 512 (UASTC KTX2), geometry and animation meshopt-compressed, 15 of the 25 clips kept (Call_Alert, Idle_01, Roar_01, Roar_02, Bite_01, Bite_02, Leap_01, Tackle, Hurt_01, Knocked Down, Death_01, Death_02, Walk, Jog, Sprint), animation channels on non-deforming bones dropped, resampled/pruned/deduplicated. 15,098 tris, 137 joints, 2.49 MB. Used at 1:1 scale (3.6 m nose to tail).
+- The root motion in Leap_01, Tackle, Knocked Down, Death_01/02 and Roar_02 is removed from the bones at load time by src/raptor.js (which moves the animal itself); the file keeps it.
+- The tail bend, head aim, crouch and eyeshine are procedural (src/raptor.js). The sickle-claw trophy is built in code and is CC0 like the rest of the project.

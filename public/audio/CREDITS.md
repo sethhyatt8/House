@@ -54,3 +54,19 @@ Source: "Bear Growls" (https://opengameart.org/content/bear-growls), uploaded by
 | bear_death.ogg | bear_02 | 0.62x speed (pitched down), 1.91 s |
 
 The bear's huffs, snorts and paw thumps are made in WebAudio (noise bursts and a falling sine) in src/bearfight.js; they are not sample files.
+
+## Overlook raptor (CC0 1.0)
+
+All sources are CC0 1.0 (public domain dedication). Edited with ffmpeg (trim, fades, speed/pitch change, layering, peak limiter), mono, 32 kHz Vorbis q2. Used by src/raptorfight.js, not by src/sfx.js.
+
+| File | Sources | Edit |
+|---|---|---|
+| raptor_call.ogg | "raptor.wav" by taure (https://freesound.org/people/taure/sounds/340272/) + "211123 Red-tailed Hawk call, pretty close, noisy roof, Toronto 10am.wav" by TRP (https://freesound.org/people/TRP/sounds/616995/) | taure 0.37-2.10 s, high-pass 120 Hz; hawk 3.55-4.20 s slowed to 0.62x (pitched down), -5 dB, +180 ms; mixed, 1.73 s |
+| raptor_roar.ogg | taure "raptor.wav" + "T-rex Calls" by CaveboyTup (https://opengameart.org/content/t-rex-calls, also https://freesound.org/people/CaveboyTup/sounds/529462/) | taure 2.63-5.58 s at 0.9x; T-rex 27.0-29.6 s at 1.22x, -3 dB; mixed, 3.28 s |
+| raptor_hiss.ogg | "Utahraptor Hiss" by NaturesTemper (https://freesound.org/people/NaturesTemper/sounds/622809/) | 0.41-1.91 s, fades, 1.5 s (leap telegraph) |
+| raptor_snort.ogg | "Velociraptor_Hiss.aif" by crcavol (https://freesound.org/people/crcavol/sounds/154636/) | 0.47-0.77 s, +16 dB, 0.3 s (bite/tackle telegraph) |
+| raptor_growl.ogg | CaveboyTup "T-rex Calls" | 4.3-6.5 s at 1.18x (pitched up), 1.86 s |
+| raptor_yelp.ogg | taure "raptor.wav" | 9.35-10.07 s at 1.06x, +6 dB, 0.68 s (hurt / knocked down) |
+| raptor_death.ogg | taure "raptor.wav" + CaveboyTup "T-rex Calls" | taure 6.78-8.81 s at 0.82x; T-rex 36.6-39.0 s, -7 dB, +0.9 s; mixed, 3.3 s |
+
+CaveboyTup's T-rex calls are themselves made from CC0 alligator, lion and elk recordings; taure's are the author's own voice; TRP's hawk is a field recording. The rustles, scrapes, footfalls and landing thumps are WebAudio noise/sine bursts in src/raptorfight.js, not sample files.

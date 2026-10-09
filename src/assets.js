@@ -3,6 +3,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 export const proxyMaterial = new THREE.MeshBasicMaterial({ visible: false });
 
@@ -109,6 +110,7 @@ export function createAssetManager(renderer) {
   const loader = new GLTFLoader(manager);
   loader.setDRACOLoader(draco);
   loader.setKTX2Loader(ktx2);
+  loader.setMeshoptDecoder(MeshoptDecoder); // raptor pass: models/enemies/raptor.glb is meshopt-compressed
   const hdrLoader = new HDRLoader(manager).setDataType(THREE.HalfFloatType);
 
   const templates = new Map();

@@ -1,12 +1,14 @@
 // src/music.js - ominous ambient score, fully procedural WebAudio (no audio files, nothing to license).
 // - Woods bed: near the overlook woods (within ~26 m of the bear's den, up on the summit) a low detuned drone fades in.
+// - Raptor (raptor pass): while it calls from the woods (bear.hiding()) the wake bed holds and the fight cluster creeps
+//   up to 0.42 over the hidden phase (the heartbeat comes in near the end); it swells to full when it steps out.
 // - Bear: on wake the bed rises; while engaged (fighting) a dissonant cluster swells, a slow heartbeat and the odd deep
 //   drum hit join; on death / leave the score fades out (~10 s to near silence) and does not return once it is dead.
 // - Cave: a quieter tense bed (filtered air + a thin glassy tone) inside the cave tunnel / room.
 // ?music=0 turns it off; ?musicvol=0.5 scales it (default 1). Exposes .state() for the headless check.
 import * as THREE from 'three';
 
-const LEVEL = { woods: 0.32, wake: 0.62, fight: 1, cave: 0.22 };
+const LEVEL = { woods: 0.32, wake: 0.62, fight: 1, cave: 0.22, hidden: 0.42 };
 
 export function createMusic({ audio, renderer, camera, bear = null, cave = null }) {
   const params = new URLSearchParams(location.search);
@@ -112,6 +114,7 @@ export function createMusic({ audio, renderer, camera, bear = null, cave = null 
         st.wakeAge += dt;
         // force() holds the phase; only the real wake event (wakeAge still advancing from the listener) promotes to fight
         if (st.forced) { /* held */ }
+        else if (bear.hiding?.()) { /* raptor still calling from the trees: hold the build-up */ }
         else if (st.wakeAge > 2.5 && bear.engaged()) st.phase = 'fight';
         else if (st.wakeAge > 2.5 && !bear.engaged()) st.phase = near ? 'woods' : 'idle';
       } else if (st.phase === 'fight') {
@@ -124,7 +127,10 @@ export function createMusic({ audio, renderer, camera, bear = null, cave = null 
         st.phase = 'idle';
       }
       if (st.phase === 'woods') { t.woods = LEVEL.woods; mode = 'woods'; }
-      else if (st.phase === 'wake') { t.woods = LEVEL.wake; mode = 'wake'; }
+      else if (st.phase === 'wake') {
+        t.woods = LEVEL.wake; mode = 'wake';
+        if (!st.forced && bear.hiding?.()) { t.fight = LEVEL.hidden * Math.min(1, st.wakeAge / (bear.hideSeconds || 15)); mode = 'hidden'; }
+      }
       else if (st.phase === 'fight') { t.woods = LEVEL.wake; t.fight = LEVEL.fight; mode = 'fight'; }
       else if (st.phase === 'after') { mode = 'after'; }
     }

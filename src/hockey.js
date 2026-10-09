@@ -394,5 +394,5 @@ export function createHockey(scene, targets, at, assets = null) {
     return out;
   }
 
-  return { update, stick, posts, ball: ballMesh };
+  return { update, stick, posts, ball: ballMesh, face, ballState: ball };   // face/ballState: the overlook raptor takes stick and ball hits
 }

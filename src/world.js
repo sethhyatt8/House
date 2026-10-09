@@ -8,6 +8,7 @@ import { createBrick, setBrickRaycast } from './bricks.js';
 import { createGear } from './gear.js';
 import { createCroc } from './croc.js';
 import { createBear } from './bear.js';
+import { createRaptor } from './raptor.js';
 import { createOcean, legacyWater } from './water.js';
 import { createGallery } from './gallery.js';
 import { colorById, COLORS, GRID_X, GRID_Z, heightById, HEIGHTS, shapeById, SHAPES, STUD } from './config.js';
@@ -4713,7 +4714,11 @@ export function createWorld({ assets, renderer = null } = {}) {
     : null;
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
   if (croc) gear.setCroc(croc);
-  const bear = createBear(scene, { assets, crag, golf, gear, targets });
+  // raptor pass: the overlook boss is the raptor (src/raptor.js); ?legacy=bear (or the pre-overlook crag) keeps the bear.
+  // `bear` stays the name of whichever boss is in, so main.js / music.js / the harness keep working with either.
+  const bear = legacy('bear') || !crag.summit
+    ? createBear(scene, { assets, crag, golf, gear, targets })
+    : createRaptor(scene, { assets, crag, golf, gear, targets, hockey });
   if (bear) gear.addFoe(bear);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
@@ -4768,6 +4773,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     forest,
     croc,
     bear,
+    raptor: bear?.kind === 'raptor' ? bear : null,
     cave: cliff.cave,
     shaft: cliff.shaft,
     notches: cliff.notches,
