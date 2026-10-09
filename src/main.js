@@ -3564,34 +3564,40 @@ function piecePoint() {
   return worldPoint;
 }
 
+// Second hand on a carried club or hockey stick (golf grip pass: the stick takes a second hand too, in its own
+// zone further down the shaft; an item without `offHand` in its userData has no two-hand hold).
 function gripClub(controller) {
-  const club = world.golf?.club;
-  if (!club?.userData.carried || club.parent === controller) return false;
-  if (club.userData.offHand === controller) return true;
-  if (club.userData.offHand) return false;
-  club.updateWorldMatrix(true, true);
-  const butt = new THREE.Vector3(0, 0.01, 0);
-  const low = new THREE.Vector3(0, -0.3, 0);
-  club.localToWorld(butt);
-  club.localToWorld(low);
-  const span = low.clone().sub(butt);
-  const spanLen = span.lengthSq() || 1;
-  let near = false;
-  for (const point of handPoints(controller)) {
-    const t = THREE.MathUtils.clamp(point.clone().sub(butt).dot(span) / spanLen, 0, 1);
-    if (butt.clone().addScaledVector(span, t).distanceTo(point) < 0.2) near = true;
+  for (const club of [world.golf?.club, world.hockey?.stick]) {
+    if (!club?.userData.carried || club.parent === controller || club.userData.offHand === undefined) continue;
+    if (club.userData.offHand === controller) return true;
+    if (club.userData.offHand) continue;
+    club.updateWorldMatrix(true, true);
+    const [top, bottom] = club.userData.twoHandZone || [0.01, -0.3];
+    const butt = new THREE.Vector3(0, top, 0);
+    const low = new THREE.Vector3(0, bottom, 0);
+    club.localToWorld(butt);
+    club.localToWorld(low);
+    const span = low.clone().sub(butt);
+    const spanLen = span.lengthSq() || 1;
+    let near = false;
+    for (const point of handPoints(controller)) {
+      const t = THREE.MathUtils.clamp(point.clone().sub(butt).dot(span) / spanLen, 0, 1);
+      if (butt.clone().addScaledVector(span, t).distanceTo(point) < 0.2) near = true;
+    }
+    if (!near) continue;
+    club.userData.offHand = controller;
+    pulseController(controller, 0.4, 24);
+    return true;
   }
-  if (!near) return false;
-  club.userData.offHand = controller;
-  pulseController(controller, 0.4, 24);
-  return true;
+  return false;
 }
 
 function onXrRelease(controller) {
-  const club = world.golf?.club;
-  if (club?.userData.offHand === controller) {
-    club.userData.offHand = null;
-    return;
+  for (const club of [world.golf?.club, world.hockey?.stick]) {
+    if (club?.userData.offHand === controller) {
+      club.userData.offHand = null;
+      return;
+    }
   }
   if (releaseGlider(controller)) return;
   if (world.gear.releaseDraw(controller)) return;
@@ -4386,6 +4392,9 @@ function frame(time, frame) {
       if (event.type === 'strike') {
         sfx.play(['hit_wood', 'hit_wood2'], { at: event.at, gain: Math.min(1, 0.35 + event.speed / 22), rate: 1.2 });
         pulseController(hand, Math.min(1, 0.4 + event.speed / 24), 30);
+        if (hand) pulseController(world.hockey.stick.userData.offHand, Math.min(1, 0.4 + event.speed / 24), 30);
+      } else if (event.type === 'fit') {
+        pulseController(hand, 0.25, 18);
       } else if (event.type === 'turf') {
         sfx.play(event.kill > 0.55 ? 'hit_plank' : 'hit_soft', { at: event.at, gain: Math.min(0.85, 0.3 + event.kill), rate: 0.72 });
         pulseController(hand, Math.min(1, 0.35 + event.kill), 45);
@@ -4412,6 +4421,9 @@ function frame(time, frame) {
         sfx.play('hit_wood', { at: event.at, gain: Math.min(0.85, 0.28 + event.speed / 30), rate: 1.7 });
         sfx.play('hit_metal', { at: event.at, gain: Math.min(0.45, 0.12 + event.speed / 50), rate: 1.85 });
         pulseController(hand, Math.min(1, 0.45 + event.speed / 30), 22);
+        if (hand) pulseController(world.golf.club.userData.offHand, Math.min(1, 0.45 + event.speed / 30), 22); // both fists feel it
+      } else if (event.type === 'fit') {
+        pulseController(hand, 0.25, 18); // shaft length fitted to the ground
       } else if (event.type === 'turf') {
         sfx.play('hit_soft', { at: event.at, gain: Math.min(0.7, 0.25 + event.kill), rate: 0.9 });
         pulseController(hand, Math.min(1, 0.3 + event.kill), 36);

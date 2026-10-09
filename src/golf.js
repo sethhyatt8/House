@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
 import { proxyMaterial } from './assets.js';
 import { legacy } from './flags.js';
+import { createFit, createHold, golfLefty, golfOld, makeStretch } from './golfgrip.js';
+import { DRIVER, golfAero, sweepFace, impact } from './golfball.js';
 
 const BALL_R = 0.02135;
 const LOFT = 12 * Math.PI / 180;
@@ -16,8 +18,15 @@ const PLATE_W = 0.108;
 const PLATE_H = 0.058;
 
 export const GREEN = { x0: -0.62, x1: 0.72, z0: -0.42, z1: 0.42, y: 11.36 };
-const TEE = { x: -0.42, z: 0.02 };
-const TEE_H = 0.042;
+// Golf grip pass: the rock is walkable only to |z| 0.6 here, so a teed ball at z 0.02 could not be addressed at
+// driver distance (~0.9 m from the golfer) without standing over the drop. The tee moves 0.32 m away from the side
+// the golfer stands on (south for right-handed, north with ?golfhand=left). ?golf=old keeps z 0.02.
+const OLD = golfOld();
+const LEFTY = !OLD && golfLefty();
+const TEE = OLD ? { x: -0.42, z: 0.02 } : { x: -0.42, z: LEFTY ? 0.3 : -0.3 };
+const WORLD_R = 148; // a drive further out than this is past the sea's edge: reset
+// the teed ball's centre sits ~0.8 cm above the model face centre (the old 4.2 cm peg put it at the top edge)
+const TEE_H = OLD ? 0.042 : 0.022;
 
 const zAxis = new THREE.Vector3(0, 0, 1);
 const FACE_LOCAL = PLATE_AT.clone().applyAxisAngle(zAxis, LOFT).add(new THREE.Vector3(0, HEAD_Y, 0));
@@ -230,7 +239,7 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
   head.add(plate);
   club.add(head);
   const model = !legacy('driver') && !legacy('clubs') && assets?.enabled ? assets.instance('club_driver') : null;
-  const K = model ? MODEL_CLUB : LEGACY_CLUB;
+  let K = model ? MODEL_CLUB : LEGACY_CLUB;
   if (model) {
     // the procedural parts stay as invisible raycast/grab proxies
     club.traverse((child) => {
@@ -238,7 +247,25 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     });
     club.add(model);
   }
-  club.position.set(-0.38, green.y + 0.08, 0.24);
+  // golf grip pass: shaft-length fit stretches the model's shaft (grip fixed, head moves along the shaft)
+  const stretch = !OLD && model ? makeStretch(model, -0.3, -0.92) : null;
+  if (LEFTY) {
+    // a left-handed driver is the mirror image (toe still away from the golfer): mirror the meshes in z
+    const body = new THREE.Group();
+    body.scale.z = -1;
+    for (const child of [...club.children]) body.add(child);
+    club.add(body);
+    const mz = (v) => new THREE.Vector3(v.x, v.y, -v.z);
+    K = { ...K, face: mz(K.face), n: mz(K.n), toe: mz(K.toe), up: mz(K.up), shaftA: mz(K.shaftA), shaftB: mz(K.shaftB), sole: K.sole.map(mz) };
+  }
+  const K0 = K;
+  // contact frame with the shaft extension applied (everything below the stretch zone moves down by ext)
+  function extendK(ext) {
+    if (!ext) return K0;
+    const dn = (v) => new THREE.Vector3(v.x, v.y - ext, v.z);
+    return { ...K0, face: dn(K0.face), shaftB: dn(K0.shaftB), sole: K0.sole.map(dn) };
+  }
+  club.position.set(-0.38, green.y + 0.08, LEFTY ? -0.24 : 0.24);
   club.rotation.z = Math.PI / 2;
   club.traverse((child) => {
     if (child.isMesh) {
@@ -257,6 +284,7 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     restRot: club.rotation.clone(),
     carried: false,
     offHand: null,
+    twoHandZone: [0.01, -0.3],
   };
   scene.add(club);
   targets.push(club);
@@ -277,6 +305,7 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
   ball.floorMu = 0.5;
   ball.cd = 0.25;
   ball.magnus = 0.0032;
+  if (!OLD) ball.aero = (b, h) => golfAero(b, h, BALL_R, 0.04593);
 
   const face = {
     c: { x: 0, y: 0, z: 0 },
@@ -324,6 +353,21 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
   let pushArmed = true;
   let turfArmed = true;
   let dug = null;
+  // golf grip pass state
+  let KE = K0;
+  const hold = OLD ? null : createHold({ faceSign: LEFTY ? 1 : -1 });
+  const fit = OLD || !stretch ? null : createFit({ min: -0.3, max: 0.2 });
+  if (fit?.fixed != null) { stretch.set(fit.fixed); KE = extendK(fit.fixed); }
+  const pose0 = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  const pose1 = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  let havePose = false;
+  let cool = 0;
+  let fitEvent = null;
+  let lastStrike = null;
+  const prevFace = new THREE.Vector3();
+  const rawFace = new THREE.Vector3();
+  const nowFace = new THREE.Vector3();
+  const shaftW = new THREE.Vector3();
 
   function worldDir(local, target) {
     return target.copy(local).transformDirection(club.matrixWorld);
@@ -331,24 +375,24 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
 
   function readFace() {
     club.updateWorldMatrix(true, false);
-    worldA.copy(K.face).applyMatrix4(club.matrixWorld);
+    worldA.copy(KE.face).applyMatrix4(club.matrixWorld);
     face.c.x = worldA.x;
     face.c.y = worldA.y;
     face.c.z = worldA.z;
-    worldDir(K.n, worldA);
+    worldDir(KE.n, worldA);
     face.n.x = worldA.x;
     face.n.y = worldA.y;
     face.n.z = worldA.z;
-    worldDir(K.toe, worldA);
+    worldDir(KE.toe, worldA);
     face.toe.x = worldA.x;
     face.toe.y = worldA.y;
     face.toe.z = worldA.z;
-    worldDir(K.up, worldA);
+    worldDir(KE.up, worldA);
     face.up.x = worldA.x;
     face.up.y = worldA.y;
     face.up.z = worldA.z;
-    worldA.copy(K.shaftA).applyMatrix4(club.matrixWorld);
-    worldB.copy(K.shaftB).applyMatrix4(club.matrixWorld);
+    worldA.copy(KE.shaftA).applyMatrix4(club.matrixWorld);
+    worldB.copy(KE.shaftB).applyMatrix4(club.matrixWorld);
     face.shaft.a.x = worldA.x;
     face.shaft.a.y = worldA.y;
     face.shaft.a.z = worldA.z;
@@ -364,7 +408,7 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
       club.updateWorldMatrix(true, false);
       club.getWorldPosition(gripV);
       let hit = null;
-      for (const local of K.sole) {
+      for (const local of KE.sole) {
         soleW.copy(local).applyMatrix4(club.matrixWorld);
         const floorY = floorAt(soleW.x, soleW.z, soleW.y);
         if (floorY == null || floorY <= waterY + 0.05) continue;
@@ -411,6 +455,108 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     club.quaternion.copy(parentQ).multiply(aimWorld);
     club.position.copy(club.userData.holdPos);
     return true;
+  }
+
+  // Golf grip pass: hold from the grip space (fist), two-hand shaft, length fit, ground clamp; face velocity from the
+  // head's own motion. Returns nothing; leaves pose0 (last frame) / pose1 (this frame) for the swept contact.
+  function lowestGap(floorAt, waterY) {
+    let gap = null;
+    for (const local of KE.sole) {
+      soleW.copy(local).applyMatrix4(club.matrixWorld);
+      const floorY = floorAt(soleW.x, soleW.z, soleW.y + 0.3);
+      if (floorY == null || floorY <= waterY + 0.05) continue;
+      const g = soleW.y - floorY;
+      if (gap == null || g < gap) gap = g;
+    }
+    return gap;
+  }
+
+  function syncPoseGrip(dt, motion, floorAt, waterY) {
+    const ud = club.userData;
+    if (!ud.carried || ud.offHand === club.parent) ud.offHand = null;
+    if (!ud.carried) {
+      hold.reset();
+      fit?.reset();
+      havePose = false;
+      pose0Ready = false;
+      twoHand = false;
+      readFace();
+      face.v.x = face.v.y = face.v.z = 0;
+      face.w.x = face.w.y = face.w.z = 0;
+      dug = null;
+      return;
+    }
+    const held = hold.apply(club, club.parent, ud.offHand, dt);
+    if (!held) {
+      // no tracked controller (desktop carry): the old pointing hold
+      club.quaternion.copy(holdQuat);
+      club.position.copy(ud.holdPos);
+    }
+    twoHand = !!held?.twoHand;
+    club.updateWorldMatrix(true, false);
+    readFace();
+    // length fit (before the clamp, so it sees how far the head would sink)
+    if (fit) {
+      shaftW.set(face.shaft.b.x - face.shaft.a.x, face.shaft.b.y - face.shaft.a.y, face.shaft.b.z - face.shaft.a.z).normalize();
+      nowFace.set(face.c.x, face.c.y, face.c.z); // before the ground clamp: the clamp itself must not read as motion
+      const speed = havePose && dt > 1e-4 ? nowFace.distanceTo(rawFace) / dt : 99;
+      rawFace.copy(nowFace);
+      const next = fit.update(dt, {
+        ext: stretch.ext,
+        gap: lowestGap(floorAt, waterY),
+        speed,
+        fromVertical: Math.acos(THREE.MathUtils.clamp(-shaftW.y, -1, 1)),
+        cosDrop: -shaftW.y,
+      });
+      if (next != null) {
+        stretch.set(next);
+        KE = extendK(next);
+        readFace();
+        fitEvent = { ext: next, at: { x: face.c.x, y: face.c.y, z: face.c.z } };
+      }
+    }
+    const pen = catchFloor(floorAt, waterY);
+    club.updateWorldMatrix(true, false);
+    readFace();
+    pose0.p.copy(pose1.p);
+    pose0.q.copy(pose1.q);
+    club.matrixWorld.decompose(pose1.p, pose1.q, soleW);
+    nowFace.set(face.c.x, face.c.y, face.c.z);
+    if (havePose && dt > 1e-4) {
+      face.v.x = (nowFace.x - prevFace.x) / dt;
+      face.v.y = (nowFace.y - prevFace.y) / dt;
+      face.v.z = (nowFace.z - prevFace.z) / dt;
+    } else face.v.x = face.v.y = face.v.z = 0;
+    const w = motion?.w;
+    face.w.x = w ? w.x : 0;
+    face.w.y = w ? w.y : 0;
+    face.w.z = w ? w.z : 0;
+    prevFace.copy(nowFace);
+    if (pen > 0) {
+      const dragged = turfDrag(face.v, face.w, pen);
+      dug = dragged.kill > 0.18 ? { kill: dragged.kill, at: { x: face.c.x, y: face.c.y, z: face.c.z } } : null;
+    } else dug = null;
+    havePose = true;
+    if (!pose0Ready) { pose0.p.copy(pose1.p); pose0.q.copy(pose1.q); pose0Ready = true; }
+  }
+  let pose0Ready = false;
+
+  // Swept strike: the face plate from last frame's pose to this one against the ball.
+  function strikeSweep(dt) {
+    if (!club.userData.carried || !pose0Ready || dt <= 1e-4) return null;
+    if (cool > 0) { cool -= dt; return null; }
+    const local = { face: KE.face, n: KE.n, toe: KE.toe, up: KE.up, halfToe: KE.halfToe, halfUp: KE.halfUp };
+    const hit = sweepFace(pose0, pose1, dt, local, ball.p, ball.v, BALL_R);
+    if (!hit) return null;
+    const res = impact(ball, hit, DRIVER, BALL_R, ball.m);
+    if (!res) return null;
+    if (!res.push) cool = 0.2;
+    lastStrike = {
+      head: +res.head.toFixed(2), ball: +res.ball.toFixed(2), smash: +res.smash.toFixed(3), launch: +res.launch.toFixed(2),
+      spinRpm: Math.round(res.spinRpm), off: +res.off.toFixed(4), push: res.push, t: +hit.t.toFixed(3),
+      dir: +(Math.atan2(ball.v.z, -ball.v.x) * 180 / Math.PI).toFixed(2),
+    };
+    return res;
   }
 
   function syncPose(dt, motion, floorAt, waterY) {
@@ -510,16 +656,23 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
       if (Math.hypot(x - TEE.x, z - TEE.z) < 0.028 && y > green.y && y < teeTop + 0.05) return teeTop;
       return floorAt(x, z, y);
     };
-    if (!club.visible || club.position.y < -5) havePrev = false;
-    else syncPose(dt, motion, floorAt, waterY);
+    let swept = null;
+    if (!club.visible || club.position.y < -5) { havePrev = false; havePose = false; pose0Ready = false; }
+    else if (OLD) syncPose(dt, motion, floorAt, waterY);
+    else {
+      syncPoseGrip(dt, motion, floorAt, waterY);
+      swept = strikeSweep(dt);
+    }
     const useFace = club.visible && club.position.y > -5;
     const events = stepBall(ball, dt, {
-      face: useFace ? face : null,
+      face: useFace && OLD ? face : null,
       boxes: colliders,
       waterY,
       floorAt: ballFloor,
     });
+    if (swept) events.push(swept.push ? { type: 'push', speed: swept.vn } : { type: 'strike', speed: swept.head, ball: swept.ball });
     if (!Number.isFinite(ball.p.y) || ball.p.y < -30 || ball.p.y > 80) resetBall();
+    if (!OLD && Math.hypot(ball.p.x - spawn.x, ball.p.z - spawn.z) > WORLD_R) resetBall();
     const speed = Math.hypot(ball.v.x, ball.v.y, ball.v.z);
     const last = samples[samples.length - 1];
     const moved = !last || Math.hypot(ball.p.x - last.x, ball.p.y - last.y, ball.p.z - last.z) > 0.18;
@@ -557,8 +710,23 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     pushArmed = !pushed;
     if (dug && turfArmed) out.push({ type: 'turf', kill: dug.kill, at: dug.at });
     turfArmed = !dug;
+    if (fitEvent) { out.push({ type: 'fit', ...fitEvent }); fitEvent = null; }
     return out;
   }
 
-  return { update, club, green, ball: ballMesh, face, ballState: ball };
+  // headless checks (scripts/ground/golfgrip.mjs) and tuning
+  function debug() {
+    club.updateWorldMatrix(true, false);
+    return {
+      mode: OLD ? 'old' : (LEFTY ? 'grip-left' : 'grip'),
+      ext: stretch ? +stretch.ext.toFixed(4) : 0,
+      twoHand,
+      weight: hold ? +hold.state.weight.toFixed(3) : null,
+      sole: KE.sole.map((p) => p.clone().applyMatrix4(club.matrixWorld).toArray()),
+      lastStrike,
+      tee: { x: TEE.x, z: TEE.z, y: teeTop },
+    };
+  }
+
+  return { update, club, green, ball: ballMesh, face, ballState: ball, resetBall, debug, tee: TEE };
 }

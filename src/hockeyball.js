@@ -268,17 +268,20 @@ function floorNormal(ball, floorY) {
 
 function integrate(ball, h) {
   const v = len(ball.v);
-  if (v > 0.05) {
+  if (ball.aero) ball.aero(ball, h); // golf grip pass: the golf ball brings its own drag + spin lift
+  else if (v > 0.05) {
     const drag = 0.5 * S.cd * RHO * S.area * v * v * S.invM;
     const s = drag * h / v;
     ball.v.x -= ball.v.x * s;
     ball.v.y -= ball.v.y * s;
     ball.v.z -= ball.v.z * s;
   }
-  const magnus = cross(ball.w, ball.v, { x: 0, y: 0, z: 0 });
-  ball.v.x += magnus.x * S.magnus * h;
-  ball.v.y += magnus.y * S.magnus * h;
-  ball.v.z += magnus.z * S.magnus * h;
+  if (!ball.aero) {
+    const magnus = cross(ball.w, ball.v, { x: 0, y: 0, z: 0 });
+    ball.v.x += magnus.x * S.magnus * h;
+    ball.v.y += magnus.y * S.magnus * h;
+    ball.v.z += magnus.z * S.magnus * h;
+  }
   ball.v.y -= GRAVITY * h;
   const damp = Math.exp(-0.12 * h);
   ball.w.x *= damp;

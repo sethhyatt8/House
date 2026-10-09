@@ -4,6 +4,14 @@ import * as THREE from 'three';
 import { BALL_R, createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
 import { proxyMaterial } from './assets.js';
 import { legacy } from './flags.js';
+import { createFit, createHold, golfOld, makeStretch } from './golfgrip.js';
+import { STICK, impact, sweepFace } from './golfball.js';
+
+// Golf grip pass: the stick hangs off the grip space like the driver (shaft out of the thumb side of the fist, flat
+// face along the palm of the right hand / back of the left), a second hand anywhere 6-50 cm down the shaft steers it,
+// and the length fit lets the hook reach the floor. Field hockey sticks are all right-handed, so ?golfhand=left does
+// not apply here. ?golf=old keeps the 59e7c4b hold (stick along the pointing ray, 50 deg down).
+const OLD = golfOld();
 
 const HALF_W = 0.55;
 const GOAL_H = 1.8;
@@ -31,7 +39,12 @@ const MODEL_STICK = {
   up: FACE_UP,
   shaftA: SHAFT_A,
   shaftB: new THREE.Vector3(0, -0.74, 0),
-  sole: [new THREE.Vector3(0, -0.8214, 0.0006), new THREE.Vector3(0, -0.835, 0.04), new THREE.Vector3(0, -0.8214, 0.0794)],
+  sole: OLD
+    ? [new THREE.Vector3(0, -0.8214, 0.0006), new THREE.Vector3(0, -0.835, 0.04), new THREE.Vector3(0, -0.8214, 0.0794)]
+    : [
+      new THREE.Vector3(0, -0.784, -0.027), new THREE.Vector3(0, -0.818, -0.01), new THREE.Vector3(0, -0.8214, 0.0006),
+      new THREE.Vector3(0, -0.835, 0.04), new THREE.Vector3(0, -0.8214, 0.0794), new THREE.Vector3(0, -0.785, 0.1),
+    ],
   halfToe: 0.072,
   halfUp: 0.03,
 };
@@ -161,10 +174,17 @@ export function createHockey(scene, targets, at, assets = null) {
   grip.add(palm);
   stick.add(grip);
   const model = !legacy('stick') && !legacy('clubs') && assets?.enabled ? assets.instance('hockey_stick') : null;
-  const K = model ? MODEL_STICK : LEGACY_STICK;
+  const K0 = model ? MODEL_STICK : LEGACY_STICK;
+  let K = K0;
   if (model) {
     for (const part of [shaft, wrap, back, playing, toe]) part.material = proxyMaterial;
     stick.add(model);
+  }
+  const stretch = !OLD && model ? makeStretch(model, -0.25, -0.6) : null;
+  function extendK(ext) {
+    if (!ext) return K0;
+    const dn = (v) => new THREE.Vector3(v.x, v.y - ext, v.z);
+    return { ...K0, face: dn(K0.face), shaftB: dn(K0.shaftB), sole: K0.sole.map(dn) };
   }
   stick.position.set(CX + 0.35, floorY + 0.02, at.z + 0.2);
   stick.rotation.z = Math.PI / 2;
@@ -185,6 +205,7 @@ export function createHockey(scene, targets, at, assets = null) {
     holdRot: new THREE.Euler(0.87, 0, 0),
     restRot: stick.rotation.clone(),
     carried: false,
+    ...(OLD ? {} : { offHand: null, twoHandZone: [0.02, -0.5] }),
   };
   scene.add(stick);
   targets.push(stick);
@@ -236,6 +257,18 @@ export function createHockey(scene, targets, at, assets = null) {
   let northSide = false;
   let southSide = false;
   let goals = 0;
+  const hold = OLD ? null : createHold({ faceSign: -1, twoHandMin: 0.06, twoHandFull: 0.14 });
+  const fit = OLD || !stretch ? null : createFit({ min: -0.15, max: 0.25 });
+  if (fit?.fixed != null) { stretch.set(fit.fixed); K = extendK(fit.fixed); }
+  const pose0 = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  const pose1 = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  let poseReady = false;
+  let cool = 0;
+  let fitEvent = null;
+  let lastStrike = null;
+  const shaftW = new THREE.Vector3();
+  const rawFace = new THREE.Vector3();
+  const scaleSink = new THREE.Vector3();
 
   function worldDir(local, target) {
     return target.copy(local).transformDirection(stick.matrixWorld);
@@ -295,13 +328,54 @@ export function createHockey(scene, targets, at, assets = null) {
     return worst;
   }
 
+  function lowestGap(floorAt, waterY) {
+    let gap = null;
+    for (const local of K.sole) {
+      soleW.copy(local).applyMatrix4(stick.matrixWorld);
+      const floorY = floorAt(soleW.x, soleW.z, soleW.y + 0.3);
+      if (floorY == null || floorY <= waterY + 0.05) continue;
+      const g = soleW.y - floorY;
+      if (gap == null || g < gap) gap = g;
+    }
+    return gap;
+  }
+
   function syncPose(dt, motion, floorAt, waterY) {
-    if (stick.userData.carried) {
-      stick.quaternion.copy(holdQuat);
-      stick.position.copy(stick.userData.holdPos);
+    const ud = stick.userData;
+    let held = null;
+    if (!OLD && (!ud.carried || ud.offHand === stick.parent)) ud.offHand = null;
+    if (!OLD && !ud.carried) { hold.reset(); fit?.reset(); poseReady = false; }
+    if (ud.carried) {
+      held = OLD ? null : hold.apply(stick, stick.parent, ud.offHand, dt);
+      if (!held) {
+        stick.quaternion.copy(holdQuat);
+        stick.position.copy(ud.holdPos);
+      }
     }
     readFace();
-    if (motion?.held && motion.v) {
+    if (held && fit) {
+      shaftW.set(face.shaft.b.x - face.shaft.a.x, face.shaft.b.y - face.shaft.a.y, face.shaft.b.z - face.shaft.a.z).normalize();
+      const speed = havePrev && dt > 1e-4 ? Math.hypot(face.c.x - rawFace.x, face.c.y - rawFace.y, face.c.z - rawFace.z) / dt : 99;
+      rawFace.set(face.c.x, face.c.y, face.c.z); // before the ground clamp
+      const next = fit.update(dt, { ext: stretch.ext, gap: lowestGap(floorAt, waterY), speed, fromVertical: Math.acos(THREE.MathUtils.clamp(-shaftW.y, -1, 1)), cosDrop: -shaftW.y });
+      if (next != null) {
+        stretch.set(next);
+        K = extendK(next);
+        readFace();
+        fitEvent = { ext: next, at: { x: face.c.x, y: face.c.y, z: face.c.z } };
+      }
+    }
+    if (held) {
+      // golf grip pass: the head's own motion (the hold is no longer rigid to one controller in two-hand mode)
+      if (havePrev && dt > 1e-4) {
+        face.v.x = (face.c.x - prevRaw.x) / dt;
+        face.v.y = (face.c.y - prevRaw.y) / dt;
+        face.v.z = (face.c.z - prevRaw.z) / dt;
+      } else face.v.x = face.v.y = face.v.z = 0;
+      face.w.x = motion?.w?.x || 0;
+      face.w.y = motion?.w?.y || 0;
+      face.w.z = motion?.w?.z || 0;
+    } else if (motion?.held && motion.v) {
       stick.getWorldPosition(gripV);
       arm.set(face.c.x - gripV.x, face.c.y - gripV.y, face.c.z - gripV.z);
       const w = motion.w || { x: 0, y: 0, z: 0 };
@@ -334,7 +408,33 @@ export function createHockey(scene, targets, at, assets = null) {
       face.w.z = dragged.w.z;
       turf = dragged.kill > 0.18 ? { kill: dragged.kill, at: { x: face.c.x, y: face.c.y, z: face.c.z } } : null;
     } else turf = null;
+    if (held) {
+      stick.updateWorldMatrix(true, false);
+      pose0.p.copy(pose1.p);
+      pose0.q.copy(pose1.q);
+      stick.matrixWorld.decompose(pose1.p, pose1.q, scaleSink);
+      if (!poseReady) { pose0.p.copy(pose1.p); pose0.q.copy(pose1.q); poseReady = true; }
+    } else poseReady = false;
   }
+
+  // Swept strike for fast swings (a 14 m/s hit moves the hook 19 cm a frame, more than the ball); slow contact
+  // (dribble, push pass) stays with the hockeyball solver.
+  function strikeSweep(dt) {
+    if (OLD || !poseReady || !stick.userData.carried || dt <= 1e-4) return null;
+    if (cool > 0) { cool -= dt; return null; }
+    if (Math.hypot(face.v.x, face.v.y, face.v.z) < 4) return null;
+    const hit = sweepFace(pose0, pose1, dt, { face: K.face, n: K.n, toe: K.toe, up: K.up, halfToe: K.halfToe, halfUp: K.halfUp }, ball.p, ball.v, BALL_R);
+    if (!hit) return null;
+    const res = impact(ball, hit, STICK, BALL_R, 0.16);
+    if (!res || res.push) return null;
+    cool = 0.2;
+    lastStrike = { head: +res.head.toFixed(2), ball: +res.ball.toFixed(2), launch: +res.launch.toFixed(2), t: +hit.t.toFixed(3) };
+    return res;
+  }
+  stick.userData.debug = () => {
+    stick.updateWorldMatrix(true, false);
+    return { face, floorY, ballState: ball, spawn: { ...spawn }, mode: OLD ? 'old' : 'grip', ext: stretch ? +stretch.ext.toFixed(4) : 0, twoHand: !!hold?.state.twoHand, weight: hold ? +hold.state.weight.toFixed(3) : null, sole: K.sole.map((p) => p.clone().applyMatrix4(stick.matrixWorld).toArray()), lastStrike };
+  };
 
   function inMouth(x, y) {
     return x > CX - HALF_W + POST && x < CX + HALF_W - POST && y > floorY + BALL_R && y < floorY + GOAL_H - 0.05;
@@ -346,9 +446,14 @@ export function createHockey(scene, targets, at, assets = null) {
       if (y >= 3.05 || y < -0.8) return groundUnder(x, z, y);
       return groundUnder(x, z, 0.2);
     };
-    if (!stick.visible || stick.position.y < -20) havePrev = false;
-    else syncPose(dt, motion, floorAt, waterY);
-    const useFace = stick.visible && stick.position.y > -20;
+    let swept = null;
+    if (!stick.visible || stick.position.y < -20) { havePrev = false; poseReady = false; }
+    else {
+      syncPose(dt, motion, floorAt, waterY);
+      swept = strikeSweep(dt);
+    }
+    // After a swept strike the follow-through (the J-hook) must not catch the ball again for 0.1 s.
+    const useFace = stick.visible && stick.position.y > -20 && !swept && !(cool > 0.1);
     const boxes = colliders.length ? solids.concat(colliders) : solids;
     const events = stepBall(ball, dt, {
       face: useFace ? face : null,
@@ -364,6 +469,7 @@ export function createHockey(scene, targets, at, assets = null) {
       ball.w.x = ball.w.y = ball.w.z = 0;
       ball.asleep = false;
     }
+    if (swept) events.push({ type: 'strike', speed: swept.head });
     ballMesh.position.set(ball.p.x, ball.p.y, ball.p.z);
     const spin = Math.hypot(ball.w.x, ball.w.y, ball.w.z);
     if (spin > 0.2) {
@@ -387,6 +493,7 @@ export function createHockey(scene, targets, at, assets = null) {
     pushArmed = !pushed;
     if (turf && turfArmed) out.push({ type: 'turf', kill: turf.kill, at: turf.at });
     turfArmed = !turf;
+    if (fitEvent) { out.push({ type: 'fit', ...fitEvent }); fitEvent = null; }
     for (const which of scored) {
       goals += 1;
       out.push({ type: 'goal', which, goals, at: { x: ball.p.x, y: ball.p.y, z: ball.p.z } });
