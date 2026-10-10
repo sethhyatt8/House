@@ -10,6 +10,8 @@ import { hostRoomCode, openRoom, watchCodeFromUrl } from './watch.js';
 import { createAssetManager } from './assets.js';
 import { legacy } from './flags.js';
 import { GROUND_OLD, followGround } from './walk.js'; // ground/boat pass
+import { FALL_OLD, SNAP_DOWN } from './walk.js'; // fall pass
+import { FALLDEATH, SCUBA_RULE, createFallDeath } from './falldeath.js'; // fall pass
 import { START_CELL } from './cell.js';
 import { CLIFF_X, WATER_Y, createPedestal, createWorld, pedestalSlot } from './world.js';
 import { createLiftFeel } from './liftfeel.js';
@@ -280,6 +282,8 @@ function teleportTo(index) {
   leaveClimb();
   teleportIndex = index;
   fallVy = 0;
+  fallDeath?.reset(spot.floor ?? 0);
+  settle.on = false; // a deliberate placement: the spawn hold must not pull it back
   if (spot.seat) {
     boardCanoe();
     return;
@@ -444,6 +448,9 @@ function shiftPlayer(dx, dy, dz) {
     xrOffset.set(prevX, prevY, prevZ);
     return false;
   }
+  // fall pass: the game moved the rig (and the head with it); only the tracked head's own motion is swept for walls
+  contain.x += dx;
+  contain.z += dz;
   return true;
 }
 
@@ -494,14 +501,55 @@ function pushOutOf(x, z, box, radius) {
   return { dx: 0, dz: far };
 }
 
+// Fall pass: where the head was after the last containment (world x/z), so a head that moved a long way between two
+// frames (a session-start hitch while you step, a tracking jump or recenter) is stopped at the wall it crossed. The
+// old push took the nearest face of the box the head ended up in: a 0.5-1 m jump into the start room's 0.26 m side
+// walls or its 0.48 m back wall came out on the far side, over no floor, and you dropped 7.9 m into the cave / tunnel.
+const contain = { x: 0, z: 0, ok: false, inside: false };
+let fallDeath = null; // fall pass (created with the swim/scuba systems below)
+
+// entry parameter t (0..1) of the segment p->c into box b grown by r, or null when it doesn't enter it
+function sweepInto(px, pz, cx, cz, b, r) {
+  const x0 = b.x0 - r; const x1 = b.x1 + r; const z0 = b.z0 - r; const z1 = b.z1 + r;
+  if (px > x0 && px < x1 && pz > z0 && pz < z1) return null; // already inside: nearest-face push handles it
+  const dx = cx - px; const dz = cz - pz;
+  let t0 = 0; let t1 = 1;
+  for (const [p, d, lo, hi] of [[px, dx, x0, x1], [pz, dz, z0, z1]]) {
+    if (Math.abs(d) < 1e-9) { if (p <= lo || p >= hi) return null; continue; }
+    let a = (lo - p) / d; let bb = (hi - p) / d;
+    if (a > bb) [a, bb] = [bb, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, bb);
+    if (t0 >= t1) return null;
+  }
+  return t0;
+}
+
 function containPlayer() {
-  if (cellPhase < 2 || watching || aboard || biteHold || mantle || !renderer.xr.isPresenting || !xrFrame) return;
+  if (cellPhase < 2 || watching || aboard || biteHold || mantle || !renderer.xr.isPresenting || !xrFrame) { contain.ok = false; contain.inside = false; return; }
   const ref = renderer.xr.getReferenceSpace();
   const pose = ref && xrFrame.getViewerPose(ref);
   if (!pose) return;
   let x = pose.transform.position.x;
   let z = pose.transform.position.z;
   const boxes = walker.solids(xrOffset.y);
+  if (!FALL_OLD && contain.ok) {
+    for (let pass = 0; pass < 3; pass += 1) {
+      let best = null;
+      for (const box of boxes) {
+        if (climb && box.climbThrough) continue;
+        const t = sweepInto(contain.x, contain.z, x, z, box, 0.2);
+        if (t != null && (best == null || t < best)) best = t;
+      }
+      if (best == null) break;
+      const k = Math.max(0, best - 0.002);
+      const nx = contain.x + (x - contain.x) * k;
+      const nz = contain.z + (z - contain.z) * k;
+      const px = contain.x; const pz = contain.z;
+      if (!shiftPlayer(nx - x, 0, nz - z)) return;
+      contain.x = px; contain.z = pz; // shiftPlayer moved the anchor along; the anchor is still where the head was
+      x = nx; z = nz;
+    }
+  }
   for (let pass = 0; pass < 6; pass += 1) {
     let hit = false;
     for (const box of boxes) {
@@ -515,6 +563,10 @@ function containPlayer() {
     }
     if (!hit) break;
   }
+  contain.x = x;
+  contain.z = z;
+  contain.ok = true;
+  contain.inside = boxes.some((b) => !(climb && b.climbThrough) && x > b.x0 + 0.02 && x < b.x1 - 0.02 && z > b.z0 + 0.02 && z < b.z1 - 0.02);
 }
 
 function yawAround(delta, pivotX, pivotZ) {
@@ -534,6 +586,10 @@ function yawAround(delta, pivotX, pivotZ) {
     xrOffset.z = prevZ;
     return false;
   }
+  const ax = pivotX - contain.x;
+  const az = pivotZ - contain.z;
+  contain.x = pivotX - (cos * ax + sin * az);
+  contain.z = pivotZ - (-sin * ax + cos * az);
   return true;
 }
 
@@ -610,9 +666,9 @@ function attachClimb(controller, hit) {
   climb.hand = controller;
   climb.lifted = lifted;
   climb.onLip = !!hit.owner.userData.lip;
+  climb.lowest = Math.min(low, feet); // fall pass: every climb (topout.js arms the lip only from below)
   if (ladder.userData.shaft) {
     climb.feet = feet;
-    climb.lowest = Math.min(low, feet);
     climb.highest = Math.max(high, feet);
   }
   standAtLadder(ladder);
@@ -994,11 +1050,76 @@ function updateLift(dt) {
   liftFeel.update(dt, ridingLift, renderer.xr.isPresenting);
 }
 
+// Fall pass: gravity is held at session start (and after a respawn) until the floor under the head has been found and
+// stayed under the feet for a moment: SETTLE_MIN s and SETTLE_FRAMES frames after the start-room placement, then
+// SETTLE_STABLE frames in a row with the floor within SNAP_DOWN of the feet (timeout SETTLE_MAX s). While held, a
+// head that is not over a floor near the feet is put back on the spawn (feet on the floor, head over the spawn).
+const SETTLE_MIN = 0.6;
+const SETTLE_FRAMES = 30;
+const SETTLE_STABLE = 12;
+const SETTLE_MAX = 5;
+const settle = { on: false, t: 0, frames: 0, stable: 0, spot: null, recovered: 0 };
+function startSettle(spot = null) {
+  settle.on = !FALL_OLD;
+  settle.t = 0;
+  settle.frames = 0;
+  settle.stable = 0;
+  settle.spot = spot;
+}
+function holdForSettle(dt, head, feetY, ground) {
+  if (!settle.on) return false;
+  settle.t += dt;
+  if (cellPhase >= 2 || settle.spot) settle.frames += 1;
+  const near = Math.abs(ground - feetY) <= SNAP_DOWN;
+  settle.stable = near ? settle.stable + 1 : 0;
+  if ((settle.t >= SETTLE_MIN && settle.frames >= SETTLE_FRAMES && settle.stable >= SETTLE_STABLE) || settle.t >= SETTLE_MAX) {
+    settle.on = false;
+    return false;
+  }
+  if (!near && ground < feetY) {
+    // no floor under the head yet: back over the spawn (start room) or the respawn spot, feet on its floor
+    const spot = settle.spot || { x: START_CELL.spawnX, z: START_CELL.spawnZ, floor: 0 };
+    if (cellPhase >= 1 || settle.spot) {
+      shiftPlayer(spot.x - head.x, spot.floor - feetY, spot.z - head.z);
+      settle.recovered += 1;
+    }
+  } else if (near && Math.abs(ground - feetY) > 1e-4) {
+    shiftPlayer(0, ground - feetY, 0); // feet on the floor
+  }
+  return true;
+}
+
+function safeZone(x, z, feet) {
+  let zone = null;
+  const cell = START_CELL.floor;
+  if (Math.abs(feet) < 0.03) {
+    if (x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1) zone = 'start room';
+    else if (x >= CLIFF_X + 0.04 && x <= roof.roomX1 && z >= roof.roomZ0 && z <= roof.roomZ1) zone = 'cliff room';
+    else if (world.yard && x >= world.yard.x0 && x <= world.yard.x1 && z >= world.yard.z0 && z <= world.yard.z1) zone = 'yard';
+  } else if (Math.abs(feet - roof.y) < 0.03 && x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1) zone = 'roof';
+  else if (feet > 8 && (world.crag?.deckAt?.(x, z) != null || inBox(world.golf?.green, x, z))) zone = 'overlook';
+  if (!zone) return null;
+  // keep checkpoints off edges and out of corners: the floor carries on 0.45 m around you
+  for (const [dx, dz] of [[0.45, 0], [-0.45, 0], [0, 0.45], [0, -0.45]]) {
+    const w = walker.walkable(x + dx, z + dz, feet);
+    if (!w.ok || Math.abs(w.ground - feet) > 0.3) return null;
+  }
+  return zone;
+}
+
 function updatePlayerFall(dt) {
-  if (watching || biteHold || aboard || swim?.active || !renderer.xr.isPresenting || !xrFrame) return;
-  if (climb?.hand || boatGrip || glide.flying || mantle) {
-    fallVy = 0;
+  if (watching || !renderer.xr.isPresenting || !xrFrame) return;
+  if (biteHold || aboard || swim?.active || fallDeath?.dying()) {
+    // fall pass: the swim system can catch a falling body a few cm over the surface (swim.js enters at feet <= sea +
+    // 0.08) before the fall lands; that entry is the water landing
+    if (swim?.active && fallDeath?.falling(xrOffset.y, 0) && fallDeath.land(WATER_Y, { water: true })) swim.leave?.('fall');
+    fallDeath?.reset(xrOffset.y);
     return;
+  }
+  if (climb?.hand || boatGrip || glide.flying || mantle || ridingLift) {
+    if (!ridingLift) fallVy = 0;
+    fallDeath?.reset(xrOffset.y); // only the free fall after you let go counts
+    if (!ridingLift) return;
   }
   const ref = renderer.xr.getReferenceSpace();
   const pose = ref && xrFrame.getViewerPose(ref);
@@ -1006,6 +1127,11 @@ function updatePlayerFall(dt) {
   const head = pose.transform.position;
   const feetY = xrOffset.y;
   const ground = groundUnder(head.x, head.z, feetY);
+  if (holdForSettle(dt, head, feetY, ground)) {
+    fallVy = 0;
+    fallDeath?.reset(xrOffset.y);
+    return;
+  }
   // ground/boat pass: one rule (walk.js followGround): snap up, snap down within SNAP_DOWN (the old 12 cm band was
   // never closed, so you hovered after every small step down and all the way down ramps), else fall and land.
   // forest pass: letting go on a notch line is a controlled slide down the rock, not a free fall
@@ -1013,8 +1139,16 @@ function updatePlayerFall(dt) {
   const step = followGround(feetY, ground, fallVy, dt, { slide: sliding ? -4.5 : null });
   if (step.feet !== ground && !step.rest) { // in the air
     if (climb) leaveClimb();
+    fallDeath?.air(feetY, dt, sliding);
     fallVy = step.vy;
     shiftPlayer(0, step.moved, 0);
+    return;
+  }
+  const wading = world.shallowFloor?.(head.x, head.z) != null;
+  // fall pass: a landing from more than the lethal height kills, the sea included (unless you wear the dive kit)
+  if (fallDeath?.land(step.feet, { water: !wading && ground === WATER_Y })) {
+    if (Math.abs(step.feet - feetY) > 1e-4) shiftPlayer(0, step.feet - feetY, 0);
+    fallVy = 0;
     return;
   }
   if (Math.abs(step.feet - feetY) > 1e-4) landShift(step.feet, feetY, head);
@@ -1023,9 +1157,26 @@ function updatePlayerFall(dt) {
     pulseBoth(0.6, 90);
     setStatus('You slide down the rock and land on your feet.');
   }
-  const wading = world.shallowFloor?.(head.x, head.z) != null;
   // rowing pass: === WATER_Y only (the dry lift floors at -10.8 / -14.4 are below sea level)
   if (!wading && ground === WATER_Y && (step.landed > (GROUND_OLD ? 1.2 : 0) || feetY - ground > 0.01)) startWaterBite(head.x, head.z);
+  else if (fallDeath && !climb) fallDeath.stand(head.x, head.z, step.feet, safeZone(head.x, head.z, step.feet), dt);
+}
+
+// Fall pass: respawn after a fall death at the last checkpoint (fall.checkpoint()); keeps everything you carry
+function respawnFromFall(cp) {
+  if (climb) leaveClimb();
+  if (aboard) leaveCanoe();
+  swim?.leave?.('respawn');
+  biteHold = false;
+  fallVy = 0;
+  if (renderer.xr.isPresenting && xrFrame) {
+    const head = headSample();
+    shiftPlayer(cp.x - head.x, cp.floor - xrOffset.y, cp.z - head.z);
+  }
+  contain.ok = false;
+  fallDeath?.reset(cp.floor);
+  health?.reset?.();
+  startSettle({ x: cp.x, z: cp.z, floor: cp.floor });
 }
 
 const raycaster = new THREE.Raycaster();
@@ -1101,6 +1252,15 @@ renderer.xr.addEventListener('sessionstart', () => {
   xrOffset.set(0, 0, 0);
   xrYaw = 0;
   cellPhase = 0;
+  if (!FALL_OLD) {
+    // fall pass: nothing from the last session carries into the new one (a fall speed, the canoe, a half-done mantle)
+    fallVy = 0;
+    if (aboard) leaveCanoe();
+    biteHold = false;
+    contain.ok = false;
+    startSettle();
+  }
+  fallDeath?.reset(0);
   enableCellView();
   try { audio(); } catch { /* the roar starts once the headset session is running */ }
   sfx.start();
@@ -1237,6 +1397,18 @@ const swim = UNDERWATER && SWIM && !watching ? createSwim({
 world.underwater = underwater;
 world.swim = swim;
 world.scuba = scuba;
+// fall pass: big falls kill and reset (src/falldeath.js, ?falldeath=0 off)
+fallDeath = !watching ? createFallDeath({
+  camera,
+  scene,
+  sfx,
+  pulse: pulseBoth,
+  setStatus,
+  respawn: respawnFromFall,
+  scubaSafe: () => (SCUBA_RULE === '0' ? false : SCUBA_RULE === 'any' ? !!(scuba && ['mask', 'tank', 'fins'].some((id) => scuba.has(id))) : !!scuba?.has('tank')),
+  home: { x: START_CELL.spawnX, z: START_CELL.spawnZ, floor: 0 },
+}) : null;
+world.fallDeath = fallDeath;
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -3632,7 +3804,7 @@ function canoeHolds(controller) {
 
 function pollMove(dt) {
   exitCooldown = Math.max(0, exitCooldown - dt);
-  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold || mantle) {
+  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold || mantle || fallDeath?.dying()) {
     liftFeel.setComfort?.(0);
     return;
   }
@@ -3690,7 +3862,8 @@ function pollMove(dt) {
     }
   }
   // stepping physically into the hull also boards
-  if (!aboard && exitCooldown <= 0 && !climb && Math.abs(xrOffset.y - world.canoe.seatPoint.y) < 1.2 && inHull(head.x, head.y, head.z, 0.36, 1.3)) boardCanoe();
+  // fall pass: not while falling past it (an 8 m drop from the cliff room used to land you safely in the seat)
+  if (!aboard && exitCooldown <= 0 && !climb && !fallDeath?.falling(xrOffset.y) && Math.abs(xrOffset.y - world.canoe.seatPoint.y) < 1.2 && inHull(head.x, head.y, head.z, 0.36, 1.3)) boardCanoe();
   liftFeel.setComfort?.(comfort);
 }
 
@@ -4480,6 +4653,10 @@ function frame(time, frame) {
   updateGlider(dt);
   pollMove(dt);
   updatePlayerFall(dt);
+  if (fallDeath && renderer.xr.isPresenting && xrFrame) {
+    const busy = !!(climb?.hand || aboard || swim?.active || mantle || biteHold || glide.flying);
+    fallDeath.update(dt, { head: headSample(), feet: xrOffset.y, inside: contain.inside && !busy, active: !busy || !Number.isFinite(xrOffset.y) || xrOffset.y < -20 });
+  }
   swim?.update(dt, xrFrame);
   if (renderer.xr.isPresenting || !(climb && !climb.onRoof)) {
     pollGazeLock();
@@ -4562,6 +4739,7 @@ if (pageParams.get('testhooks') === '1') {
       leaveCanoe();
       const head = hookHead();
       shiftPlayer(x - head.x, feet - xrOffset.y, z - head.z);
+      settle.on = false; // deliberate placement ends the spawn hold
     },
     cameraMatrix: () => renderer.xr.getCamera().matrixWorld.toArray(),
     chopDoor() { (world.gear.doorBoards || []).forEach((b) => { b.userData.dead = true; b.visible = false; }); },
@@ -4581,6 +4759,9 @@ if (pageParams.get('testhooks') === '1') {
     tryStickExit,
     playerDown,
     fall: () => fallVy,
+    fallDeath: () => fallDeath?.debug?.() ?? null, // fall pass
+    settle: () => ({ ...settle }),
+    contain: () => ({ ...contain }),
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };
 }

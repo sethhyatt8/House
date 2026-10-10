@@ -15,6 +15,8 @@ export const START_CELL = {
   back: { z0: -0.3, z1: 0.54, h: 2.02, gateX: 5.08 },
   floor: { x0: 2.55, x1: 5.18, z0: -0.72, z1: 0.96 },
   ceiling: 2.42,
+  // fall pass: the rock the room is cut into (the union of the wall blocks below); walk.js stands you on it at y 0
+  rock: { x0: 2.5, x1: 5.18, z0: -0.98, z1: 1.22 },
   blocks: [
     { x0: 2.5, x1: 3.33, z0: -3.05, z1: -0.36 },
     { x0: 2.5, x1: 3.33, z0: 0.6, z1: 3.05 },

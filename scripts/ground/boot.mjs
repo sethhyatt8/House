@@ -8,7 +8,7 @@ const puppeteer = require('puppeteer-core');
 const iwer = fs.readFileSync(require.resolve('iwer/build/iwer.js'), 'utf8');
 const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium', 'C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => fs.existsSync(p));
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.glb': 'model/gltf-binary', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.ktx2': 'image/ktx2', '.hdr': 'application/octet-stream', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.webp': 'image/webp' };
-export async function boot(dist, query = '', { port = 8790 + Math.floor(Math.random() * 200), headH = 1.6 } = {}) {
+export async function boot(dist, query = '', { port = 8790 + Math.floor(Math.random() * 200), headH = 1.6, before = null, beforeArg = null, wait = 2500 } = {}) {
   const root = path.resolve(dist);
   const srv = http.createServer((q, r) => {
     let rel = decodeURIComponent(q.url.split('?')[0]);
@@ -30,11 +30,11 @@ export async function boot(dist, query = '', { port = 8790 + Math.floor(Math.ran
   RS.getOffsetReferenceSpace = function (t) { return orig.call(this, t && t.matrix ? t.matrix : t); }; })();`);
   await pg.goto(`http://localhost:${port}/?testhooks=1&shadow=256&xrscale=0.25&${query}`);
   await pg.waitForFunction(() => document.getElementById('loading')?.hidden && window.__house, { timeout: 600000, polling: 1000 });
-  const btn = await pg.evaluate(() => { const b = document.getElementById('XRButton'); return b ? b.textContent + '|' + b.disabled + '|' + getComputedStyle(b).display : 'none'; }); console.log('xrbutton', btn); await pg.evaluate(() => document.getElementById('XRButton').click());
+  const btn = await pg.evaluate(() => { const b = document.getElementById('XRButton'); return b ? b.textContent + '|' + b.disabled + '|' + getComputedStyle(b).display : 'none'; }); console.log('xrbutton', btn); if (before) await pg.evaluate(before, beforeArg); await pg.evaluate(() => document.getElementById('XRButton').click());
   try { await pg.waitForFunction(() => window.__xr.activeSession, { timeout: 60000 }); } catch (e) { console.log('no session', logs); throw e; }
-  await new Promise((r) => setTimeout(r, 2500));
+  await new Promise((r) => setTimeout(r, wait));
   await pg.evaluate((headH) => {
-    __xr.position.set(0, headH, 0);
+    if (headH != null) __xr.position.set(0, headH, 0);
     const qm = (q) => { const { x, y, z, w } = q; return new DOMMatrix([1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0, 2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0, 2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0, 0, 0, 0, 1]); };
     const headLocal = () => { const p = __xr.position; return new DOMMatrix().translate(p.x, p.y, p.z).multiply(qm(__xr.quaternion)); };
     const W = () => DOMMatrix.fromFloat32Array(new Float32Array(__house.cameraMatrix())).multiply(headLocal().inverse());

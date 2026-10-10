@@ -800,6 +800,7 @@ export function createSwim({ renderer, scene, camera, world, underwater, scuba, 
     veil,
     gauge,
     takeFall,
+    leave: (why) => exit(why), // fall pass: the respawn after a fall death
     onSqueeze,
     update,
     scare: () => startScare(),

@@ -28,6 +28,9 @@ export const DROP = 0.5;        // deepest step you walk down; deeper is a ledge
 // Ground/boat pass: one ground-follow rule for every frame the rig is on its feet (followGround below).
 // ?ground=old restores the previous behaviour (12 cm hover band, crate tops only up to +0.40, no rim-rock colliders).
 export const GROUND_OLD = params.get('ground') === 'old';
+// Fall pass: ?fall=old restores 005ff00's spawn/containment (no gravity hold at session start, nearest-face wall push,
+// no floor under the start-room walls). ?falldeath=0 (falldeath.js) only turns the fall death off.
+export const FALL_OLD = params.get('fall') === 'old';
 export const SNAP_DOWN = 0.26;  // a floor this close under the feet is followed (stairs, ramps, crate edges): no hover
 export const GRAVITY = 9.2;
 export const FALL_MAX = 16;
@@ -81,9 +84,14 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
     const cell = startCell.floor;
     const inCell = x >= cell.x0 && x <= cell.x1 && z >= cell.z0 && z <= cell.z1;
     if (inCell && feetY >= startCell.ceiling - 0.35) return startCell.ceiling;
+    // fall pass: the start room is a box cut into rock. Its walls (cell.js blocks, x 2.5..5.18, z -0.98..1.22) had no
+    // floor under them, so a head pushed into or through a wall read as open water (-8) or, once the feet passed -1,
+    // as the cave / paint tunnel 7.9 m below the spawn. The rock around the room now carries you at floor level.
+    const rock = startCell.rock;
+    const inRock = !FALL_OLD && rock && x >= rock.x0 && x <= rock.x1 && z >= rock.z0 && z <= rock.z1;
     // rowing pass: only from above (feet > -1). The room box overhangs the cave mouth by 9 cm (x -1.74..-1.65), and
     // standing there in the cave used to read as the room floor 7.9 m up (landShift lifted you onto it).
-    if ((overFloor || inCell) && feetY > -1) return standHeight(x, z, feetY, 0);
+    if ((overFloor || inCell || inRock) && feetY > -1) return standHeight(x, z, feetY, 0);
     const liftFloor = world.lift?.floorAt(x, z, feetY);
     if (liftFloor != null) return liftFloor;
     const porch = world.lift?.door?.porch;
@@ -190,6 +198,7 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
   // Can a body standing with its feet at `feet` move its centre to (x, z)? Returns the new ground when it can.
   // opts.up / opts.down widen the step limits (stepping out of the canoe onto the shelf or into the shallows).
   function walkable(x, z, feet, opts = null) {
+    const loose = !!opts?.loose;
     const up = opts?.up ?? STEP_UP;
     const down = opts?.down ?? DROP;
     const g = ground.groundUnder(x, z, feet);
@@ -199,6 +208,7 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
     for (const c of colliders) if (hitsBox(c, x, z, feet, RADIUS)) return { ok: false, why: c.why };
     const dyn = dynamicHit(x, z, feet, RADIUS);
     if (dyn) return { ok: false, why: dyn };
+    if (loose) return { ok: true, ground: g };
     // clearance: the floor has to carry on a little around you (keeps you off edges and out of tunnel walls)
     const r = RADIUS * 0.7;
     for (let i = 0; i < 4; i += 1) {
@@ -218,10 +228,16 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
     let cz = z;
     let f = feet;
     let blocked = null;
+    // fall pass: standing somewhere the clearance rule rejects (a notch slide or a push puts you 5-15 cm too close to an
+    // edge: the sea-wall shelf is only 0.3 m of clearance wide) used to freeze the stick in every direction. While the
+    // spot you are on fails only for clearance, steps that keep the centre over the same kind of floor are allowed.
+    let escape = !FALL_OLD && walkable(x, z, feet).why === 'edge';
     for (let i = 0; i < steps; i += 1) {
       const sx = dx / steps;
       const sz = dz / steps;
-      const w = walkable(cx + sx, cz + sz, f);
+      let w = walkable(cx + sx, cz + sz, f);
+      if (!w.ok && escape && w.why === 'edge') w = walkable(cx + sx, cz + sz, f, { loose: true });
+      if (w.ok && escape) escape = walkable(cx + sx, cz + sz, w.ground).why === 'edge';
       if (w.ok) { cx += sx; cz += sz; f = w.ground; continue; }
       blocked = w.why;
       const wx = walkable(cx + sx, cz, f);

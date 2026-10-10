@@ -20,6 +20,9 @@ export function createTopout({ getClimb, head, feet, shiftPlayer, leaveClimb, pu
     const climb = getClimb();
     const lip = climb?.ladder?.userData?.lip;
     if (!lip) { hinted = false; return; }
+    // fall pass: only when this climb started at least 1 m under the lip; grabbing the top holds from up there (to
+    // climb down) used to haul you straight back over
+    if (climb.lowest != null && climb.lowest > lip.y - 1.0) return;
     const h = head();
     if (h.z < lip.z0 - 0.6 || h.z > lip.z1 + 0.6 || h.x < lip.x - 1.1) return;
     const over = h.y - lip.y;
@@ -35,7 +38,8 @@ export function createTopout({ getClimb, head, feet, shiftPlayer, leaveClimb, pu
   }
 
   function start(h, lip, how) {
-    const toZ = clamp(h.z, lip.z0 + 0.25, lip.z1 - 0.25);
+    // fall pass: a lip with a fixed spot (sea wall, roof ladder) lands you there; the crag lands where you came over
+    const toZ = lip.fixed ? lip.spot.z : clamp(h.z, lip.z0 + 0.25, lip.z1 - 0.25);
     m = {
       t: 0,
       dur: 0.6,
@@ -43,7 +47,8 @@ export function createTopout({ getClimb, head, feet, shiftPlayer, leaveClimb, pu
       fromX: h.x,
       fromZ: h.z,
       fromY: feet(),
-      toX: Math.max(h.x, lip.spot.x),
+      toX: lip.fixed ? lip.spot.x : Math.max(h.x, lip.spot.x),
+      status: lip.status || 'On top of the crag. The woods start behind you.',
       toZ,
       toY: lip.spot.y,
       x: h.x,
@@ -73,7 +78,7 @@ export function createTopout({ getClimb, head, feet, shiftPlayer, leaveClimb, pu
     if (!m.landed && k > 0.62) { m.landed = true; pulse(0.35, 30); }
     if (k >= 1) {
       pulse(0.55, 45);
-      setStatus('On top of the crag. The woods start behind you.');
+      setStatus(m.status);
       m = null;
       setActive(null);
     }

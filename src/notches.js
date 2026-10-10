@@ -7,6 +7,9 @@ import { legacy } from './flags.js';
 import { proxyMaterial } from './assets.js';
 
 export const NOTCHES = new URLSearchParams(location.search).get('ladders') !== 'old' && !legacy('ladders');
+// Fall pass: ?climb=old keeps 005ff00's sea-wall line (top at z 10.05 behind the rim boulder, no lip, snap only when the
+// feet reach -0.25) and the roof ladder without a lip.
+export const CLIMB_OLD = new URLSearchParams(location.search).get('climb') === 'old';
 
 const cutMat = new THREE.MeshStandardMaterial({ color: 0x26221d, roughness: 1 });
 const wornMat = new THREE.MeshStandardMaterial({ color: 0x766e64, roughness: 0.95 });
@@ -45,7 +48,12 @@ function proxy(ladder, x, y, z, rungs) {
 
 // Diagonal notch line down the outside cliff face from the yard edge (z 10.05: the yard's far corner, behind the rim boulder and past the last crate pile) to a shelf at the
 // foot of the cliff by the cave mouth. The line drifts 3.4 m sideways on the way down (main.js follows userData.path).
-export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTop = 10.05, zBase = 2.95 }) {
+// Fall pass: the top used to be at z 10.05, a 0.2 m strip between the rim boulder's collider (x -1.67..-0.71,
+// z 9.02..9.98, +0.2 body radius) and the yard's far edge (z 10.2): every spot over the top read as 'rock' or 'edge',
+// and the old snap needed the feet at -0.25 with the top hold at -0.16 (a hand pulled to 9 cm over your feet; the most
+// a hip-height pull gets you is -0.96). The line now tops out at z 8.55, clear of the boulder, onto open yard floor,
+// with a lip (two holds on the edge) and the crag's mantle (topout.js).
+export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTop = CLIMB_OLD ? 10.05 : 8.55, zBase = 2.95 }) {
   const ladder = new THREE.Group();
   const rx = faceX + 0.22;
   ladder.position.set(rx, 0, zBase);
@@ -73,6 +81,13 @@ export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTo
     scuff.translate(faceX + 0.07 - rx, 0.004, zTop - zBase + dz);
     lips.push(scuff);
   });
+  // fall pass: two lip holds on the yard edge itself (grab, pull down = haul over), where the cleft and scuffs are
+  if (!CLIMB_OLD) {
+    [-0.12, 0.12].forEach((dz) => {
+      const lipHold = proxy(ladder, faceX - rx + 0.05, 0.02, zTop - zBase + dz, rungs);
+      lipHold.userData.lip = true;
+    });
+  }
   [mergedMesh(cuts, cutMat, 'cliffnotches_cut'), mergedMesh(lips, wornMat, 'cliffnotches_worn')].forEach((m) => m && ladder.add(m));
   ladder.userData = {
     rungs,
@@ -83,7 +98,9 @@ export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTo
     zAt,
     topSpot: { x: faceX + 0.6, y: 0, z: zTop + 0.05 }, // clear of the rim boulder (-1.19, 9.5, r 0.48)
     baseSpot: { x: faceX - 0.3, y: beachTop, z: zBase - 0.2 },
-    topStatus: 'At the top of the cliff, behind the boulder in the corner of the yard.',
+    topStatus: CLIMB_OLD ? 'At the top of the cliff, behind the boulder in the corner of the yard.' : 'At the top of the cliff, at the edge of the yard.',
+    // fall pass: the mantle over the yard edge (topout.js): lands on the yard 0.6 m in from the edge
+    lip: CLIMB_OLD ? null : { y: 0, x: faceX, z0: zTop - 0.8, z1: zTop + 0.4, spot: { x: faceX + 0.6, y: 0, z: zTop + 0.05 }, fixed: true, status: 'Over the top. You are on the yard at the head of the cliff.' },
     baseStatus: 'On the rocks at the foot of the cliff. The cave mouth is just around the corner.',
   };
   scene.add(ladder);
@@ -91,7 +108,10 @@ export function cliffRoute({ scene, targets, rock, faceX, beachTop, WATER_Y, zTo
   // shelf at the foot of the face (catches falls) plus a step into the cave mouth
   const shelfTop = beachTop;
   const shelf = { x0: faceX - 0.6, x1: faceX, z0: zBase - 0.5, z1: zTop + 0.45, floor: shelfTop };
-  const step = { x0: faceX, x1: faceX + 0.24, z0: zBase - 0.75, z1: zBase - 0.3, floor: shelfTop };
+  // fall pass: the step was 0.24 m wide with open water on both sides of the shelf/step corner (z 2.35..2.45), so the
+  // body clearance check read 'edge' all the way across: after a slide down the sea wall the stick couldn't get you off
+  // the shelf into the cave mouth. It now reaches 0.3 m back under the shelf.
+  const step = { x0: CLIMB_OLD ? faceX : faceX - 0.3, x1: faceX + 0.24, z0: zBase - 0.75, z1: zBase - 0.3, floor: shelfTop };
   const slabs = [
     [shelf.x0, shelf.x1, shelf.z0, shelf.z0 + 1.6, 0],
     [shelf.x0 + 0.08, shelf.x1, shelf.z0 + 1.55, shelf.z0 + 3.0, 0.03],

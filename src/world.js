@@ -19,7 +19,7 @@ import { createLift } from './lift.js';
 import { createZones } from './zones.js';
 import { createReef } from './reef.js';
 import { createForestNext, FOREST_LEGACY } from './forest.js';
-import { cliffRoute, NOTCHES } from './notches.js';
+import { CLIMB_OLD, cliffRoute, NOTCHES } from './notches.js';
 import { createBackCrag } from './crag.js';
 import { createGlider } from './glider.js';
 import { createGolf } from './golf.js';
@@ -3770,6 +3770,13 @@ function createLadder(scene, targets, x, z, roofY, assets) {
     rungs.push(y);
   }
   group.userData = { rungs, roofY };
+  // fall pass: the roof ladder only "arrived" when you had pulled 2.81 m (the top rung at 3.30 down to 49 cm over your
+  // feet); a hip-height pull stops at feet 2.5 with your eyes 0.84 m over the roof. Now the crag's mantle: head 20 cm
+  // over the roof edge, the top rung pulled with the head over it, or a lean over the edge hauls you onto the roof.
+  if (!CLIMB_OLD) {
+    group.userData.lip = { y: roofY, x: x + 0.14, z0: z - 0.45, z1: z + 0.45, spot: { x: x + 0.85, y: roofY, z }, fixed: true, status: 'On the roof.' };
+    rungMeshes[rungMeshes.length - 1].userData.lip = true;
+  }
   scene.add(group);
   targets.push(group);
   if (assets?.feature('props4') && addLadderVisuals(
