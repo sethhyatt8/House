@@ -31,20 +31,25 @@ const HOLD = 0.3;
 
 const box = (x0, x1, y0, y1, z0, z1) => new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
 const STOPS = [0, -3.6, -7.2, -10.8, -14.4];
-// Order matters: the first box that contains the eye wins.
-const ZONE_BOXES = [
-  // gallery and tunnel first: the lift:2 box (-7.2 landing) overlaps the paint tunnel, so a walker halfway down the
-  // tunnel used to count as 'lift:2' and the tunnel, gallery and cave were hidden around them.
-  ['gallery', box(10.55, 15.8, -8.7, -4.3, -1.0, 4.7)],
-  ['tunnel', box(4.0, 10.55, -8.7, -4.6, 0.95, 2.72)],
-  ['liftshaft', box(5.1, 6.72, -15, 2.5, -0.68, 0.92)],
-  ...STOPS.slice(1).map((y, i) => [`lift:${i + 1}`, box(6.55, 9.45, y - 0.4, y + 2.45, -3.05, 3.3)]),
-  // x from 2.64 (just inside the choppable door at x 2.6, cell.js START_CELL.floor.x0 2.55): the whole cell floor is
-  // 'cell'. From 3.3 the west strip of the cell counted as outdoor, so with the door still boarded the portal walk
-  // never reached the cell or the lift and the gate showed the forest behind the shaft.
-  ['cell', box(2.64, 5.1, -0.2, 2.3, -0.8, 1.02)],
-  ['cave', box(-1.7, 4.65, -9.6, -2.6, -7.0, 3.1)],
-];
+// Lift boxes are written for the pre-shift shaft (x0 5.18, z0 -0.52). createZones adds the live shaft's offset,
+// so the yard move in lift.js (and ?lift=legacy, which stays put) both match.
+function zoneBoxes(dx, dz) {
+  const shift = (x0, x1, y0, y1, z0, z1) => box(x0 + dx, x1 + dx, y0, y1, z0 + dz, z1 + dz);
+  // Order matters: the first box that contains the eye wins.
+  return [
+    // gallery and tunnel first: the lift:2 box overlaps the paint tunnel, so a walker halfway down the
+    // tunnel used to count as 'lift:2' and the tunnel, gallery and cave were hidden around them.
+    ['gallery', box(10.55, 15.8, -8.7, -4.3, -1.0, 4.7)],
+    ['tunnel', box(4.0, 10.55, -8.7, -4.6, 0.95, 2.72)],
+    ['liftshaft', shift(5.1, 6.72, -15, 2.5, -0.68, 0.92)],
+    ...STOPS.slice(1).map((y, i) => [`lift:${i + 1}`, shift(6.55, 9.45, y - 0.4, y + 2.45, -3.05, 3.3)]),
+    // x from 2.64 (just inside the choppable door at x 2.6, cell.js START_CELL.floor.x0 2.55): the whole cell floor is
+    // 'cell'. From 3.3 the west strip of the cell counted as outdoor, so with the door still boarded the portal walk
+    // never reached the cell or the lift and the gate showed the forest behind the shaft.
+    ['cell', box(2.64, 5.1, -0.2, 2.3, -0.8, 1.02)],
+    ['cave', box(-1.7, 4.65, -9.6, -2.6, -7.0, 3.1)],
+  ];
+}
 // Asset ids worth fetching early when the camera is in (or next to) a zone.
 const PREFETCH = {
   cell: ['rock_cliff', 'rock_floor', 'boulder', 'lift_kit'],
@@ -69,6 +74,13 @@ export function createZones({ scene, targets = [], lift = null, isCellOpen = () 
   scene.userData.zones = api;
   if (!ZONES_ON) return api;
 
+  const shaft = lift?.shaft;
+  const dx = shaft ? shaft.x0 - 5.18 : 0;
+  const dz = shaft ? shaft.z0 + 0.52 : 0;
+  const moved = Math.abs(dz) > 0.5;
+  const ZONE_BOXES = zoneBoxes(dx, dz);
+  const shift = (x0, x1, y0, y1, z0, z1) => box(x0 + dx, x1 + dx, y0, y1, z0 + dz, z1 + dz);
+
   const roots = new Map();
   const zoneIds = [...ZONE_BOXES.map(([id]) => id), 'outdoor', 'sea'];
   for (const id of zoneIds) {
@@ -81,8 +93,12 @@ export function createZones({ scene, targets = [], lift = null, isCellOpen = () 
   // ---- portals ----
   const portals = [
     { a: 'cell', b: 'outdoor', box: box(2.4, 2.8, 0, 2.06, -0.42, 0.66), open: isCellOpen },
-    { a: 'cell', b: 'liftshaft', box: box(4.82, 5.28, -0.05, 2.1, -0.36, 0.6) },
-    ...STOPS.slice(1).map((y, i) => ({ a: 'liftshaft', b: `lift:${i + 1}`, box: box(6.45, 6.78, y, y + 2.1, -0.56, 0.8) })),
+    // The shaft used to open off the back of the cell. It now stands on the east side of the yard, so the
+    // doorway is the yard gate. ?lift=legacy keeps the old cell opening.
+    moved && shaft
+      ? { a: 'outdoor', b: 'liftshaft', box: box(shaft.x0 - 0.35, shaft.x0 + 0.22, 0.02, 2.02, shaft.z0 + 0.06, shaft.z1 - 0.06) }
+      : { a: 'cell', b: 'liftshaft', box: box(4.82, 5.28, -0.05, 2.1, -0.36, 0.6) },
+    ...STOPS.slice(1).map((y, i) => ({ a: 'liftshaft', b: `lift:${i + 1}`, box: shift(6.45, 6.78, y, y + 2.1, -0.56, 0.8) })),
     { a: 'cave', b: 'tunnel', box: box(3.9, 4.5, -8.0, -5.5, 1.1, 2.55) },
     { a: 'tunnel', b: 'gallery', box: box(10.4, 11.5, -8.0, -5.5, 1.1, 2.55) },
     // the cave interior sits under the cliff overhang: only looked into from below the mouth's top (beach, boat, sea)

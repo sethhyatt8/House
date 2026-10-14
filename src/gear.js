@@ -81,7 +81,7 @@ function carryable(object) {
   return gear === 'hatchet' || gear === 'tile' || gear === 'bow' || gear === 'torch' || gear === 'brush' || gear === 'spray' || gear === 'stick' || gear === 'driver';
 }
 
-export function createGear(scene, camera, targets, roof, cave, gallery, assets) {
+export function createGear(scene, camera, targets, roof, cave, gallery, assets, range = null) {
   const wood = new THREE.MeshStandardMaterial({ color: 0x6d4c32, roughness: 0.78 });
   const metal = new THREE.MeshStandardMaterial({ color: 0xb7b8b4, roughness: 0.42, metalness: 0.55 });
   const leather = new THREE.MeshStandardMaterial({ color: 0x5a3824, roughness: 0.86 });
@@ -93,7 +93,6 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const tmp = new THREE.Vector3();
   const tmp2 = new THREE.Vector3();
   const tmp3 = new THREE.Vector3();
-  const bladePrev = new THREE.Vector3();
   const bladeNow = new THREE.Vector3();
   const hitBox = new THREE.Box3();
   const vrHands = new Map();
@@ -173,6 +172,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   head.position.set(0.015, 0.22, 0);
   hatchet.add(head);
   const blade = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.09, 0.012), metal);
+  blade.name = 'hatchetBlade';
   blade.position.set(0.07, 0.25, 0);
   blade.rotation.z = -0.45;
   hatchet.add(blade);
@@ -186,6 +186,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     }
   });
   const grip = new THREE.Group();
+  grip.name = 'hatchetGrip';
   grip.position.set(0, -0.04, 0);
   grip.visible = false;
   const skin = new THREE.MeshStandardMaterial({ color: 0xc9956b, roughness: 0.66 });
@@ -206,6 +207,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     ? assets.instance('hatchet', { fit: { uniform: 1 } })
     : null;
   if (hatchetModel) {
+    hatchetModel.name = 'hatchetModel';
     hatchetModel.rotation.y = Math.PI / 2;
     hatchet.add(hatchetModel);
     for (const part of [handle, head, blade]) {
@@ -249,10 +251,14 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     blade.getWorldPosition(bladeCenter);
     console.info('[hatchet] blade marker', blade.position.toArray(), 'inside model', modelBox.containsPoint(bladeCenter));
   }
-  hatchet.userData = { type: 'gear', gear: 'hatchet', floorY: START_CELL.hatchet.y, blade, grip, hatchetModel };
+  hatchet.userData = {
+    type: 'gear', gear: 'hatchet', floorY: START_CELL.hatchet.y, blade, grip, hatchetModel,
+    handPos: new THREE.Vector3(), handVel: new THREE.Vector3(), handSeen: false, bladeReady: false, flight: null,
+  };
   holdPose(hatchet, [0, 0.04, 0], [0, Math.PI / 2, 0]);
   scene.add(hatchet);
   enlist(hatchet);
+  const axes = [hatchet];
 
   const torch = new THREE.Group();
   const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.02, 0.46, 6), wood);
@@ -547,6 +553,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   for (let i = 0; i < 6; i += 1) {
     const arrow = makeArrow();
     arrow.visible = false;
+    arrow.userData.zone = 'shared';
     scene.add(arrow);
     quiver.push(arrow);
   }
@@ -558,6 +565,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     : { x: 0.9, z: -2.2, yaw: Math.atan2(-(-1.925 + 2.2), -1.15 - 0.9) };
   bow.position.set(BOW_SPOT.x, cave.floor + 0.56, BOW_SPOT.z);
   bow.rotation.y = BOW_SPOT.yaw;
+  if (range) furnishRange(range);
   if (!legacy('bowspot')) {
     stringMat.emissive.setHex(0x3a3222);
     stringMat.emissiveIntensity = 1;
@@ -568,7 +576,8 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       child.receiveShadow = true;
     }
   });
-  bow.userData = { type: 'gear', gear: 'bow', floorY: cave.floor + 0.56, houseY: 0.58 };
+  bow.userData = { type: 'gear', gear: 'bow', floorY: bow.position.y, houseY: 0.58 };
+  if (range) bow.userData.zone = 'lift:1';
   bow.userData.home = { position: bow.position.clone(), rotation: bow.rotation.clone() };
   holdPose(bow, [0, -0.03, -0.02], [0.15, 0, 0]);
   scene.add(bow);
@@ -1125,6 +1134,8 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     }
     if (item === bow) drawHand = null;
     item.userData.carried = false;
+    item.userData.flight = null;
+    item.userData.handSeen = false;
   }
 
   function clearSeat(item) {
@@ -1230,6 +1241,8 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
     }
     if (item.userData.grip) item.userData.grip.visible = true;
     item.userData.inBag = false;
+    item.userData.bladeReady = false;
+    item.userData.handSeen = false;
     unlist(item);
     vrHands.set(who, item);
     bladeReady = false;
@@ -1497,29 +1510,205 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
   const torchVel = new THREE.Vector3();
   const torchLean = new THREE.Vector3();
   let torchSeen = false;
+  const throwAim = new THREE.Vector3();
+
+  // The other side room on the first floor down (opposite the hockey rink): butts, the bow, and a second hatchet.
+  function furnishRange(room) {
+    const mx = (room.x0 + room.x1) / 2;
+    bow.position.set(mx + 0.42, room.y + 0.62, room.z0 + 0.58);
+    bow.rotation.y = 0.15;
+    const savedData = hatchet.userData;
+    hatchet.userData = {};
+    const spare = hatchet.clone(true);
+    hatchet.userData = savedData;
+    spare.position.set(mx - 0.48, room.y + 0.62, room.z0 + 0.52);
+    spare.rotation.set(0, 0.4, Math.PI / 2);
+    spare.userData = {
+      type: 'gear',
+      gear: 'hatchet',
+      floorY: room.y + 0.62,
+      blade: spare.getObjectByName('hatchetBlade'),
+      grip: spare.getObjectByName('hatchetGrip'),
+      hatchetModel: spare.getObjectByName('hatchetModel'),
+      handPos: new THREE.Vector3(),
+      handVel: new THREE.Vector3(),
+      handSeen: false,
+      bladeReady: false,
+      flight: null,
+      zone: 'lift:1',
+    };
+    holdPose(spare, [0, 0.04, 0], [0, Math.PI / 2, 0]);
+    spare.userData.home = { position: spare.position.clone(), rotation: spare.rotation.clone() };
+    scene.add(spare);
+    enlist(spare);
+    axes.push(spare);
+
+    const group = new THREE.Group();
+    group.name = 'range';
+    group.userData.zone = 'lift:1';
+    const straw = new THREE.MeshStandardMaterial({ color: 0xcbb58a, roughness: 0.9 });
+    const red = new THREE.MeshStandardMaterial({ color: 0x9a2c2c, roughness: 0.72 });
+    const gold = new THREE.MeshStandardMaterial({ color: 0xd4b15a, roughness: 0.55, metalness: 0.15 });
+    const bull = new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.62 });
+    const board = new THREE.Mesh(new THREE.BoxGeometry(room.x1 - room.x0 - 0.36, 2.05, 0.08), straw);
+    board.position.set(mx, room.y + 1.16, room.z1 - 0.14);
+    board.castShadow = true;
+    board.receiveShadow = true;
+    group.add(board);
+    const faceZ = room.z1 - 0.28;
+    const xs = [room.x0 + 0.58, mx, room.x1 - 0.58];
+    for (const x of xs) {
+      [[0.42, straw], [0.30, red], [0.18, gold], [0.07, bull]].forEach(([radius, mat], ring) => {
+        const disc = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.02, 20), mat);
+        disc.rotation.x = Math.PI / 2;
+        disc.position.set(x, room.y + 1.28, faceZ - ring * 0.012);
+        disc.castShadow = true;
+        disc.receiveShadow = true;
+        group.add(disc);
+      });
+    }
+    scene.add(group);
+  }
+
+  function handOf(item) {
+    for (const [who, held] of vrHands) if (held === item) return who;
+    return null;
+  }
+
+  function sampleHand(item, dt) {
+    const who = handOf(item);
+    if (!who || dt <= 0) return;
+    who.getWorldPosition(tmp);
+    if (item.userData.handSeen) {
+      item.userData.handVel.copy(tmp).sub(item.userData.handPos).multiplyScalar(1 / dt);
+      if (item.userData.handVel.length() > 16) item.userData.handVel.setLength(16);
+    }
+    item.userData.handPos.copy(tmp);
+    item.userData.handSeen = true;
+  }
+
+  function axeOwns(item, obj) {
+    let node = obj;
+    while (node) {
+      if (node === item) return true;
+      node = node.parent;
+    }
+    return false;
+  }
+
+  function landingY(x, y, z) {
+    if (range && x >= range.x0 - 0.3 && x <= range.x1 + 0.3 && z >= range.z0 - 0.3 && z <= range.z1 + 0.3) return range.y + 0.05;
+    if (y >= -0.3) return 0.05;
+    let best = 0.05;
+    let bestD = Infinity;
+    for (const stop of [0, -3.6, -7.2, -10.8, -14.4]) {
+      const d = y - stop;
+      if (d >= -0.2 && d < bestD) {
+        bestD = d;
+        best = stop + 0.05;
+      }
+    }
+    return best;
+  }
+
+  function landAxe(item) {
+    item.userData.flight = null;
+    item.userData.carried = false;
+    item.userData.handSeen = false;
+    if (item.userData.grip) item.userData.grip.visible = false;
+    item.rotation.z = Math.PI / 2;
+    scene.attach(item);
+    enlist(item);
+  }
+
+  function stepThrow(item, dt) {
+    const flight = item.userData.flight;
+    if (!flight || dt <= 0) return;
+    flight.life -= dt;
+    flight.vel.y -= 9.2 * dt;
+    const speed = flight.vel.length();
+    const step = speed * dt;
+    arrowPrev.copy(item.position);
+    item.rotateX(14 * dt);
+    if (step > 1e-4) {
+      throwAim.copy(flight.vel).multiplyScalar(1 / speed);
+      const nose = 0.18;
+      arrowRay.set(arrowPrev, throwAim);
+      arrowRay.ray.origin.addScaledVector(throwAim, nose);
+      arrowRay.far = step + 0.08;
+      const hits = arrowRay.intersectObjects(arrowSolids(), true);
+      for (const hit of hits) {
+        if (hit.distance > arrowRay.far) break;
+        if (axeOwns(item, hit.object) || hit.object.userData?.arrow) continue;
+        item.position.copy(arrowPrev).addScaledVector(throwAim, nose + Math.max(0, hit.distance));
+        landAxe(item);
+        return;
+      }
+      item.position.addScaledVector(flight.vel, dt);
+    }
+    const floor = landingY(item.position.x, item.position.y, item.position.z);
+    if (item.position.y <= floor || flight.life <= 0) {
+      if (item.position.y < floor) item.position.y = floor;
+      landAxe(item);
+    }
+  }
+
+  function throwHatchet(controller) {
+    const item = vrHands.get(controller);
+    if (!item || item.userData.gear !== 'hatchet' || item.userData.flight) return false;
+    const vel = item.userData.handVel ? item.userData.handVel.clone() : new THREE.Vector3();
+    throwAim.set(0, 0, -1).applyQuaternion(controller.quaternion);
+    if (vel.length() < 3) vel.copy(throwAim).multiplyScalar(9);
+    else vel.addScaledVector(throwAim, 3.5);
+    if (vel.y < 0.8) vel.y += 1.2;
+    vel.clampLength(0, 16);
+    scene.attach(item);
+    vrHands.delete(controller);
+    item.userData.carried = false;
+    item.userData.bladeReady = false;
+    item.userData.handSeen = false;
+    item.userData.inBag = false;
+    if (item.userData.grip) item.userData.grip.visible = false;
+    item.userData.flight = { vel, life: 6 };
+    bladeReady = false;
+    return true;
+  }
 
   function update(dt) {
-    const carried = hatchet.userData.carried;
-    if (!carried) bladeReady = false;
-    else {
-      hatchet.updateWorldMatrix(true, true);
-      blade.getWorldPosition(bladeNow);
-      if (!bladeLogged && hatchet.userData.hatchetModel) {
+    let anyAxe = false;
+    for (const axe of axes) {
+      if (axe.userData.flight) {
+        stepThrow(axe, dt);
+        continue;
+      }
+      if (!axe.userData.carried) {
+        axe.userData.bladeReady = false;
+        continue;
+      }
+      anyAxe = true;
+      sampleHand(axe, dt);
+      const edge = axe.userData.blade;
+      if (!edge) continue;
+      axe.updateWorldMatrix(true, true);
+      edge.getWorldPosition(bladeNow);
+      if (!bladeLogged && axe.userData.hatchetModel) {
         bladeLogged = true;
-        const modelBox = new THREE.Box3().setFromObject(hatchet.userData.hatchetModel);
+        const modelBox = new THREE.Box3().setFromObject(axe.userData.hatchetModel);
         console.info('[hatchet] held blade', bladeNow.toArray(), 'model bbox', modelBox.min.toArray(), modelBox.max.toArray(), 'inside', modelBox.containsPoint(bladeNow));
       }
-      if (bladeReady && dt > 0) {
-        const speed = bladeNow.distanceTo(bladePrev) / dt;
+      const prev = axe.userData.bladePrev || (axe.userData.bladePrev = new THREE.Vector3().copy(bladeNow));
+      if (axe.userData.bladeReady && dt > 0) {
+        const speed = bladeNow.distanceTo(prev) / dt;
         if (speed > 2.1) {
-          swingHit(bladePrev, bladeNow);
-          croc?.chop(bladePrev, bladeNow);
-          for (const foe of foes) foe.chop(bladePrev, bladeNow, speed);
+          swingHit(prev, bladeNow);
+          croc?.chop(prev, bladeNow);
+          for (const foe of foes) foe.chop(prev, bladeNow, speed);
         }
       }
-      bladePrev.copy(bladeNow);
-      bladeReady = true;
+      prev.copy(bladeNow);
+      axe.userData.bladeReady = true;
     }
+    if (!anyAxe) bladeReady = false;
     if (!torch.visible) torchSeen = false;
     if (torch.visible && torch.userData.light && torchFire) {
       flame.getWorldPosition(torchHead);
@@ -1738,6 +1927,7 @@ export function createGear(scene, camera, targets, roof, cave, gallery, assets) 
       return vrHands.has(who);
     },
     tryGrip,
+    throwHatchet,
     tryDraw,
     releaseDraw,
     drawing: () => !!drawHand,

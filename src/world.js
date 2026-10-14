@@ -4719,7 +4719,8 @@ export function createWorld({ assets, renderer = null } = {}) {
       room: eloose,
     }, assets)
     : null;
-  const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets);
+  const range = lift.floors?.find((room) => Math.abs(room.y + 3.6) < 0.01 && room.z0 >= lift.shaft.z1 - 0.02) || null;
+  const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets, range);
   if (croc) gear.setCroc(croc);
   // raptor pass: the overlook boss is the raptor (src/raptor.js); ?legacy=bear (or the pre-overlook crag) keeps the bear.
   // `bear` stays the name of whichever boss is in, so main.js / music.js / the harness keep working with either.

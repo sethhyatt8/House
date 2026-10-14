@@ -3489,6 +3489,10 @@ function onXrTrigger(controller) {
     dropProp();
   }
   if (held && heldFrom === controller) return;
+  if (world.gear.throwHatchet(controller)) {
+    pulseController(controller);
+    return;
+  }
   if (world.gear.equipPocket(aimed?.owner, controller)) return;
   if (world.gear.use(controller)) return;
   if (boatGrip) {
