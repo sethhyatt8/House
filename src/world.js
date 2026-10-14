@@ -2003,6 +2003,7 @@ function createBite(scene, source, assets) {
   shark.traverse((child) => {
     if (child.userData?.jawRibbon) child.geometry = child.geometry.clone();
   });
+  shark.name = 'biteShark';
   scene.add(shark);
   let reach = 0;
   let jawX = 0;
@@ -2110,19 +2111,75 @@ function createBite(scene, source, assets) {
     drops.length = 0;
   }
 
-  function start(x, z) {
+  function start(x, z, mode = 'quick') {
     if (bite && !bite.done) return;
     clear();
-    bite = { t: 0, x, z, sprayed: false, struck: false, done: false };
+    bite = { t: 0, x, z, sprayed: false, struck: false, done: false, mode };
     shark.visible = true;
+    if (mode === 'scene') {
+      shark.position.set(x - 8.4, WATER_Y - 2.4, z);
+      shark.rotation.set(0, 0, 0);
+      poseBite(0);
+      return;
+    }
     shark.position.set(x - 7.2, WATER_Y - 0.7, z);
     shark.rotation.set(0.2, 0, 0.18);
     poseBite(0.05);
   }
 
+  // Cutscene bite: a slow swim in, then the jaws close on the camera for 2 seconds.
+  function updateScene(dt) {
+    const approach = 1.5;
+    const chomp = 2;
+    const u = bite.t < approach ? bite.t / approach : 1;
+    const ease = u * u * (3 - 2 * u);
+    const c = bite.t <= approach ? 0 : Math.min(1, (bite.t - approach) / chomp);
+    const faceY = WATER_Y - 1.05;
+    const fromX = bite.x - 8.4;
+    const atFace = bite.x - mouthX - 0.45;
+    const inFace = bite.x - mouthX + 0.08;
+    shark.position.x = fromX + (atFace - fromX) * ease + (inFace - atFace) * c;
+    shark.position.y = (WATER_Y - 2.4) + ((faceY - mouthY) - (WATER_Y - 2.4)) * Math.max(ease, c);
+    shark.position.z = bite.z;
+    shark.rotation.set(0, Math.sin(c * Math.PI) * 0.04, 0);
+    const open = bite.t < approach * 0.35 ? 0.04 : bite.t < approach ? 0.04 + 0.96 * ((bite.t - approach * 0.35) / (approach * 0.65)) : 1 - c;
+    poseBite(open);
+    const tail = shark.getObjectByName('tail');
+    if (tail) tail.rotation.y = Math.sin(bite.t * (c > 0 ? 5 : 2.2)) * 0.28;
+    if (c > 0 && !bite.sprayed) {
+      bite.sprayed = true;
+      bite.struck = true;
+      spray(bite.x - 0.2, faceY, bite.z);
+    }
+    if (bite.t > approach + chomp) bite.done = true;
+  }
+
   function update(dt) {
     if (!bite || bite.done) return;
     bite.t += dt;
+    if (bite.mode === 'scene') {
+      updateScene(dt);
+      for (let i = drops.length - 1; i >= 0; i -= 1) {
+        const drop = drops[i];
+        drop.age += dt;
+        if (drop.disc) {
+          drop.mesh.scale.setScalar(1 + drop.age * 3.4);
+          drop.mesh.material.opacity = Math.max(0.15, 0.9 - drop.age * 0.28);
+          continue;
+        }
+        drop.vy -= 9.2 * dt;
+        drop.mesh.position.x += drop.vx * dt;
+        drop.mesh.position.y += drop.vy * dt;
+        drop.mesh.position.z += drop.vz * dt;
+        if (drop.mesh.position.y < WATER_Y + 0.04) {
+          drop.mesh.position.y = WATER_Y + 0.04;
+          drop.vy *= -0.18;
+          drop.vx *= 0.7;
+          drop.vz *= 0.7;
+        }
+      }
+      return;
+    }
     const swim = 0.7;
     const openAt = 1.4;
     const from = bite.x - 8;

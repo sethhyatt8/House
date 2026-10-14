@@ -69,10 +69,12 @@ export function createFallDeath({ camera, scene, sfx = null, pulse = null, setSt
     reset();
     stuckT = 0;
     veil.visible = true;
-    if (extra.water) sfx?.play?.('splash_big', { gain: 0.9, rate: 0.8 });
-    else {
-      sfx?.play?.('hit_punch', { gain: 1, rate: 0.5 });
-      sfx?.play?.('hit_soft', { gain: 0.9, rate: 0.55 });
+    if (!extra.quiet) {
+      if (extra.water) sfx?.play?.('splash_big', { gain: 0.9, rate: 0.8 });
+      else {
+        sfx?.play?.('hit_punch', { gain: 1, rate: 0.5 });
+        sfx?.play?.('hit_soft', { gain: 0.9, rate: 0.55 });
+      }
     }
     pulse?.(1, 260);
     return true;
@@ -108,6 +110,16 @@ export function createFallDeath({ camera, scene, sfx = null, pulse = null, setSt
     },
     reset,
     die,
+    // peek: this landing would kill. Does not start the death (a cutscene may play it out first).
+    willKill(floor, { water = false } = {}) {
+      if (!FALLDEATH || death || !air.on) return false;
+      const height = air.top - floor;
+      const limit = air.slid ? SLIDE_LETHAL : LETHAL;
+      if (!(height > limit)) return false;
+      if (water && scubaSafe()) return false;
+      return true;
+    },
+    drop(floor) { return air.on ? air.top - floor : 0; },
     // every frame: safety net + the fade. head: world head position, feet: rig y. inside: head is inside a wall.
     update(dt, { head, feet, inside = false, active = true }) {
       if (death) {

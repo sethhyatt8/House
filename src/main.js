@@ -275,7 +275,7 @@ function doorStanding() {
 }
 
 function teleportTo(index) {
-  if (biteHold) return;
+  if (biteHold || sceneLock()) return;
   if (renderer.xr.isPresenting && doorStanding()) return;
   const spot = teleportSpots[index];
   if (!spot) return;
@@ -525,7 +525,7 @@ function sweepInto(px, pz, cx, cz, b, r) {
 }
 
 function containPlayer() {
-  if (cellPhase < 2 || watching || aboard || biteHold || mantle || !renderer.xr.isPresenting || !xrFrame) { contain.ok = false; contain.inside = false; return; }
+  if (cellPhase < 2 || watching || aboard || biteHold || sceneLock() || mantle || !renderer.xr.isPresenting || !xrFrame) { contain.ok = false; contain.inside = false; return; }
   const ref = renderer.xr.getReferenceSpace();
   const pose = ref && xrFrame.getViewerPose(ref);
   if (!pose) return;
@@ -1109,6 +1109,7 @@ function safeZone(x, z, feet) {
 
 function updatePlayerFall(dt) {
   if (watching || !renderer.xr.isPresenting || !xrFrame) return;
+  if (sceneLock()) return;
   if (biteHold || aboard || swim?.active || fallDeath?.dying()) {
     // fall pass: the swim system can catch a falling body a few cm over the surface (swim.js enters at feet <= sea +
     // 0.08) before the fall lands; that entry is the water landing
@@ -1140,6 +1141,7 @@ function updatePlayerFall(dt) {
   if (step.feet !== ground && !step.rest) { // in the air
     if (climb) leaveClimb();
     fallDeath?.air(feetY, dt, sliding);
+    if (tryCutscene(head, ground)) return;
     fallVy = step.vy;
     shiftPlayer(0, step.moved, 0);
     return;
@@ -1383,7 +1385,7 @@ const swim = UNDERWATER && SWIM && !watching ? createSwim({
     yaw: () => xrYaw,
     aboard: () => aboard,
     climbing: () => !!climb,
-    busy: () => biteHold || glide.flying,
+    busy: () => biteHold || glide.flying || sceneLock(),
     boardCanoe,
     leaveCanoe,
     respawn: () => teleportTo(1),
@@ -1409,6 +1411,185 @@ fallDeath = !watching ? createFallDeath({
   home: { x: START_CELL.spawnX, z: START_CELL.spawnZ, floor: 0 },
 }) : null;
 world.fallDeath = fallDeath;
+
+// Cutscenes: while one plays, the rig is locked (no move, turn, grab, or teleport) and the view is held
+// on the shot. A lethal fall into open water plays the sea shot; a lethal fall onto rock plays the drop.
+let shot = null;
+const shotFrom = new THREE.Vector3();
+const shotAim = new THREE.Vector3();
+const shotWant = new THREE.Vector3();
+const gazeForward = new THREE.Vector3();
+const gazeQuat = new THREE.Quaternion();
+function sceneLock() { return !!shot; }
+
+function playScream() {
+  // Original falling yell. The Wilhelm recording is a copyrighted take, so this is a short descending shout of our own.
+  const ctx = audio();
+  const t = ctx.currentTime;
+  const dur = 1.05;
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.setValueAtTime(1500, t);
+  band.frequency.exponentialRampToValueAtTime(480, t + dur);
+  band.Q.value = 2.4;
+  const gain = envGain(ctx, t, 0.28, 0.04, dur - 0.04);
+  band.connect(gain);
+  const tone = ctx.createOscillator();
+  tone.type = 'sawtooth';
+  tone.frequency.setValueAtTime(540, t);
+  tone.frequency.exponentialRampToValueAtTime(170, t + dur);
+  tone.connect(band);
+  const over = ctx.createOscillator();
+  over.type = 'triangle';
+  over.frequency.setValueAtTime(820, t);
+  over.frequency.exponentialRampToValueAtTime(250, t + dur);
+  over.connect(band);
+  tone.start(t);
+  over.start(t);
+  tone.stop(t + dur);
+  over.stop(t + dur);
+}
+
+function smooth01(u) {
+  const t = Math.min(1, Math.max(0, u));
+  return t * t * (3 - 2 * t);
+}
+
+function beginShot(name, head, ground) {
+  const water = name === 'sea';
+  const fallT = Math.min(2.3, Math.max(1.15, Math.sqrt(Math.max(0.4, head.y - (water ? WATER_Y : ground)) / 4.6)));
+  shot = {
+    name,
+    t: 0,
+    fallT,
+    sinkT: water ? 0.5 : 0,
+    biteT: water ? 3.5 : 0.4,
+    height: +fallDeath.drop(water ? WATER_Y : ground).toFixed(2),
+    ground,
+    seaX: Math.min(head.x - 1.4, CLIFF_X - 2.6),
+    splashed: false,
+    bit: false,
+    phase: 'fall',
+  };
+  shotFrom.copy(head);
+  if (water) shotAim.set(-1, 0, 0);
+  else {
+    gazeForward.set(0, 0, -1);
+    const pose = xrFrame.getViewerPose(renderer.xr.getReferenceSpace());
+    if (pose) {
+      gazeQuat.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w);
+      gazeForward.applyQuaternion(gazeQuat);
+    }
+    gazeForward.y = 0;
+    if (gazeForward.lengthSq() < 0.04) gazeForward.set(-1, 0, 0);
+    else gazeForward.normalize();
+    shotAim.copy(gazeForward);
+  }
+  fallVy = 0;
+  if (climb) leaveClimb();
+  swim?.leave?.('cutscene');
+  fallDeath.reset(xrOffset.y);
+  try { if (water) playScream(); } catch { /* the yell waits until audio is allowed */ }
+}
+
+function tryCutscene(head, ground) {
+  if (shot || !fallDeath || watching) return false;
+  const water = ground === WATER_Y && world.shallowFloor?.(head.x, head.z) == null;
+  if (!fallDeath.willKill(water ? WATER_Y : ground, { water })) return false;
+  beginShot(water ? 'sea' : 'drop', head, ground);
+  return true;
+}
+
+function shotPose(out) {
+  const s = shot;
+  const u = s.t < s.fallT ? smooth01(s.t / s.fallT) : 1;
+  if (s.name === 'sea') {
+    const sink0 = s.fallT;
+    const bite0 = s.fallT + s.sinkT;
+    if (s.t < sink0) {
+      s.phase = 'fall';
+      out.set(
+        shotFrom.x + (s.seaX - shotFrom.x) * u,
+        shotFrom.y + (WATER_Y + 0.05 - shotFrom.y) * u,
+        shotFrom.z,
+      );
+      return;
+    }
+    if (s.t < bite0) {
+      s.phase = 'sink';
+      const k = smooth01((s.t - sink0) / s.sinkT);
+      out.set(s.seaX, (WATER_Y + 0.05) + ((WATER_Y - 1.2) - (WATER_Y + 0.05)) * k, shotFrom.z);
+      return;
+    }
+    s.phase = 'bite';
+    out.set(s.seaX, WATER_Y - 1.2, shotFrom.z);
+    return;
+  }
+  s.phase = s.t < s.fallT ? 'fall' : 'impact';
+  out.set(shotFrom.x, shotFrom.y + ((s.ground + 0.42) - shotFrom.y) * u, shotFrom.z);
+}
+
+// Hold the horizontal facing. Turning the head is cancelled so the shot stays in front of you.
+// Pitch stays the headset's own: folding it into the rig offset swings the body off the shot.
+function lockGaze(head) {
+  const pose = xrFrame.getViewerPose(renderer.xr.getReferenceSpace());
+  if (!pose) return;
+  gazeQuat.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w);
+  gazeForward.set(0, 0, -1).applyQuaternion(gazeQuat);
+  gazeForward.y = 0;
+  if (gazeForward.lengthSq() < 1e-4) return;
+  gazeForward.normalize();
+  const current = Math.atan2(gazeForward.x, gazeForward.z);
+  const want = Math.atan2(shotAim.x, shotAim.z);
+  let delta = want - current;
+  if (delta > Math.PI) delta -= Math.PI * 2;
+  if (delta < -Math.PI) delta += Math.PI * 2;
+  if (Math.abs(delta) > 0.02) yawAround(delta, head.x, head.z);
+}
+
+function finishShot() {
+  const sea = shot.name === 'sea';
+  const height = shot.height;
+  shot = null;
+  world.clearBite();
+  fallDeath.die(sea ? 'fall-water' : 'fall', { water: sea, height, quiet: true });
+}
+
+function updateCutscene(dt) {
+  if (!shot || !renderer.xr.isPresenting || !xrFrame) return;
+  shot.t += dt;
+  shotPose(shotWant);
+  const head = headSample();
+  shiftPlayer(shotWant.x - head.x, shotWant.y - head.y, shotWant.z - head.z);
+  lockGaze(headSample());
+  if (shot.name === 'sea') {
+    const sink0 = shot.fallT;
+    if (!shot.splashed && shot.t >= sink0) {
+      shot.splashed = true;
+      world.splash(shot.seaX, shotFrom.z, true);
+      sfx.play('splash_big', { gain: 0.9, rate: 0.85 });
+      pulseBoth(0.8, 140);
+    }
+    const bite0 = shot.fallT + shot.sinkT;
+    if (!shot.bit && shot.t >= bite0) {
+      shot.bit = true;
+      world.startBite(shot.seaX, shotFrom.z, 'scene');
+    }
+    if (world.takeStrike()) {
+      playBite();
+      pulseBoth(1, 220);
+    }
+    if (shot.bit && world.biteDone()) finishShot();
+    return;
+  }
+  if (!shot.splashed && shot.t >= shot.fallT) {
+    shot.splashed = true;
+    sfx.play('hit_punch', { gain: 1, rate: 0.5 });
+    sfx.play('hit_soft', { gain: 0.9, rate: 0.55 });
+    pulseBoth(1, 260);
+  }
+  if (shot.t >= shot.fallT + shot.biteT) finishShot();
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -3483,7 +3664,7 @@ function onKeyDown(event) {
 }
 
 function onXrTrigger(controller) {
-  if (watching) return;
+  if (watching || sceneLock()) return;
   const aimed = hitFromController(controller);
   if (world.gear.pocketItem(aimed?.owner) && held && heldFrom === controller && held.userData.type === 'prop') {
     dropProp();
@@ -3686,7 +3867,7 @@ function updateGlider(dt) {
 }
 
 function onXrSqueeze(controller) {
-  if (watching) return;
+  if (watching || sceneLock()) return;
   if (swim?.onSqueeze(controller)) return; // scuba kit pickup, canoe hull from the water, strokes
   if (held && heldFrom === controller) return;
   if (world.gear.tryDraw(controller)) return;
@@ -3808,7 +3989,7 @@ function canoeHolds(controller) {
 
 function pollMove(dt) {
   exitCooldown = Math.max(0, exitCooldown - dt);
-  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold || mantle || fallDeath?.dying()) {
+  if (!renderer.xr.isPresenting || !xrFrame || watching || biteHold || sceneLock() || mantle || fallDeath?.dying()) {
     liftFeel.setComfort?.(0);
     return;
   }
@@ -3872,7 +4053,7 @@ function pollMove(dt) {
 }
 
 function pollGazeLock() {
-  if (!renderer.xr.isPresenting || !xrFrame || biteHold || climb || aboard || boatGrip || oarGrip || glide.flying || world.canoe.anyOar?.() || world.gear.drawing()) {
+  if (!renderer.xr.isPresenting || !xrFrame || biteHold || sceneLock() || climb || aboard || boatGrip || oarGrip || glide.flying || world.canoe.anyOar?.() || world.gear.drawing()) {
     gazeLock = null;
     return;
   }
@@ -4657,8 +4838,9 @@ function frame(time, frame) {
   updateGlider(dt);
   pollMove(dt);
   updatePlayerFall(dt);
+  updateCutscene(dt);
   if (fallDeath && renderer.xr.isPresenting && xrFrame) {
-    const busy = !!(climb?.hand || aboard || swim?.active || mantle || biteHold || glide.flying);
+    const busy = !!(climb?.hand || aboard || swim?.active || mantle || biteHold || glide.flying || sceneLock());
     fallDeath.update(dt, { head: headSample(), feet: xrOffset.y, inside: contain.inside && !busy, active: !busy || !Number.isFinite(xrOffset.y) || xrOffset.y < -20 });
   }
   swim?.update(dt, xrFrame);
@@ -4764,6 +4946,11 @@ if (pageParams.get('testhooks') === '1') {
     playerDown,
     fall: () => fallVy,
     fallDeath: () => fallDeath?.debug?.() ?? null, // fall pass
+    cutscene: () => (shot ? { name: shot.name, t: +shot.t.toFixed(2), phase: shot.phase } : null),
+    playCutscene(name) {
+      const head = headSample();
+      beginShot(name === 'drop' ? 'drop' : 'sea', head, name === 'drop' ? 0 : WATER_Y);
+    },
     settle: () => ({ ...settle }),
     contain: () => ({ ...contain }),
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
