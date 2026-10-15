@@ -4737,7 +4737,44 @@ function frame(time, frame) {
   machine.update(dt);
   world.challenge.update(dt);
   world.canoe.setAboard?.(aboard);
+  if (world.cans) {
+    let canBody = null;
+    if (renderer.xr.isPresenting && xrFrame && !sceneLock()) {
+      const head = headSample();
+      const prev = world.cans.prev;
+      const span = Math.max(dt, 1 / 120);
+      let vx = 0;
+      let vz = 0;
+      if (prev) {
+        const dx = head.x - prev.x;
+        const dz = head.z - prev.z;
+        if (dx * dx + dz * dz < 0.25) { vx = dx / span; vz = dz / span; }
+      }
+      world.cans.prev = { x: head.x, z: head.z };
+      canBody = {
+        x: head.x,
+        z: head.z,
+        y0: xrOffset.y + 0.04,
+        y1: Math.max(head.y, xrOffset.y + 0.5),
+        r: 0.26,
+        vx,
+        vz,
+      };
+    }
+    world.cans.setBody(canBody);
+  }
   world.update(dt);
+  if (world.cans) {
+    for (const hit of world.cans.impacts) {
+      sfx.play('hit_metal', {
+        at: hit,
+        gain: Math.min(0.62, 0.1 + hit.speed * 0.1),
+        rate: 1.5 + Math.min(0.8, hit.speed * 0.12),
+        jitter: 0.22,
+        ref: 0.7,
+      });
+    }
+  }
   if (world.hockey) {
     const events = world.hockey.update(dt, {
       colliders: walker.colliders,

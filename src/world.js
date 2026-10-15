@@ -24,6 +24,7 @@ import { createBackCrag } from './crag.js';
 import { createGlider } from './glider.js';
 import { createGolf } from './golf.js';
 import { createHockey } from './hockey.js';
+import { createCans } from './cans.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -4777,6 +4778,13 @@ export function createWorld({ assets, renderer = null } = {}) {
     }, assets)
     : null;
   const range = lift.floors?.find((room) => Math.abs(room.y + 3.6) < 0.01 && room.z0 >= lift.shaft.z1 - 0.02) || null;
+  // One floor under the range, same side of the vestibule: the can pyramid. The low-z room on this
+  // stop sits against the paint tunnel, so the stack goes in the high-z room.
+  const canRoom = lift.floors?.find((room) => Math.abs(room.y + 7.2) < 0.01 && room.z0 >= lift.shaft.z1 - 0.02) || null;
+  const canVest = canRoom
+    ? lift.floors.find((room) => Math.abs(room.y - canRoom.y) < 0.01 && room.z1 <= canRoom.z0 + 0.05 && room.z1 >= canRoom.z0 - 0.05 && room.z0 < canRoom.z0)
+    : null;
+  const cans = canRoom ? createCans(scene, { room: canRoom, vestibule: canVest }) : null;
   const gear = createGear(scene, camera, targets, roof, cliff.cave, cliff.gallery, assets, range);
   if (croc) gear.setCroc(croc);
   // raptor pass: the overlook boss is the raptor (src/raptor.js); ?legacy=bear (or the pre-overlook crag) keeps the bear.
@@ -4826,10 +4834,12 @@ export function createWorld({ assets, renderer = null } = {}) {
       canoe.update(dt);
       gear.update(dt);
       finds.update();
+      cans?.update(dt);
     },
     gear,
     golf,
     hockey,
+    cans,
     yard,
     crates,
     canoe,
