@@ -15,7 +15,13 @@
 import * as THREE from 'three';
 
 const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
-export const golfOld = () => params.get('golf') === 'old';
+// ?golf= mode. Two-grip pass: default 'twogrip'; 'old' = the 5fad730 grip hold (createHold); 'onehand' = the two-grip
+// hold with the second hand ignored (one-hand / putting-style swings); 'legacy' = the 59e7c4b pointing hold.
+export const golfMode = () => {
+  const g = params.get('golf');
+  return g === 'legacy' || g === 'old' || g === 'onehand' ? g : 'twogrip';
+};
+export const golfOld = () => golfMode() === 'legacy'; // the 59e7c4b hold and strike (no grip pass at all)
 export const golfLefty = () => params.get('golfhand') === 'left';
 export const golfLenParam = () => params.get('golflen');
 
@@ -200,16 +206,24 @@ export function createFit({ min = -0.3, max = 0.2, hold = 1.0, still = 0.35, nea
   };
 }
 
-// Stretch a club model along its shaft: vertices below y0 move down by ext, ramping in between y0 and y1 (so the
-// grip stays put, the shaft stretches, the head moves rigidly). Clones the geometry once (the template is shared).
-export function makeStretch(root, y0, y1) {
+// Stretch a club along its shaft: vertices below y0 (in the ROOT's frame) move down by ext, ramping in between y0
+// and y1 (the grip stays put, the shaft stretches, the head moves rigidly). Works for the GLB model and for the
+// procedural parts (meshes with their own transforms under the root). Clones each geometry once (templates are
+// shared). Two-grip pass: the fit used to need the GLB, so a build whose models failed to load (no Draco decoders,
+// ?models=0, ?legacy=clubs) had no fit at all and the stick hook floated 11 cm over the floor.
+export function makeStretch(root, y0, y1, skip = null) {
   const parts = [];
-  root?.traverse((child) => {
-    if (!child.isMesh || !child.geometry?.attributes?.position) return;
+  if (!root) return { get ext() { return 0; }, set() {} };
+  root.updateMatrix();
+  root.traverse((child) => {
+    if (!child.isMesh || !child.geometry?.attributes?.position || skip?.(child)) return;
+    const m = new THREE.Matrix4();
+    for (let o = child; o && o !== root; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
     child.geometry = child.geometry.clone();
     const pos = child.geometry.attributes.position;
-    parts.push({ mesh: child, pos, base: Float32Array.from(pos.array) });
+    parts.push({ mesh: child, pos, base: Float32Array.from(pos.array), m, mi: m.clone().invert(), id: m.equals(new THREE.Matrix4()) });
   });
+  const v = new THREE.Vector3();
   let ext = 0;
   return {
     get ext() { return ext; },
@@ -217,17 +231,223 @@ export function makeStretch(root, y0, y1) {
       if (Math.abs(next - ext) < 1e-5 || !parts.length) { ext = next; return; }
       ext = next;
       for (const part of parts) {
-        const { pos, base } = part;
-        // the mesh may sit under the club with its own transform; the club models are authored at identity
+        const { pos, base, m, mi, id } = part;
         for (let i = 0; i < pos.count; i += 1) {
-          const y = base[i * 3 + 1];
-          const k = THREE.MathUtils.clamp((y0 - y) / (y0 - y1), 0, 1);
-          pos.array[i * 3 + 1] = y - ext * k;
+          v.set(base[i * 3], base[i * 3 + 1], base[i * 3 + 2]);
+          if (!id) v.applyMatrix4(m);
+          const k = THREE.MathUtils.clamp((y0 - v.y) / (y0 - y1), 0, 1);
+          v.y -= ext * k;
+          if (!id) v.applyMatrix4(mi);
+          pos.array[i * 3] = v.x; pos.array[i * 3 + 1] = v.y; pos.array[i * 3 + 2] = v.z;
         }
         pos.needsUpdate = true;
         part.mesh.geometry.computeBoundingSphere();
         part.mesh.geometry.computeBoundingBox();
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Two-grip pass: the club is held at two fixed grip points, the way a right-handed golfer holds it.
+//  - TOP grip (club y = -butt, near the butt end): the LEFT hand (right hand with ?golfhand=left).
+//  - LOWER grip, `gap` further down the shaft (0.09 m driver: hands touching; 0.35 m hockey stick): the other hand.
+//  Each hand goes to its own grip whichever grabs first: one hand alone holds the club at its own grip point, at the
+//  natural grip angle (holdQuat), and the empty grip shows a ghost fist.
+//  - Both hands: the shaft is the line from the lower fist to the top fist (direction only, so 4-12 cm or 30-40 cm
+//    between real controllers all work) and the club is anchored at the top fist. The lower fist's sideways offset
+//    from the shaft when it lands (up to 5 cm; real controllers are never co-axial) is held in the club frame. The roll of the face about the shaft
+//    is NOT read from either controller: a face frame is carried along with the shaft (minimal rotation per frame)
+//    and only turned when BOTH hands agree that it turned (same sign; the smaller of the two), so wrist roll noise
+//    on one controller cannot spin the club, while both forearms rotating together (a real face rotation) does.
+//  - Smoothing: a One Euro filter on the club orientation (min cutoff 0.5 Hz at rest, + 20 Hz per rad/s: a constant ~0.45 deg lag at any swing speed), so the
+//    head is still at address and lag-free at swing speed; mode changes (one <-> two hands) blend over 0.2 s.
+export function createTwoGrip(opts = {}) {
+  const q = holdQuat(opts.faceSign ?? -1, opts.tilt ?? GRIP_TILT);
+  const butt = opts.butt ?? BUTT_IN_FIST;
+  const gap = opts.gap ?? 0.09;
+  const topSide = opts.topSide ?? 'left';
+  const oneOnly = !!opts.onehand;
+  const minCut = opts.minCutoff ?? 0.5;
+  const beta = opts.beta ?? 20;
+  const near = opts.twoHandMin ?? 0.02;
+  const full = opts.twoHandFull ?? 0.035;
+  const P1 = new THREE.Vector3(); const Q1 = new THREE.Quaternion();
+  const P2 = new THREE.Vector3(); const Q2 = new THREE.Quaternion();
+  const pT = new THREE.Vector3(); const qT = new THREE.Quaternion();
+  const pL = new THREE.Vector3(); const qL = new THREE.Quaternion();
+  const sUp = new THREE.Vector3(); const prevS = new THREE.Vector3();
+  const faceRef = new THREE.Vector3(); const fT = new THREE.Vector3(); const fL = new THREE.Vector3();
+  const zA = new THREE.Vector3(); const tmp = new THREE.Vector3(); const tq = new THREE.Quaternion();
+  const ta = new THREE.Vector3(); const R = new THREE.Quaternion(); const basis = new THREE.Matrix4();
+  const offQ = new THREE.Quaternion(); const offP = new THREE.Vector3(); const blendQ = new THREE.Quaternion();
+  const dq = new THREE.Quaternion(); const wv = new THREE.Vector3(); const wRaw = new THREE.Vector3();
+  const yC = new THREE.Vector3(); const sideOff = new THREE.Vector3(); const maxSide = opts.maxSide ?? 0.05;
+  const ident = new THREE.Quaternion(); const hq = new THREE.Quaternion(); const prevTarget = new THREE.Quaternion(); const qf = new THREE.Quaternion();
+  const outP = new THREE.Vector3(); const outQ = new THREE.Quaternion();
+  const parentInv = new THREE.Matrix4(); const world = new THREE.Matrix4();
+  const state = { twoHand: false, weight: 0, mode: null, missing: null, faceErr: [0, 0], p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  let haveFace = false; let oT = 0; let oL = 0; let lastMode = null; let blend = 1; let haveF = false;
+  const alphaOf = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
+  const sideOf = (c) => c?.userData?.inputSource?.handedness ?? null;
+  // signed angle from a to b about axis (a, b perpendicular to axis)
+  const signed = (a, b, axis) => Math.atan2(tmp.crossVectors(a, b).dot(axis), a.dot(b));
+  const handFace = (Q, out) => {
+    out.set(1, 0, 0).applyQuaternion(hq.copy(Q).multiply(q)); // the face this hand alone would give
+    out.addScaledVector(sUp, -out.dot(sUp));
+    return out.lengthSq() > 1e-8 ? out.normalize() : null;
+  };
+  // both hands must turn the same way by about the same amount (3 deg + 25 %) or the face does not turn
+  const agree = (a, b) => {
+    if (a * b <= 0) return 0;
+    const m = Math.max(Math.abs(a), Math.abs(b));
+    if (Math.abs(a - b) > 3 * DEG + 0.25 * m) return 0;
+    return Math.sign(a) * Math.min(Math.abs(a), Math.abs(b));
+  };
+
+  function apply(club, lead, offHand, dt) {
+    if (!fistPose(lead, P1, Q1)) return null;
+    let two = !oneOnly && !!offHand && offHand !== lead && fistPose(offHand, P2, Q2);
+    const ls = sideOf(lead);
+    let leadTop = ls ? ls === topSide : true;
+    if (two && ls === sideOf(offHand)) leadTop = true;
+    let w = 0;
+    if (two) {
+      if (leadTop) { pT.copy(P1); qT.copy(Q1); pL.copy(P2); qL.copy(Q2); } else { pT.copy(P2); qT.copy(Q2); pL.copy(P1); qL.copy(Q1); }
+      sUp.copy(pT).sub(pL);
+      const len = sUp.length();
+      w = THREE.MathUtils.smoothstep(len, near, full);
+      if (w < 0.5 || len < 1e-4) two = false;
+      else {
+        // Real fists are never exactly co-axial: the lower fist's sideways offset from the shaft at the moment it
+        // lands is kept in the club's own (roll-locked) frame and taken off its position, so landing the second
+        // hand neither pops nor tilts the club, and wrist roll cannot swing the offset around.
+        if (!haveFace && haveF) {
+          yC.set(0, 1, 0).applyQuaternion(qf);
+          sideOff.copy(pL).sub(pT);
+          sideOff.addScaledVector(yC, -sideOff.dot(yC));
+          if (sideOff.length() > maxSide) sideOff.setLength(maxSide);
+          sideOff.applyQuaternion(hq.copy(qf).invert());
+        } else if (!haveFace) sideOff.set(0, 0, 0);
+        tmp.copy(sideOff).applyQuaternion(qf);
+        sUp.copy(pT).sub(pL).add(tmp).normalize();
+      }
+    }
+    let mode;
+    if (!two) {
+      tq.copy(Q1).multiply(q);
+      ta.set(0, leadTop ? butt : butt + gap, 0).applyQuaternion(tq).add(P1);
+      haveFace = false;
+      mode = leadTop ? 'top' : 'lower';
+    } else {
+      mode = 'two';
+      if (!haveFace) {
+        // continuity: start from the face of whatever is showing now, then calibrate each hand against it
+        faceRef.set(1, 0, 0).applyQuaternion(haveF ? qf : hq.copy(qT).multiply(q));
+        faceRef.addScaledVector(sUp, -faceRef.dot(sUp));
+        if (faceRef.lengthSq() < 1e-8) handFace(qT, faceRef); else faceRef.normalize();
+        oT = handFace(qT, fT) ? signed(faceRef, fT, sUp) : 0;
+        oL = handFace(qL, fL) ? signed(faceRef, fL, sUp) : 0;
+        haveFace = true;
+      } else {
+        R.setFromUnitVectors(prevS, sUp);
+        faceRef.applyQuaternion(R);
+        faceRef.addScaledVector(sUp, -faceRef.dot(sUp)).normalize();
+        const eT = handFace(qT, fT) ? signed(faceRef, fT, sUp) - oT : 0;
+        const eL = handFace(qL, fL) ? signed(faceRef, fL, sUp) - oL : 0;
+        const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+        const e = agree(wrap(eT), wrap(eL));
+        state.faceErr[0] = eT; state.faceErr[1] = eL;
+        if (e) faceRef.applyAxisAngle(sUp, e);
+      }
+      prevS.copy(sUp);
+      zA.crossVectors(faceRef, sUp).normalize();
+      tq.setFromRotationMatrix(basis.makeBasis(faceRef, sUp, zA));
+      ta.copy(sUp).multiplyScalar(butt).add(pT);
+    }
+    // mode change: blend from what was showing over 0.2 s (no pop when the second hand lands or lets go)
+    if (lastMode && mode !== lastMode && haveF) {
+      offQ.copy(outQ).multiply(blendQ.copy(tq).invert());
+      offP.copy(outP).sub(ta);
+      blend = 0;
+    }
+    lastMode = mode;
+    if (blend < 1) {
+      blend = Math.min(1, blend + dt / 0.2);
+      const k = 1 - THREE.MathUtils.smoothstep(blend, 0, 1);
+      blendQ.slerpQuaternions(ident, offQ, k);
+      tq.premultiply(blendQ);
+    }
+    // One Euro on the orientation. The speed term is the low-passed angular VELOCITY vector (signed), so tracking
+    // noise averages out of it and only a real turn opens the filter up.
+    if (!haveF || dt <= 0) { qf.copy(tq); wv.set(0, 0, 0); haveF = true; } else {
+      dq.copy(prevTarget).invert().premultiply(tq); // world-frame delta
+      if (dq.w < 0) { dq.x = -dq.x; dq.y = -dq.y; dq.z = -dq.z; dq.w = -dq.w; }
+      const sn = Math.hypot(dq.x, dq.y, dq.z);
+      const ang = 2 * Math.atan2(sn, dq.w);
+      if (sn > 1e-9) wRaw.set(dq.x, dq.y, dq.z).multiplyScalar(ang / sn / dt); else wRaw.set(0, 0, 0);
+      wv.lerp(wRaw, alphaOf(1.2, dt));
+      qf.slerp(tq, alphaOf(minCut + beta * wv.length(), dt));
+    }
+    prevTarget.copy(tq);
+    outQ.copy(qf);
+    // the holding fist stays exactly on its grip point: position from the FILTERED orientation
+    if (mode === 'two') outP.set(0, butt, 0).applyQuaternion(qf).add(pT);
+    else outP.set(0, leadTop ? butt : butt + gap, 0).applyQuaternion(qf).add(P1);
+    if (blend < 1) outP.addScaledVector(offP, 1 - THREE.MathUtils.smoothstep(blend, 0, 1));
+    state.twoHand = mode === 'two';
+    state.weight = mode === 'two' ? w : 0;
+    state.mode = mode;
+    state.missing = oneOnly ? null : (mode === 'two' ? null : (leadTop ? 'lower' : 'top'));
+    state.p.copy(outP);
+    state.q.copy(outQ);
+    const parent = club.parent;
+    parent.updateWorldMatrix(true, false);
+    parentInv.copy(parent.matrixWorld).invert();
+    world.compose(outP, outQ, _s.set(1, 1, 1));
+    world.premultiply(parentInv);
+    world.decompose(club.position, club.quaternion, club.scale);
+    club.scale.set(1, 1, 1);
+    return state;
+  }
+  function reset() {
+    haveFace = false; haveF = false; lastMode = null; blend = 1;
+    state.twoHand = false; state.weight = 0; state.mode = null; state.missing = null;
+  }
+  return { apply, reset, state, holdQ: q, grips: [-butt, -butt - gap] };
+}
+
+// Ghost fists on the two grip points: shown on the EMPTY grip while one hand holds the club (the prompt to add the
+// second hand), pulsing; hidden when both hands are on or the club is down. Top = cool blue, lower = warm amber.
+export function createGhosts(club, grips) {
+  const mk = (color) => {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false });
+    const fist = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.085, 14, 1, true), mat);
+    g.add(fist);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.003, 6, 20), mat);
+    ring.rotation.x = Math.PI / 2;
+    g.add(ring);
+    const knuckles = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.05), mat);
+    knuckles.position.x = -0.035;
+    g.add(knuckles);
+    g.visible = false;
+    g.renderOrder = 3;
+    g.userData.mat = mat;
+    club.add(g);
+    return g;
+  };
+  const top = mk(0x7fc8ff); top.position.y = grips[0] - 0.035;
+  const low = mk(0xffb45a); low.position.y = grips[1] - 0.035;
+  let t = 0;
+  return {
+    top, low,
+    update(dt, carried, missing) {
+      t += dt;
+      top.visible = !!carried && missing === 'top';
+      low.visible = !!carried && missing === 'lower';
+      const a = 0.22 + 0.18 * (0.5 + 0.5 * Math.sin(t * 5));
+      top.userData.mat.opacity = a; low.userData.mat.opacity = a;
     },
   };
 }

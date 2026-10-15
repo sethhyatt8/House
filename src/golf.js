@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
 import { proxyMaterial } from './assets.js';
 import { legacy } from './flags.js';
-import { createFit, createHold, golfLefty, golfOld, makeStretch } from './golfgrip.js';
+import { createFit, createGhosts, createHold, createTwoGrip, golfLefty, golfMode, golfOld, makeStretch } from './golfgrip.js';
 import { DRIVER, golfAero, sweepFace, impact } from './golfball.js';
 
 const BALL_R = 0.02135;
@@ -21,7 +21,10 @@ export const GREEN = { x0: -0.62, x1: 0.72, z0: -0.42, z1: 0.42, y: 11.36 };
 // Golf grip pass: the rock is walkable only to |z| 0.6 here, so a teed ball at z 0.02 could not be addressed at
 // driver distance (~0.9 m from the golfer) without standing over the drop. The tee moves 0.32 m away from the side
 // the golfer stands on (south for right-handed, north with ?golfhand=left). ?golf=old keeps z 0.02.
-const OLD = golfOld();
+const OLD = golfOld(); // ?golf=legacy: the 59e7c4b hold
+const MODE = golfMode();
+// Two-grip pass: hands touching on the driver grip, lower fist 9 cm below the top one.
+const GRIP_GAP = 0.09;
 const LEFTY = !OLD && golfLefty();
 const TEE = OLD ? { x: -0.42, z: 0.02 } : { x: -0.42, z: LEFTY ? 0.3 : -0.3 };
 const WORLD_R = 148; // a drive further out than this is past the sea's edge: reset
@@ -248,7 +251,8 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     club.add(model);
   }
   // golf grip pass: shaft-length fit stretches the model's shaft (grip fixed, head moves along the shaft)
-  const stretch = !OLD && model ? makeStretch(model, -0.3, -0.92) : null;
+  // two-grip pass: the procedural club stretches too when the GLB is missing (the fit used to need the model)
+  const stretch = OLD ? null : makeStretch(model || club, -0.3, -0.92);
   if (LEFTY) {
     // a left-handed driver is the mirror image (toe still away from the golfer): mirror the meshes in z
     const body = new THREE.Group();
@@ -355,7 +359,10 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
   let dug = null;
   // golf grip pass state
   let KE = K0;
-  const hold = OLD ? null : createHold({ faceSign: LEFTY ? 1 : -1 });
+  const hold = OLD ? null : MODE === 'old' ? createHold({ faceSign: LEFTY ? 1 : -1 })
+    : createTwoGrip({ faceSign: LEFTY ? 1 : -1, gap: GRIP_GAP, topSide: LEFTY ? 'right' : 'left', onehand: MODE === 'onehand' });
+  const ghosts = hold?.grips ? createGhosts(club, hold.grips) : null;
+  club.userData.gripMissing = () => hold?.state.missing ?? null;
   const fit = OLD || !stretch ? null : createFit({ min: -0.3, max: 0.2 });
   if (fit?.fixed != null) { stretch.set(fit.fixed); KE = extendK(fit.fixed); }
   const pose0 = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
@@ -475,6 +482,7 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     const ud = club.userData;
     if (!ud.carried || ud.offHand === club.parent) ud.offHand = null;
     if (!ud.carried) {
+      ghosts?.update(dt, false, null);
       hold.reset();
       fit?.reset();
       havePose = false;
@@ -493,6 +501,7 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
       club.position.copy(ud.holdPos);
     }
     twoHand = !!held?.twoHand;
+    ghosts?.update(dt, true, held?.missing ?? null);
     club.updateWorldMatrix(true, false);
     readFace();
     // length fit (before the clamp, so it sees how far the head would sink)
@@ -719,6 +728,10 @@ export function createGolf(scene, targets, deckY = GREEN.y, assets = null) {
     club.updateWorldMatrix(true, false);
     return {
       mode: OLD ? 'old' : (LEFTY ? 'grip-left' : 'grip'),
+      hold: OLD ? 'legacy' : MODE,
+      handMode: hold?.state.mode ?? null,
+      missing: hold?.state.missing ?? null,
+      grips: hold?.grips ?? null,
       ext: stretch ? +stretch.ext.toFixed(4) : 0,
       twoHand,
       weight: hold ? +hold.state.weight.toFixed(3) : null,

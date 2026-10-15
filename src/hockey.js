@@ -4,14 +4,17 @@ import * as THREE from 'three';
 import { BALL_R, createBallState, soleCatch, stepBall, turfDrag } from './hockeyball.js';
 import { proxyMaterial } from './assets.js';
 import { legacy } from './flags.js';
-import { createFit, createHold, golfOld, makeStretch } from './golfgrip.js';
+import { createFit, createGhosts, createHold, createTwoGrip, golfMode, golfOld, makeStretch } from './golfgrip.js';
 import { STICK, impact, sweepFace } from './golfball.js';
 
 // Golf grip pass: the stick hangs off the grip space like the driver (shaft out of the thumb side of the fist, flat
 // face along the palm of the right hand / back of the left), a second hand anywhere 6-50 cm down the shaft steers it,
 // and the length fit lets the hook reach the floor. Field hockey sticks are all right-handed, so ?golfhand=left does
 // not apply here. ?golf=old keeps the 59e7c4b hold (stick along the pointing ray, 50 deg down).
-const OLD = golfOld();
+const OLD = golfOld(); // ?golf=legacy: the 59e7c4b hold
+const MODE = golfMode();
+const LIE_FIX = 32 * Math.PI / 180;
+const GRIP_GAP = 0.35; // two-grip pass: top hand at the end, lower hand 35 cm down the shaft
 
 const HALF_W = 0.55;
 const GOAL_H = 1.8;
@@ -174,13 +177,24 @@ export function createHockey(scene, targets, at, assets = null) {
   grip.add(palm);
   stick.add(grip);
   const model = !legacy('stick') && !legacy('clubs') && assets?.enabled ? assets.instance('hockey_stick') : null;
-  const K0 = model ? MODEL_STICK : LEGACY_STICK;
+  let K0 = model ? MODEL_STICK : LEGACY_STICK;
+  if (!model && !OLD) {
+    // two-grip pass: the procedural fallback stick (no GLB: ?models=0, ?legacy=stick, a failed load) gets the same
+    // 32 deg lie as the model, so its blade lies flat at the grip hold instead of standing on its heel with the toe
+    // 11 cm up (the face then passed over the ball)
+    const lie = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), LIE_FIX);
+    const pivot = new THREE.Vector3(0, -0.8, 0);
+    const rp = (v) => v.clone().sub(pivot).applyQuaternion(lie).add(pivot);
+    const rd = (v) => v.clone().applyQuaternion(lie);
+    for (const part of [back, playing, toe]) { part.position.copy(rp(part.position)); part.quaternion.premultiply(lie); }
+    K0 = { ...LEGACY_STICK, face: rp(LEGACY_STICK.face), n: rd(LEGACY_STICK.n), toe: rd(LEGACY_STICK.toe), up: rd(LEGACY_STICK.up), sole: LEGACY_STICK.sole.map(rp) };
+  }
   let K = K0;
   if (model) {
     for (const part of [shaft, wrap, back, playing, toe]) part.material = proxyMaterial;
     stick.add(model);
   }
-  const stretch = !OLD && model ? makeStretch(model, -0.25, -0.6) : null;
+  const stretch = OLD ? null : makeStretch(model || stick, -0.25, -0.6); // two-grip pass: procedural stick too
   function extendK(ext) {
     if (!ext) return K0;
     const dn = (v) => new THREE.Vector3(v.x, v.y - ext, v.z);
@@ -257,7 +271,10 @@ export function createHockey(scene, targets, at, assets = null) {
   let northSide = false;
   let southSide = false;
   let goals = 0;
-  const hold = OLD ? null : createHold({ faceSign: -1, twoHandMin: 0.06, twoHandFull: 0.14 });
+  const hold = OLD ? null : MODE === 'old' ? createHold({ faceSign: -1, twoHandMin: 0.06, twoHandFull: 0.14 })
+    : createTwoGrip({ faceSign: -1, gap: GRIP_GAP, topSide: 'left', onehand: MODE === 'onehand', twoHandMin: 0.05, twoHandFull: 0.08 });
+  const ghosts = hold?.grips ? createGhosts(stick, hold.grips) : null;
+  stick.userData.gripMissing = () => hold?.state.missing ?? null;
   const fit = OLD || !stretch ? null : createFit({ min: -0.15, max: 0.25 });
   if (fit?.fixed != null) { stretch.set(fit.fixed); K = extendK(fit.fixed); }
   const pose0 = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
@@ -344,9 +361,10 @@ export function createHockey(scene, targets, at, assets = null) {
     const ud = stick.userData;
     let held = null;
     if (!OLD && (!ud.carried || ud.offHand === stick.parent)) ud.offHand = null;
-    if (!OLD && !ud.carried) { hold.reset(); fit?.reset(); poseReady = false; }
+    if (!OLD && !ud.carried) { hold.reset(); fit?.reset(); poseReady = false; ghosts?.update(dt, false, null); }
     if (ud.carried) {
       held = OLD ? null : hold.apply(stick, stick.parent, ud.offHand, dt);
+      ghosts?.update(dt, !!held, held?.missing ?? null);
       if (!held) {
         stick.quaternion.copy(holdQuat);
         stick.position.copy(ud.holdPos);
@@ -433,7 +451,7 @@ export function createHockey(scene, targets, at, assets = null) {
   }
   stick.userData.debug = () => {
     stick.updateWorldMatrix(true, false);
-    return { face, floorY, ballState: ball, spawn: { ...spawn }, mode: OLD ? 'old' : 'grip', ext: stretch ? +stretch.ext.toFixed(4) : 0, twoHand: !!hold?.state.twoHand, weight: hold ? +hold.state.weight.toFixed(3) : null, sole: K.sole.map((p) => p.clone().applyMatrix4(stick.matrixWorld).toArray()), lastStrike };
+    return { face, floorY, ballState: ball, spawn: { ...spawn }, mode: OLD ? 'old' : 'grip', hold: OLD ? 'legacy' : MODE, handMode: hold?.state.mode ?? null, missing: hold?.state.missing ?? null, grips: hold?.grips ?? null, ext: stretch ? +stretch.ext.toFixed(4) : 0, twoHand: !!hold?.state.twoHand, weight: hold ? +hold.state.weight.toFixed(3) : null, sole: K.sole.map((p) => p.clone().applyMatrix4(stick.matrixWorld).toArray()), lastStrike };
   };
 
   function inMouth(x, y) {

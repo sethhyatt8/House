@@ -4803,6 +4803,16 @@ function frame(time, frame) {
       }
     }
   }
+  // two-grip pass: one hand on a club or the stick -> say where the other hand goes (the ghost fist shows it), once a pickup
+  for (const club of [world.golf?.club, world.hockey?.stick]) {
+    if (!club) continue;
+    const miss = club.userData.carried ? club.userData.gripMissing?.() : null;
+    if (miss && !club.userData.hinted) {
+      club.userData.hinted = true;
+      setStatus(miss === 'top' ? 'Other hand on the top of the grip (the blue ghost).' : 'Other hand on the grip just below (the amber ghost).');
+    }
+    if (!club.userData.carried) club.userData.hinted = false;
+  }
   if (world.golf) {
     const events = world.golf.update(dt, {
       colliders: walker.colliders,

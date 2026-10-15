@@ -100,11 +100,11 @@ async function kit(name) {
   let h0 = 0.9; for (let h = 1.05; h >= 0.55; h -= 0.01) { const m = await place(h); if (m.soleAboveGround <= 0.012) { h0 = h; break; } }
   await place(golf ? h0 : 0.85); await frames(100); // still at address: the length fit settles the sole
   await place(golf ? h0 : 0.85); await frames(10);
-  // trail fist below the lead one on the shaft (9 cm golf, 30 cm hockey)
+  // trail fist below the lead one on the shaft (9 cm golf, 35 cm hockey)
   const m0 = await X(() => G.measure());
   const sdW = await X((sd) => new __house.THREE.Vector3(...sd).applyQuaternion(G.R).toArray(), m0.shaftDir);
   const L = await X(gripOf, lead);
-  const p2 = L.p.map((v, i) => v + sdW[i] * (golf ? 0.09 : 0.3));
+  const p2 = L.p.map((v, i) => v + sdW[i] * (golf ? 0.09 : 0.35));
   const q2 = await X((s) => { const q = G.anatomy(s, 17, false); return { x: q.x, y: q.y, z: q.z, w: q.w }; }, trail);
   await X((a) => G.setGrip(a.s, new __house.THREE.Vector3(...a.p), a.q), { s: trail, p: p2, q: q2 }); await frames(3);
   await ev((s) => T.btn(s, 'squeeze', 1), trail); await frames(40);
