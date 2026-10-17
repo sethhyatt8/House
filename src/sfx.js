@@ -2,6 +2,7 @@
 // ?sfx=0), and callers keep their procedural WebAudio sound as the fallback. Files: public/audio/*.ogg (mono Vorbis,
 // credits in public/audio/CREDITS.md). Ambience loops are crossfaded by zone; one-shots can be positional (HRTF).
 import * as THREE from 'three';
+import { CAN_SFX } from './cansfx.js';
 
 export const SFX_FILES = [
   'amb_ocean', 'amb_night', 'amb_wind', 'amb_cave', 'amb_fire',
@@ -9,6 +10,7 @@ export const SFX_FILES = [
   'splash_small1', 'splash_small2', 'splash_big', 'paddle1', 'paddle2', 'paddle3',
   'hit_wood', 'hit_wood2', 'hit_plank', 'hit_soft', 'hit_metal', 'hit_punch',
   'chop', 'latch', 'door_open', 'door_close', 'cloth', 'coins', 'creak', 'ui_click', 'ui_confirm',
+  ...CAN_SFX, // cans pass
 ];
 
 // zone -> ambience bed levels (0..1). Unknown zones fall back to 'outdoor' above ground and 'cave' below.
@@ -197,5 +199,8 @@ export function createSfx(getCtx, opts = {}) {
     if (Math.abs(muffler.frequency.value - f) > 1) muffler.frequency.value = f;
   }
 
-  return { enabled, fetchAll, warm, play, update, start, buffers, setMuffle };
+  // cans pass: cansfx.js builds its own positional voices on the same bus (underwater muffle applies)
+  function output() { ctxReady(); return bus; }
+
+  return { enabled, fetchAll, warm, play, update, start, buffers, setMuffle, buffer, output };
 }

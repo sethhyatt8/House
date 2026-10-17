@@ -70,3 +70,22 @@ All sources are CC0 1.0 (public domain dedication). Edited with ffmpeg (trim, fa
 | raptor_death.ogg | taure "raptor.wav" + CaveboyTup "T-rex Calls" | taure 6.78-8.81 s at 0.82x; T-rex 36.6-39.0 s, -7 dB, +0.9 s; mixed, 3.3 s |
 
 CaveboyTup's T-rex calls are themselves made from CC0 alligator, lion and elk recordings; taure's are the author's own voice; TRP's hawk is a field recording. The rustles, scrapes, footfalls and landing thumps are WebAudio noise/sine bursts in src/raptorfight.js, not sample files.
+
+## Cans (cans pass): aluminium / tin can samples, CC0 1.0
+
+Mono 44.1 kHz Vorbis q3, silence-trimmed, loudness-normalised (ffmpeg loudnorm I=-14 LUFS, TP -1 dB), 0.12-1.4 s
+each; `can_roll_loop` is a 2.05 s seamless loop (0.3 s crossfade of tail into head, numpy). 18 files, ~200 KB total.
+
+| File | Source | Author / licence |
+|---|---|---|
+| can_clank_0..4.ogg | Kenney "Impact Sounds" 1.0, impactTin_medium_000..004.ogg (https://kenney.nl/assets/impact-sounds; mirrored at https://cc0-sounds.exi.software/collection/kenney_impactsounds/) | Kenney (www.kenney.nl), CC0 1.0 |
+| can_clank_5.ogg | "Micro Pack - Small Can": Small Can - Dent 1.wav (https://cc0-sounds.exi.software/collection/micro%20pack%20-%20small%20can/) | CC0 1.0 per the CC0 Sounds archive (original author not named there) |
+| can_clank_6.ogg | Micro Pack - Small Can: Small Can - Flick.wav | as above, CC0 1.0 |
+| can_floor_0.ogg | Micro Pack - Small Can: Small Can - Tap on Tile.wav | as above, CC0 1.0 |
+| can_floor_1..4.ogg | Kenney Impact Sounds: impactMetal_light_000..003.ogg | Kenney, CC0 1.0 |
+| can_floor_5.ogg | Kenney Impact Sounds: impactPlate_light_000.ogg | Kenney, CC0 1.0 |
+| can_clatter_0.ogg | Micro Pack - Small Can: Small Crushed Can - Clatter.wav | CC0 1.0 |
+| can_clatter_1.ogg | Micro Pack - Small Can: Small Crushed Can - Clatter 3.wav | CC0 1.0 |
+| can_clatter_2.ogg | Micro Pack - Small Can: Small Crushed Can - Dropping.wav | CC0 1.0 |
+| can_clatter_3.ogg | Micro Pack - Small Can: Small Crushed Can - Clatter 2.wav | CC0 1.0 |
+| can_roll_loop.ogg | Micro Pack - Small Can: Small Can - Roll on Tile 2.wav (0.15-2.5 s) | CC0 1.0 |

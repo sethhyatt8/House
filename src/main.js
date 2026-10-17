@@ -21,6 +21,8 @@ import { wireRaptor } from './raptorfight.js';
 import { createMusic } from './music.js';
 import { createTopout } from './topout.js';
 import { createSfx } from './sfx.js';
+import { createCanSfx } from './cansfx.js'; // cans pass
+import { CAN_MASS } from './cans.js'; // cans pass
 import { nearNotches } from './notches.js';
 import { barFrame, stepGlide } from './glider.js';
 import { FOREST_LEGACY } from './forest.js';
@@ -118,6 +120,7 @@ world.bakeWater(renderer);
 world.gear.bakeIcons?.(renderer);
 // Sound pass: samples first (public/audio, see sfx.js), the procedural sounds stay as the fallback / ?sfx=0.
 const sfx = createSfx(() => audio());
+const canSfx = createCanSfx(sfx, () => audio(), { mass: CAN_MASS }); // cans pass
 const SEA_POINT = new THREE.Vector3(-30, WATER_Y, 0);
 sfx.fetchAll();
 const rawSplash = world.splash;
@@ -4333,7 +4336,62 @@ function releaseProp() {
   setStatus(`Threw the ${prop.userData.label}.`);
 }
 
+// cans pass: what can knock the cans over besides the body: both hands (controller grips), a carried golf club /
+// hockey stick / hatchet (segment along the long side of its world box), flying arrows and thrown props. Kinematic
+// unless an invMass is given (an arrow is 30 g, a thrown prop ~0.5 kg, so they shove cans without stopping dead).
+const canBox = new THREE.Box3();
+const canV = new THREE.Vector3();
+const canV2 = new THREE.Vector3();
+const thrownForCans = new Set();
+let canArrows = [];
+let canArrowScan = 0;
+function canSegmentProbe(key, obj, invMass) {
+  canBox.setFromObject(obj);
+  if (canBox.isEmpty()) return null;
+  const size = canBox.getSize(canV);
+  const c = canBox.getCenter(canV2);
+  const ax = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
+  const half = size[ax] / 2;
+  const others = ['x', 'y', 'z'].filter((k) => k !== ax).map((k) => size[k]);
+  const r = Math.min(0.08, Math.max(0.02, Math.min(...others) / 2));
+  const a = { x: c.x, y: c.y, z: c.z }; const b = { x: c.x, y: c.y, z: c.z };
+  a[ax] -= Math.max(0, half - r); b[ax] += Math.max(0, half - r);
+  return { key, ax: a.x, ay: a.y, az: a.z, bx: b.x, by: b.y, bz: b.z, r, invMass };
+}
+function canProbes() {
+  const out = [];
+  for (const [k, controller] of controllers.entries()) {
+    const grip = controller.userData.grip;
+    if (!grip?.visible) continue;
+    grip.getWorldPosition(canV);
+    out.push({ key: 'hand' + k, ax: canV.x, ay: canV.y, az: canV.z, r: 0.05, invMass: 0 });
+  }
+  for (const [key, item] of [['club', world.golf?.club], ['stick', world.hockey?.stick], ['hatchet', world.gear.hatchet]]) {
+    if (!item?.visible || !(item.userData.carried || item.userData.flight)) continue;
+    const p = canSegmentProbe(key, item, item.userData.carried ? 0 : 1 / 0.6);
+    if (p) out.push(p);
+  }
+  if (--canArrowScan <= 0) { // the quiver grows on demand; rescan twice a second
+    canArrowScan = 36;
+    canArrows = [];
+    world.scene.traverse((o) => { if (o.userData?.arrow) canArrows.push(o); });
+  }
+  for (const [k, arrow] of canArrows.entries()) {
+    if (!arrow.visible || arrow.userData.stuck || !arrow.userData.vel) continue;
+    arrow.getWorldPosition(canV);
+    out.push({ key: 'arrow' + k, ax: canV.x, ay: canV.y, az: canV.z, r: 0.02, invMass: 1 / 0.03 });
+  }
+  for (const prop of thrownForCans) {
+    if (!prop.parent) { thrownForCans.delete(prop); continue; }
+    const p = canSegmentProbe('prop' + prop.id, prop, 1 / 0.5);
+    if (p) out.push(p);
+  }
+  return out;
+}
+
 function throwProp(prop, velocity) {
+  thrownForCans.add(prop); // cans pass: a thrown prop can bowl the pyramid over
+  setTimeout(() => thrownForCans.delete(prop), 6000);
   let vx = velocity.x;
   let vy = velocity.y;
   let vz = velocity.z;
@@ -4764,9 +4822,10 @@ function frame(time, frame) {
       };
     }
     world.cans.setBody(canBody);
+    if (!world.cans.legacy) world.cans.setProbes(canBody ? canProbes() : null); // cans pass: hands, clubs, arrows, thrown items
   }
   world.update(dt);
-  if (world.cans) {
+  if (world.cans?.legacy) {
     for (const hit of world.cans.impacts) {
       sfx.play('hit_metal', {
         at: hit,
@@ -4776,6 +4835,8 @@ function frame(time, frame) {
         ref: 0.7,
       });
     }
+  } else if (world.cans) {
+    canSfx.update(dt, world.cans.impacts, world.cans.rollers(3)); // cans pass: real can samples, positional
   }
   if (world.hockey) {
     const events = world.hockey.update(dt, {
@@ -5002,6 +5063,7 @@ if (pageParams.get('testhooks') === '1') {
     },
     settle: () => ({ ...settle }),
     contain: () => ({ ...contain }),
+    cans: () => ({ phys: world.cans?.debug?.() ?? null, sfx: canSfx.stats, voices: canSfx.voices(), log: canSfx.log.slice(-40), legacy: !!world.cans?.legacy }), // cans pass
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };
 }
