@@ -30,6 +30,11 @@ export const SLIDE_LETHAL = num('slidelethal', 10);
 export const SCUBA_RULE = params.get('fallscuba') || 'tank'; // 'tank' | 'any' | '0'
 const VOID_Y = -20;
 const MAP = 400;
+
+function offWorld(head, feet) {
+  return !head || !Number.isFinite(feet) || !Number.isFinite(head.x) || !Number.isFinite(head.z)
+    || feet < VOID_Y || Math.abs(head.x) > MAP || Math.abs(head.z) > MAP;
+}
 const AIR_MAX = 6;
 const STUCK_MAX = 2;
 const CHECKPOINT_T = 2;
@@ -140,8 +145,7 @@ export function createFallDeath({ camera, scene, sfx = null, pulse = null, setSt
         return;
       }
       if (!FALLDEATH || !active || !head) { stuckT = 0; return; }
-      if (!Number.isFinite(feet) || !Number.isFinite(head.x) || !Number.isFinite(head.z)) { die('void'); return; }
-      if (feet < VOID_Y || Math.abs(head.x) > MAP || Math.abs(head.z) > MAP) { die('void'); return; }
+      if (offWorld(head, feet)) { die('void'); return; }
       stuckT = inside ? stuckT + dt : 0;
       if (stuckT > STUCK_MAX) die('stuck');
     },
@@ -158,6 +162,7 @@ export function createFallDeath({ camera, scene, sfx = null, pulse = null, setSt
         cp.x = cand.x; cp.z = cand.z; cp.floor = cand.floor; cp.zone = zone;
       }
     },
+    offWorld,
     dying: () => !!death,
     // in a free fall of more than `m` metres so far (main.js: falling past the canoe doesn't board it)
     falling: (feet, m = 1.2) => air.on && air.top - feet > m,

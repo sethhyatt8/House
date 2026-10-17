@@ -1141,6 +1141,8 @@ function updatePlayerFall(dt) {
   if (step.feet !== ground && !step.rest) { // in the air
     if (climb) leaveClimb();
     fallDeath?.air(feetY, dt, sliding);
+    // off the map (or below the world) is a void death, not the lethal-fall cutscene
+    if (fallDeath?.offWorld(head, feetY) && fallDeath.die('void')) return;
     if (tryCutscene(head, ground)) return;
     fallVy = step.vy;
     shiftPlayer(0, step.moved, 0);
