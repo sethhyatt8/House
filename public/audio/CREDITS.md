@@ -89,3 +89,12 @@ each; `can_roll_loop` is a 2.05 s seamless loop (0.3 s crossfade of tail into he
 | can_clatter_2.ogg | Micro Pack - Small Can: Small Crushed Can - Dropping.wav | CC0 1.0 |
 | can_clatter_3.ogg | Micro Pack - Small Can: Small Crushed Can - Clatter 2.wav | CC0 1.0 |
 | can_roll_loop.ogg | Micro Pack - Small Can: Small Can - Roll on Tile 2.wav (0.15-2.5 s) | CC0 1.0 |
+
+## Garden (OpenGameArt, CC0 1.0, by rubberduck; credited anyway)
+
+| File | Source | Edit |
+|---|---|---|
+| garden_clack_0.ogg | "100 CC0 metal and wood SFX" (https://opengameart.org/content/100-cc0-metal-and-wood-sfx), wood_hit_07.ogg | trimmed to 0.21 s, normalised |
+| garden_clack_1.ogg | "100 CC0 SFX" (https://opengameart.org/content/100-cc0-sfx), wooden_01.ogg | trimmed to 0.29 s, normalised |
+| garden_falls.ogg | "40 CC0 water / splash / slime SFX" (https://opengameart.org/content/40-cc0-water-splash-slime-sfx), loop_water_02.ogg | 6.8 s seamless loop (tail crossfaded into head), mono 44.1 kHz |
+| garden_trickle.ogg | same pack, loop_water_01.ogg | 3.2 s seamless loop (tail crossfaded into head), mono 44.1 kHz |

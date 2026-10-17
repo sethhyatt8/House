@@ -118,6 +118,7 @@ const vertexShader = `
   uniform vec4 uShoreRect;   // x0, z0, 1/width, 1/depth
   uniform sampler2D uShore;
   uniform float uNearX;
+  uniform float uCapeZ;
   uniform vec4 uRings[4];
   uniform vec4 uBoat;
   uniform float uBoatH;
@@ -129,7 +130,8 @@ const vertexShader = `
   void main() {
     float skirt = position.y;
     vec4 base = modelMatrix * vec4(position.x, 0.0, position.z, 1.0);
-    vec2 p = vec2(min(base.x, uNearX), base.z);
+    float nearX = base.z < uCapeZ ? uNearX : 1e4; // garden pass: south of uCapeZ the sea runs east of the cliff line
+    vec2 p = vec2(min(base.x, nearX), base.z);
     vec2 suv = (p - uShoreRect.xy) * uShoreRect.zw;
     float inside = step(0.0, suv.x) * step(suv.x, 1.0) * step(0.0, suv.y) * step(suv.y, 1.0);
     float amp = mix(1.0, texture2D(uShore, suv).b, inside);
@@ -155,9 +157,9 @@ const vertexShader = `
     vec3 rw = (ringWaveG(uRings[0], p) + ringWaveG(uRings[1], p) + ringWaveG(uRings[2], p) + ringWaveG(uRings[3], p)) * 0.045;
     float r0 = rw.x / 0.045;
     vec2 rg = rw.yz;
-    vec3 world = vec3(min(p.x + disp.x, uNearX), base.y + disp.y + r0 * 0.045, p.y + disp.z);
+    vec3 world = vec3(min(p.x + disp.x, nearX), base.y + disp.y + r0 * 0.045, p.y + disp.z);
     // Skirt: lift to 0.3 deg under the eye, except toward the land side of the cliff line.
-    float lift = skirt * smoothstep(uNearX - 1.0, uNearX - 7.0, base.x);
+    float lift = skirt * smoothstep(nearX - 1.0, nearX - 7.0, base.x);
     world.y = mix(world.y, uEye.y - length(base.xz - uEye.xz) * 0.005, lift);
     vSkirt = lift;
     vNormal = vec3(-slope.x - rg.x, 1.0 - slope.y, -slope.z - rg.y);
@@ -303,10 +305,10 @@ function flatNormalTexture() {
   return tex;
 }
 
-function neutralShore(size, nearX) {
+function neutralShore(size, nearX, rect = SHORE_RECT) {
   // Before bake(): open water everywhere except the analytic cliff line (x >= nearX is land).
   const data = new Uint8Array(size * size * 4);
-  const { x0, x1 } = SHORE_RECT;
+  const { x0, x1 } = rect;
   for (let j = 0; j < size; j += 1) {
     for (let i = 0; i < size; i += 1) {
       const x = x0 + ((i + 0.5) / size) * (x1 - x0);
@@ -321,9 +323,12 @@ function neutralShore(size, nearX) {
   return data;
 }
 
-export function createOcean({ scene, waterY, nearX, cliffX, assets, moonDir, sky, radius = 150, segments = 96 }) {
-  const size = SHORE_RECT.size;
-  const shoreData = neutralShore(size, nearX);
+export function createOcean({ scene, waterY, nearX, cliffX, assets, moonDir, sky, radius = 150, segments = 96, cape = null }) {
+  // garden pass: cape = { z, landAt(x, z), rect } lets the sea run east of the cliff line south of z and bakes a
+  // larger shore rectangle that covers the new coast; without it everything is as before
+  const rect = cape?.rect || SHORE_RECT;
+  const size = rect.size;
+  const shoreData = neutralShore(size, nearX, rect);
   const shoreTex = new THREE.DataTexture(shoreData, size, size);
   shoreTex.magFilter = THREE.LinearFilter;
   shoreTex.minFilter = THREE.LinearFilter;
@@ -338,12 +343,12 @@ export function createOcean({ scene, waterY, nearX, cliffX, assets, moonDir, sky
   const params = new URLSearchParams(location.search);
   const waveA = WAVES.map((w) => new THREE.Vector4(w.dirX, w.dirZ, w.k, w.amp));
   const waveB = WAVES.map((w) => new THREE.Vector4(w.side, w.seed, w.fadeFrom, 1 / (w.fadeTo - w.fadeFrom)));
-  const rect = SHORE_RECT;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     uTime: { value: 0 },
     uEye: { value: new THREE.Vector3() },
     uShoreRect: { value: new THREE.Vector4(rect.x0, rect.z0, 1 / (rect.x1 - rect.x0), 1 / (rect.z1 - rect.z0)) },
     uNearX: { value: nearX },
+    uCapeZ: { value: cape ? cape.z : 1e9 },
     uRings: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
     uBoat: { value: new THREE.Vector4() },
     uBoatH: { value: 0 },
@@ -457,7 +462,7 @@ export function createOcean({ scene, waterY, nearX, cliffX, assets, moonDir, sky
   // CPU twin of the vertex shader: surface height above waterY at world (x, z), excluding the
   // short-lived splash rings and the canoe's flattened patch. Inverts the Gerstner sideways shift.
   function heightAt(x, z) {
-    const px0 = Math.min(x, nearX);
+    const px0 = cape && z >= cape.z ? x : Math.min(x, nearX);
     let px = px0;
     let pz = z;
     for (let k = 0; k < 4; k += 1) {
@@ -561,7 +566,8 @@ export function createOcean({ scene, waterY, nearX, cliffX, assets, moonDir, sky
         const hit = pixels[o + 3] > 0;
         const back = pixels[o + 2] > 127;
         const y = top - span + ((pixels[o] + pixels[o + 1] / 255) / 255) * span;
-        const isLand = x >= cliffX || (hit && (back || y >= waterY - 0.02));
+        const z = rect.z0 + (j + 0.5) * texel;
+        const isLand = (cape ? cape.landAt(x, z) : x >= cliffX) || (hit && (back || y >= waterY - 0.02));
         land[k] = isLand ? 1 : 0;
         depth[k] = isLand ? 0 : hit ? Math.min(waterY - y, DEPTH_MAX) : DEPTH_MAX;
       }

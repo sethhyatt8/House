@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { legacy } from './flags.js';
+import { GARDEN, CAPE, baseY, rollOff, coastDist, onLand, FOREST_XS, FOREST_ZS, inDomain, COAST } from './cape.js';
 
 const params = new URLSearchParams(location.search);
 export const FOREST_LEGACY = ['legacy', 'old'].includes(params.get('forest')) || legacy('forest');
@@ -20,6 +21,7 @@ const patches = [];
 export function patchForest(patch) { patches.push(patch); }
 
 const CENTER = { x: 2.5, z: 4 }; // middle of the clearing (yard + cell); every view of the forest is from around here
+const GARDEN_C = { x: 5, z: 23 }; // garden pass: the garden terrace is the other place the forest is seen from close up
 const clock = { value: 0 };
 const hazeColor = { value: new THREE.Color(0x1b2738) };
 
@@ -52,11 +54,34 @@ function clearingGap(x, z) {
 }
 // Ground height: flat (-0.04, as before) in the clearing, at the cliff edge and past 55 m; up to about +-0.6 m of soft
 // rolling ground in between.
+// Garden pass (cape.js): south of the bank the base drops to the garden level and, with the cape, the ground rounds
+// down over the last few metres before the new coast; the undulation fades out at that coast instead of at x = -1.4.
 export function forestGroundY(x, z) {
-  const amp = smooth(1.5, 10, clearingGap(x, z)) * smooth(-1.4, 3, x) * (1 - smooth(45, 58, Math.max(x, Math.abs(z))));
-  if (amp <= 0) return -0.04;
+  const edge = CAPE ? smooth(0.3, 4, coastDist(x, z)) : smooth(-1.4, 3, x);
+  const amp = smooth(1.5, 10, clearingGap(x, z)) * edge * (1 - smooth(45, 58, Math.max(x, Math.abs(z))));
+  const base = GARDEN ? -0.04 + baseY(x, z) + rollOff(x, z) : -0.04;
+  if (amp <= 0) return base;
   const h = (vnoise(x * 0.06 + 3.1, z * 0.06 - 1.7) - 0.5) * 1.0 + (vnoise(x * 0.17 - 8, z * 0.17 + 2) - 0.5) * 0.35;
-  return -0.04 + amp * h;
+  return base + amp * h;
+}
+// nearest point on the coast polyline (forest ground vertices out at sea are pulled onto it)
+function snapToCoast(x, z) {
+  let best = Infinity;
+  let bx = x;
+  let bz = z;
+  for (let k = 0; k < COAST.length - 1; k += 1) {
+    const [ax, az] = COAST[k];
+    const [cx, cz] = COAST[k + 1];
+    if (Math.max(ax, cx) < x - 12 || Math.min(ax, cx) > x + 12 || Math.max(az, cz) < z - 12 || Math.min(az, cz) > z + 12) continue;
+    const dx = cx - ax;
+    const dz = cz - az;
+    const t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    const px = ax + dx * t;
+    const pz = az + dz * t;
+    const d = Math.hypot(px - x, pz - z);
+    if (d < best) { best = d; bx = px; bz = pz; }
+  }
+  return [bx, bz];
 }
 
 // Shader patch shared by every forest material: wind sway (instanced trees use the instance matrix, merged cover uses
@@ -151,12 +176,8 @@ function buildGround(group, kit, near) {
     color: map ? 0x7d8274 : 0x1a261e, map, roughness: 1, metalness: 0, vertexColors: true,
   }), { kind: 'ground' });
   material.name = 'ForestFloor';
-  const span = (a, b, step) => {
-    const n = Math.max(1, Math.round((b - a) / step));
-    return Array.from({ length: n }, (_, i) => a + ((b - a) * i) / n);
-  };
-  const xs = [...span(-1.55, 3.7, 1.3), ...span(3.7, 60, 1.5), 60];
-  const zs = [...span(-60, -4.1, 1.5), ...span(-4.1, 11.3, 1.4), ...span(11.3, 60, 1.5), 60];
+  const xs = FOREST_XS;
+  const zs = FOREST_ZS;
   const pos = [];
   const uv = [];
   const col = [];
@@ -171,25 +192,38 @@ function buildGround(group, kit, near) {
     const warm = Math.min(1, dark * 0.5);
     return [k * (0.92 + 0.12 * warm), k * (0.98 - 0.06 * warm), k * (0.9 - 0.12 * warm)];
   };
-  const vert = (x, z) => {
+  const vert = (x0, z0) => {
+    // cape: a vertex out at sea is pulled onto the coast (only cells that touch land are drawn)
+    const [x, z] = CAPE && !onLand(x0, z0) ? snapToCoast(x0, z0) : [x0, z0];
     pos.push(x, forestGroundY(x, z), z);
     uv.push(x / TILE, z / TILE);
     col.push(...shade(x, z));
     return pos.length / 3 - 1;
   };
-  const ids = xs.map((x) => zs.map((z) => vert(x, z)));
-  for (let i = 0; i < xs.length - 1; i += 1) {
-    for (let j = 0; j < zs.length - 1; j += 1) {
-      const cx = (xs[i] + xs[i + 1]) / 2;
-      const cz = (zs[j] + zs[j + 1]) / 2;
-      if (cx < 3.7 && cz > -4.1 && cz < 11.3) continue; // the yard and cell have their own ground
-      const a = ids[i][j];
-      const b = ids[i + 1][j];
-      const c = ids[i + 1][j + 1];
-      const d = ids[i][j + 1];
-      index.push(a, d, b, b, d, c);
+  // one grid of cells; skip(i, j) drops a cell. Cells entirely at sea and the garden's rectangle are dropped too.
+  const addGrid = (gx, gz, skip) => {
+    const land = gx.map((x) => gz.map((z) => onLand(x, z)));
+    const ids = gx.map((x) => gz.map(() => -1));
+    const id = (i, j) => {
+      if (ids[i][j] < 0) ids[i][j] = vert(gx[i], gz[j]);
+      return ids[i][j];
+    };
+    for (let i = 0; i < gx.length - 1; i += 1) {
+      for (let j = 0; j < gz.length - 1; j += 1) {
+        const cx = (gx[i] + gx[i + 1]) / 2;
+        const cz = (gz[j] + gz[j + 1]) / 2;
+        if (skip(cx, cz)) continue;
+        if (GARDEN && inDomain(cx, cz)) continue; // garden.js terrain
+        if (CAPE && !(land[i][j] || land[i + 1][j] || land[i + 1][j + 1] || land[i][j + 1])) continue;
+        const a = id(i, j);
+        const b = id(i + 1, j);
+        const c = id(i + 1, j + 1);
+        const d = id(i, j + 1);
+        index.push(a, d, b, b, d, c);
+      }
     }
-  }
+  };
+  addGrid(xs, zs, (cx, cz) => cx < 3.7 && cz > -4.1 && cz < 11.3); // the yard and cell have their own ground
   // far ring at y -0.04 out to 150 m, same material (UVs in world metres so the tiling continues)
   const quad = (x0, x1, z0, z1) => {
     const base = pos.length / 3;
@@ -200,8 +234,19 @@ function buildGround(group, kit, near) {
     }
     index.push(base, base + 3, base + 1, base + 1, base + 3, base + 2);
   };
-  quad(60, 150, -150, 150);
-  quad(-1.55, 60, 60, 150);
+  if (GARDEN) {
+    // garden pass: the land south of the bank is lower, so the far east ring is a coarse grid sharing the fine grid's
+    // z lines at x = 60 (no cracks); with the cape it is clipped to the coast like the near grid
+    const farX = [60, 66, 74, 84, 96, 110, 126, 150];
+    const farZ = [...zs.filter((z) => z >= -60 && z <= 60), ...(CAPE ? [] : [80, 105, 150])];
+    if (CAPE) farZ.splice(farZ.findIndex((z) => z > 40) + 1);
+    addGrid(farX, [...new Set(farZ)].sort((a, b) => a - b), () => false);
+    quad(60, 150, -150, -60);
+    if (!CAPE) addGrid(xs, [60, 80, 105, 150], () => false);
+  } else {
+    quad(60, 150, -150, 150);
+    quad(-1.55, 60, 60, 150);
+  }
   quad(-1.55, 60, -150, -60);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -222,7 +267,8 @@ function buildTrees(group, pines, spots) {
     variants[node.name] = { node, h: new THREE.Box3().setFromObject(node).max.y, list: [] };
   }
   for (const spot of spots) {
-    const d = Math.hypot(spot.x - CENTER.x, spot.z - CENTER.z);
+    let d = Math.hypot(spot.x - CENTER.x, spot.z - CENTER.z);
+    if (GARDEN) d = Math.min(d, Math.hypot(spot.x - GARDEN_C.x, spot.z - GARDEN_C.z) + 4);
     let name = 'pine_far';
     if (spot.band === 0 && d < FULL_R) name = hash(spot.x * 5.3, spot.z * 2.9) < 0.5 ? 'pine_a' : 'pine_b';
     else if (spot.band === 1 && d < FULL_R) name = 'pine_b';

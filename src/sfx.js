@@ -3,6 +3,7 @@
 // credits in public/audio/CREDITS.md). Ambience loops are crossfaded by zone; one-shots can be positional (HRTF).
 import * as THREE from 'three';
 import { CAN_SFX } from './cansfx.js';
+import { GARDEN_SFX } from './gardensfx.js';
 
 export const SFX_FILES = [
   'amb_ocean', 'amb_night', 'amb_wind', 'amb_cave', 'amb_fire',
@@ -11,6 +12,7 @@ export const SFX_FILES = [
   'hit_wood', 'hit_wood2', 'hit_plank', 'hit_soft', 'hit_metal', 'hit_punch',
   'chop', 'latch', 'door_open', 'door_close', 'cloth', 'coins', 'creak', 'ui_click', 'ui_confirm',
   ...CAN_SFX, // cans pass
+  ...GARDEN_SFX, // garden pass
 ];
 
 // zone -> ambience bed levels (0..1). Unknown zones fall back to 'outdoor' above ground and 'cave' below.

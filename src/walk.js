@@ -102,6 +102,9 @@ export function createGround({ world, roof, startCell, cliffX, waterY }) {
     if (yard && x >= yard.x0 && x <= yard.x1 && z >= yard.z0 && z <= yard.z1 && feetY >= yard.y - 0.4) {
       return standHeight(x, z, feetY, yard.y);
     }
+    // garden pass: the terrace, the bank path and the strip south of the yard (garden.js; null = not garden ground)
+    const garden = world.garden?.groundAt(x, z);
+    if (garden != null && feetY > garden - 1.5) return garden;
     const shelf = world.shallowFloor?.(x, z);
     if (shelf != null && feetY < -1) return shelf;
     return waterY;
@@ -122,6 +125,7 @@ function staticColliders({ world, startCell, cliffX, roof }) {
   list.push({ x0: 1.8, x1: 2.5, z0: 0.9, z1: 2.2, y0: 0, y1: 0.85, why: 'room wall' });
   for (const w of world.lift?.colliders || []) list.push({ ...w, why: 'lift wall' });
   for (const block of world.crag?.colliders || []) list.push(block);
+  for (const block of world.garden?.colliders || []) list.push(block); // garden pass: stones, lantern, trees, fence
   if (!GROUND_OLD) {
     // ground/boat pass: the yard rim boulders and the paint-room fire pit had no collider, so the feet went into them
     // (rock boxes reach 0.6 m over the top so you can't step down into one off a crate either)
@@ -206,6 +210,12 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
     if (g - feet > up) return { ok: false, why: 'too high' };
     if (feet - g > down) return { ok: false, why: 'ledge' };
     for (const c of colliders) if (hitsBox(c, x, z, feet, RADIUS)) return { ok: false, why: c.why };
+    // garden pass: the bank (off the path), the sea edge, the pond and the fence line are walls for the stick;
+    // a body already standing in such a spot (a fall or a glide put it there) may walk out of it
+    if (!opts?.gardenFree) {
+      const gb = world.garden?.blocked(x, z);
+      if (gb) return { ok: false, why: `garden ${gb}` };
+    }
     const dyn = dynamicHit(x, z, feet, RADIUS);
     if (dyn) return { ok: false, why: dyn };
     if (loose) return { ok: true, ground: g };
@@ -232,17 +242,18 @@ export function createWalker({ world, ground, startCell, cliffX, roof, waterY })
     // edge: the sea-wall shelf is only 0.3 m of clearance wide) used to freeze the stick in every direction. While the
     // spot you are on fails only for clearance, steps that keep the centre over the same kind of floor are allowed.
     let escape = !FALL_OLD && walkable(x, z, feet).why === 'edge';
+    const free = world.garden?.blocked(x, z) ? { gardenFree: true } : null;
     for (let i = 0; i < steps; i += 1) {
       const sx = dx / steps;
       const sz = dz / steps;
-      let w = walkable(cx + sx, cz + sz, f);
-      if (!w.ok && escape && w.why === 'edge') w = walkable(cx + sx, cz + sz, f, { loose: true });
+      let w = walkable(cx + sx, cz + sz, f, free);
+      if (!w.ok && escape && w.why === 'edge') w = walkable(cx + sx, cz + sz, f, { loose: true, ...free });
       if (w.ok && escape) escape = walkable(cx + sx, cz + sz, w.ground).why === 'edge';
       if (w.ok) { cx += sx; cz += sz; f = w.ground; continue; }
       blocked = w.why;
-      const wx = walkable(cx + sx, cz, f);
+      const wx = walkable(cx + sx, cz, f, free);
       if (wx.ok && Math.abs(sx) > 1e-5) { cx += sx; f = wx.ground; continue; }
-      const wz = walkable(cx, cz + sz, f);
+      const wz = walkable(cx, cz + sz, f, free);
       if (wz.ok && Math.abs(sz) > 1e-5) { cz += sz; f = wz.ground; continue; }
       break;
     }

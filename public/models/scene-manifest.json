@@ -1263,6 +1263,70 @@
         "den": [14.3, 1.5]
       },
       "note": "Modified (compressed, clips trimmed): metal/rough, 1k colour/AO/ORM (ETC1S) + 512 normals (UASTC), meshopt geometry/animation, 15 of the 25 clips kept (dropped Sniff, Eat Prey, Drink, the sleep set, Idle_02, Roar_03, Leap_02, Hurt_02, Action_Pose), animation channels on non-deforming bones dropped. Not preloaded: src/raptor.js prefetches it during the east crag climb. ?raptor=0 (or ?bear=0) turns it off; ?legacy=bear brings back the bear."
+    },
+    "garden_stones": {
+      "url": "models/garden/garden_stones.glb",
+      "source": "https://polyhaven.com/a/moon_rock_01 + /a/moon_rock_02 + /a/moon_rock_03 + /a/moon_rock_05",
+      "author": "Greg Zaal, Rico Cilliers, Jenelle van Heerden, Dario Barresi (Poly Haven)",
+      "license": "CC0",
+      "nodes": {
+        "stone_a": "moon_rock_01",
+        "stone_b": "moon_rock_02",
+        "stone_c": "moon_rock_03",
+        "stone_d": "moon_rock_05"
+      },
+      "note": "Garden pass: four scanned rocks (~930 tris each, diffuse ETC1S 512 + normal UASTC 512). src/garden.js tints them dark for the karesansui stones and mid grey for the bank and coast boulders; one InstancedMesh per rock.",
+      "bytes": 1272156
+    },
+    "garden_bonsai": {
+      "url": "models/garden/garden_bonsai.glb",
+      "source": "https://sketchfab.com/3d-models/bonsai-8b73fd97545b468288cd9ba03c93d358",
+      "author": "Vermos",
+      "license": "CC-BY-4.0",
+      "note": "Garden pass: niwaki pine on a rock base (6.4k tris (trunk/base simplified 60%), 2 materials, 512 textures, KTX2). Scaled up to 2.2-3 m garden pines.",
+      "bytes": 899868
+    },
+    "garden_maple": {
+      "url": "models/garden/garden_maple.glb",
+      "source": "https://sketchfab.com/3d-models/japanese-maple-003c6ab20e644655ba36fe54cb04765b",
+      "author": "endlessvoidmc",
+      "license": "CC-BY-4.0",
+      "note": "Garden pass: red Japanese maple (simplified to 10.5k tris (meshopt simplifier, leaves 45%), alpha-tested leaves, 512 texture, KTX2).",
+      "bytes": 269748
+    },
+    "garden_toro": {
+      "url": "models/garden/garden_toro.glb",
+      "source": "https://sketchfab.com/3d-models/japanese-toro-afe883adeab045348b7dc9a038975feb",
+      "author": "André Bernardo",
+      "license": "CC-BY-4.0",
+      "note": "Garden pass: mossy stone lantern (1.8k tris, 512 textures, KTX2).",
+      "bytes": 416384
+    },
+    "garden_koi": {
+      "url": "models/garden/garden_koi.glb",
+      "source": "https://sketchfab.com/3d-models/koi-fish-236859b809984f52b70c94fd040b9c59",
+      "author": "7PLUS",
+      "license": "CC-BY-4.0",
+      "note": "Garden pass: koi (522 tris; the 150 morph targets and the clip were stripped, src/garden.js swims it with a vertex-shader wiggle, one InstancedMesh).",
+      "bytes": 115280
+    },
+    "garden_gravel": {
+      "url": "models/garden/garden_gravel.glb",
+      "kind": "material",
+      "source": "https://polyhaven.com/a/gravel_floor_02",
+      "author": "Jenelle van Heerden, Dimitrios Savva (Poly Haven)",
+      "license": "CC0",
+      "note": "Garden pass: 2-tri carrier quad; only its diffuse (ETC1S 1024) is used, whitened, under the raked-line shader.",
+      "bytes": 241360
+    },
+    "garden_moss": {
+      "url": "models/garden/garden_moss.glb",
+      "kind": "material",
+      "source": "https://polyhaven.com/a/sparse_grass",
+      "author": "Amal Kumar (Poly Haven)",
+      "license": "CC0",
+      "note": "Garden pass: 2-tri carrier quad; diffuse + normal 512, tinted to moss on the garden terrain.",
+      "bytes": 393416
     }
   },
   "placements": [
@@ -1573,6 +1637,7 @@
     "clubs": ["club_driver", "hockey_stick"],
     "crag": ["crag_kit"],
     "bear": ["bear"],
-    "raptor": ["raptor"]
+    "raptor": ["raptor"],
+    "garden": ["garden_stones", "garden_bonsai", "garden_maple", "garden_toro", "garden_koi", "garden_gravel", "garden_moss"]
   }
 }

@@ -22,6 +22,7 @@ import { createMusic } from './music.js';
 import { createTopout } from './topout.js';
 import { createSfx } from './sfx.js';
 import { createCanSfx } from './cansfx.js'; // cans pass
+import { createGardenSfx } from './gardensfx.js'; // garden pass
 import { CAN_MASS } from './cans.js'; // cans pass
 import { nearNotches } from './notches.js';
 import { barFrame, stepGlide } from './glider.js';
@@ -121,6 +122,7 @@ world.gear.bakeIcons?.(renderer);
 // Sound pass: samples first (public/audio, see sfx.js), the procedural sounds stay as the fallback / ?sfx=0.
 const sfx = createSfx(() => audio());
 const canSfx = createCanSfx(sfx, () => audio(), { mass: CAN_MASS }); // cans pass
+const gardenSfx = createGardenSfx(sfx, () => audio(), world.garden); // garden pass
 const SEA_POINT = new THREE.Vector3(-30, WATER_Y, 0);
 sfx.fetchAll();
 const rawSplash = world.splash;
@@ -1101,6 +1103,7 @@ function safeZone(x, z, feet) {
     else if (world.yard && x >= world.yard.x0 && x <= world.yard.x1 && z >= world.yard.z0 && z <= world.yard.z1) zone = 'yard';
   } else if (Math.abs(feet - roof.y) < 0.03 && x >= roof.x0 && x <= roof.x1 && z >= roof.z0 && z <= roof.z1) zone = 'roof';
   else if (feet > 8 && (world.crag?.deckAt?.(x, z) != null || inBox(world.golf?.green, x, z))) zone = 'overlook';
+  else if (world.garden?.isTerrace(x, z, feet)) zone = 'garden'; // garden pass
   if (!zone) return null;
   // keep checkpoints off edges and out of corners: the floor carries on 0.45 m around you
   for (const [dx, dz] of [[0.45, 0], [-0.45, 0], [0, 0.45], [0, -0.45]]) {
@@ -4904,6 +4907,7 @@ function frame(time, frame) {
       }
     }
   }
+  if (audioCtx) gardenSfx.update(dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera); // garden pass
   sfx.update(dt, {
     camera: renderer.xr.isPresenting ? renderer.xr.getCamera() : camera,
     zone: world.zones?.current ?? null,
@@ -5063,6 +5067,7 @@ if (pageParams.get('testhooks') === '1') {
     },
     settle: () => ({ ...settle }),
     contain: () => ({ ...contain }),
+    garden: () => (world.garden ? { stats: world.garden.stats, loaded: { ...world.garden.loaded }, shishi: { ...world.garden.shishi }, sfx: gardenSfx.stats } : null), // garden pass
     cans: () => ({ phys: world.cans?.debug?.() ?? null, sfx: canSfx.stats, voices: canSfx.voices(), log: canSfx.log.slice(-40), legacy: !!world.cans?.legacy }), // cans pass
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };

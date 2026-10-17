@@ -25,6 +25,8 @@ import { createGlider } from './glider.js';
 import { createGolf } from './golf.js';
 import { createHockey } from './hockey.js';
 import { createCans } from './cans.js';
+import { createGarden } from './garden.js';
+import { GARDEN, CAPE, CAPE_Z, onLand } from './cape.js';
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -3264,7 +3266,8 @@ function createCliff(scene, targets, assets) {
     scene.add(mesh);
   };
   mass(innerX, caveBack + 0.7, yBot, yTop, -12, caveZ0);
-  mass(innerX, caveBack + 0.7, yBot, yTop, caveZ1, 12);
+  const southZ = GARDEN ? 10.25 : 12; // garden pass: south of the yard the land is garden.js terrain + coast cliff
+  mass(innerX, caveBack + 0.7, yBot, yTop, caveZ1, southZ);
   mass(innerX, caveBack, caveTop, yTop, caveZ0, shaftZ0);
   mass(innerX, caveBack, caveTop, yTop, shaftZ1, caveZ1);
   mass(innerX, caveBack, NOTCHES ? caveTop : shaftTop, yTop, shaftZ0, shaftZ1);
@@ -3277,7 +3280,7 @@ function createCliff(scene, targets, assets) {
   mass(lipX, caveBack, yBot, WATER_Y + 0.02, caveZ0, caveZ1);
   mass(padX0, lipX, yBot, WATER_Y + 0.02, shaftZ0, shaftZ1);
   slab(-12, caveZ0, yBot, yTop);
-  slab(caveZ1, 12, yBot, yTop);
+  slab(caveZ1, southZ, yBot, yTop);
   slab(caveZ0, caveZ1, yBot, caveBot);
   slab(caveZ0, shaftZ0, caveTop, yTop);
   slab(shaftZ1, caveZ1, caveTop, yTop);
@@ -3595,6 +3598,7 @@ function createCliff(scene, targets, assets) {
     nearX: lipX,
     cliffX: CLIFF_X,
     assets,
+    cape: CAPE ? { z: CAPE_Z, landAt: onLand, rect: { x0: -64, z0: -32, x1: 40, z1: 72, size: 512 } } : null,
     sky: skyTex,
     moonDir: skyTex
       ? new THREE.Vector3(-0.9701, 0.2385, 0.0441)
@@ -4795,6 +4799,7 @@ export function createWorld({ assets, renderer = null } = {}) {
   if (bear) gear.addFoe(bear);
   const { yard, crates } = createCrateYard(scene, targets, rockMap, assets);
   applyPlacements(scene, assets, assets?.manifest, { targets });
+  const garden = createGarden({ scene, assets }); // before the forest: it patches the forest (no trees in the garden)
   const forest = createForest(scene, assets);
   const zones = createZones({
     scene,
@@ -4827,6 +4832,7 @@ export function createWorld({ assets, renderer = null } = {}) {
       }
       reef?.update?.(camera);
       if (zones.isAwake('outdoor')) forest?.update?.(dt);
+      if (zones.isAwake('outdoor')) garden?.update(dt, camera);
       bite.update(dt);
       cliff.update(dt);
       cliff.gallery.update(dt);
@@ -4846,6 +4852,7 @@ export function createWorld({ assets, renderer = null } = {}) {
     reef,
     rockBases,
     forest,
+    garden,
     croc,
     bear,
     raptor: bear?.kind === 'raptor' ? bear : null,
