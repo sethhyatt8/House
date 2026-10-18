@@ -31,6 +31,7 @@ import { MOVE, MOVE_SPEED, SMOOTH_TURN_DEG, SNAP_DEG, TELEPORT, TURN, createGrou
 import { UNDERWATER, createUnderwater } from './underwater.js';
 import { SWIM, createSwim } from './swim.js';
 import { createScuba } from './scuba.js';
+import { DAYNIGHT, createDayNight } from './daynight.js'; // day/night pass
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -119,6 +120,8 @@ if (envHdr) {
 world.scene.environmentIntensity = +(pageParams.get('envi') ?? 1);
 world.bakeWater(renderer);
 world.gear.bakeIcons?.(renderer);
+// Day/night pass (src/daynight.js): ?daynight=0 keeps the old fixed night lighting exactly.
+const dayNight = DAYNIGHT ? createDayNight({ renderer, scene: world.scene, camera: world.camera, world }) : null;
 // Sound pass: samples first (public/audio, see sfx.js), the procedural sounds stay as the fallback / ?sfx=0.
 const sfx = createSfx(() => audio());
 const canSfx = createCanSfx(sfx, () => audio(), { mass: CAN_MASS }); // cans pass
@@ -4913,6 +4916,7 @@ function frame(time, frame) {
     zone: world.zones?.current ?? null,
     firePoint: world.gallery?.firePoint?.() ?? null,
     seaPoint: SEA_POINT,
+    night: dayNight ? dayNight.state.nightSound : 1, // day/night pass: the night bed fades in after dusk
   });
   if (croc) {
     if (watching) croc.root.visible = false;
@@ -5004,6 +5008,7 @@ function frame(time, frame) {
     const eye = headSample();
     world.zones.update(eye, dt, renderer.xr.isPresenting ? renderer.xr.getCamera() : camera);
   }
+  dayNight?.update(dt, headSample()); // day/night pass (before underwater, which owns the fog while you're under)
   underwater?.update(dt, headSample());
   renderer.render(scene, camera);
   notePerf(time);
@@ -5069,6 +5074,7 @@ if (pageParams.get('testhooks') === '1') {
     contain: () => ({ ...contain }),
     garden: () => (world.garden ? { stats: world.garden.stats, loaded: { ...world.garden.loaded }, shishi: { ...world.garden.shishi }, sfx: gardenSfx.stats } : null), // garden pass
     cans: () => ({ phys: world.cans?.debug?.() ?? null, sfx: canSfx.stats, voices: canSfx.voices(), log: canSfx.log.slice(-40), legacy: !!world.cans?.legacy }), // cans pass
+    daynight: dayNight, // day/night pass
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };
 }

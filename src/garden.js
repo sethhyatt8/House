@@ -1703,6 +1703,7 @@ function finishGarden({ scene, assets, group, details, colliders, addCollider, s
       trickle: new THREE.Vector3(spout.x, spout.y, SHISHI.z),
     },
     set onClack(fn) { onClack = fn; },
+    lantern: glow, // day/night pass: lit after dusk
   };
 }
 const KOI_YAW = 0;

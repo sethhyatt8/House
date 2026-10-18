@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { legacy } from './flags.js';
+import { DAYNIGHT, SKY_GLSL, SKY_UNIFORMS } from './daynight.js'; // day/night pass
 
 // One continuous ocean surface: a radial grid that follows the viewer, a Gerstner wave sum in the
 // vertex shader, two scrolling detail normal maps, Fresnel reflection of scene.environment (the
@@ -375,11 +376,19 @@ export function createOcean({ scene, waterY, nearX, cliffX, assets, moonDir, sky
   uniforms.uNormalMap = { value: normalMap || flatNormalTexture() };
   uniforms.uSky = { value: sky || flatNormalTexture() };
   uniforms.envMap = { value: null };
+  // day/night pass: the far-sea mirror uses the same day sky / sea fog as the dome (shared uniform objects);
+  // with ?daynight=0 the shader text is exactly the old one
+  if (DAYNIGHT) Object.assign(uniforms, SKY_UNIFORMS);
+  const fragText = DAYNIGHT
+    ? fragmentShader
+      .replace('vec3 skyBehind(vec3 d) {', `${SKY_GLSL}\n  vec3 skyBehind(vec3 d) {`)
+      .replace('return texture2D(uSky, vec2(fract(u), v)).rgb * uSkyGain;', 'return dnSky(texture2D(uSky, vec2(fract(u), v)).rgb * uSkyGain, d, 0.0);')
+    : fragmentShader;
   const material = new THREE.ShaderMaterial({
     defines: params.get('wdebug') === 'refl' ? { WATER_DEBUG_REFL: 1 } : params.get('wdebug') === 'height' ? { WATER_DEBUG_HEIGHT: 1 } : {},
     uniforms,
     vertexShader,
-    fragmentShader,
+    fragmentShader: fragText,
     transparent: true,
     depthWrite: true,
     fog: true,

@@ -24,6 +24,7 @@ const CENTER = { x: 2.5, z: 4 }; // middle of the clearing (yard + cell); every 
 const GARDEN_C = { x: 5, z: 23 }; // garden pass: the garden terrace is the other place the forest is seen from close up
 const clock = { value: 0 };
 const hazeColor = { value: new THREE.Color(0x1b2738) };
+let fireflyPoints = null; // day/night pass: faded in after dusk
 
 function hash(x, z) {
   const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
@@ -509,6 +510,7 @@ void main() {
   });
   const points = new THREE.Points(geometry, material);
   points.name = 'forest_fireflies';
+  fireflyPoints = points; // day/night pass
   points.frustumCulled = false;
   points.renderOrder = 2;
   group.add(tag(points));
@@ -535,6 +537,8 @@ export function createForestNext(scene, assets, { pines, spots: allSpots }) {
   return {
     group,
     stats,
+    haze: hazeColor.value, // day/night pass: the haze colour follows the time of day
+    fireflies: fireflyPoints,
     update(dt) {
       clock.value = (clock.value + dt) % 3600;
     },

@@ -165,7 +165,7 @@ export function createSfx(getCtx, opts = {}) {
     let zone = state.zone || '';
     if (zone.startsWith('lift') || zone === 'liftshaft' || zone === 'cell' || zone === 'room') zone = 'indoor';
     const levels = BEDS[zone] || (tmp.y < -3 ? BEDS.cave : BEDS.outdoor);
-    for (const name of ['ocean', 'night', 'wind', 'cave']) setBed(name, levels[name], dt);
+    for (const name of ['ocean', 'night', 'wind', 'cave']) setBed(name, levels[name] * (name === 'night' ? (state.night ?? 1) : 1), dt); // day/night pass: crickets after dusk
     const fire = state.firePoint;
     if (fire) {
       setBed('fire', 1, dt);

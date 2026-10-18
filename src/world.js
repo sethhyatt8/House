@@ -27,6 +27,7 @@ import { createHockey } from './hockey.js';
 import { createCans } from './cans.js';
 import { createGarden } from './garden.js';
 import { GARDEN, CAPE, CAPE_Z, onLand } from './cape.js';
+import { patchSkyMaterial } from './daynight.js'; // day/night pass
 
 const TABLE_TOP = 0.76;
 const WALL_Z = -2.68;
@@ -3209,6 +3210,7 @@ function createCliff(scene, targets, assets) {
     depthWrite: false,
     fog: false,
   }));
+  patchSkyMaterial(sky.material); // day/night pass: day sky + sun disc + sea fog mixed over the night map (no-op with ?daynight=0)
   if (skyTex) {
     sky.renderOrder = -1;
     sky.material.color.setScalar(+(params.get('skygain') ?? 1));
@@ -3724,7 +3726,7 @@ function createCliff(scene, targets, assets) {
     else waterMat.uniforms.uBoat.value.set(x, z, yaw, active ? 1 : 0);
   }
 
-  return { update, splash, ripple, cave, shaft, notches, gallery, waterMat, water: ocean, setBoat };
+  return { update, splash, ripple, cave, shaft, notches, gallery, waterMat, water: ocean, setBoat, skyTex };
 }
 
 function plateTexture() {
@@ -4875,6 +4877,10 @@ export function createWorld({ assets, renderer = null } = {}) {
     biteFocus: bite.focus,
     roof,
     keyLight: key,
+    hemiLight: hemi, // day/night pass
+    fillLight: fill,
+    rimLight: rim,
+    skyTexture: cliff.skyTex,
     lift,
     zones,
   };
