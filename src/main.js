@@ -32,6 +32,7 @@ import { UNDERWATER, createUnderwater } from './underwater.js';
 import { SWIM, createSwim } from './swim.js';
 import { createScuba } from './scuba.js';
 import { DAYNIGHT, createDayNight } from './daynight.js'; // day/night pass
+import { MENU, createMenu, loadChoice, settingsFor } from './menu.js'; // menu pass
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -269,14 +270,24 @@ if (world.cave?.tunnel && world.cave?.room) {
 
 // Rowing pass: with teleport off (?teleport=0, or TELEPORT_DEFAULT in walk.js) the spots stay as respawn points
 // (teleportTo(1) after the water bite / going down) but the rings, the A button and pointer-teleport go away.
-if (!TELEPORT) {
+let nextSpotHint = TELEPORT ? ' Press A for the next spot.' : '';
+// menu pass: teleport is a runtime switch now (the start menu's Game-mode toggle); ?teleport= still wins.
+let teleportOn = TELEPORT;
+function setTeleport(on) {
+  teleportOn = !!on;
   teleportSpots.forEach((spot) => {
-    spot.group.visible = false;
+    spot.group.visible = teleportOn;
     const at = targets.indexOf(spot.group);
-    if (at >= 0) targets.splice(at, 1);
+    if (!teleportOn && at >= 0) targets.splice(at, 1);
+    else if (teleportOn && at < 0) targets.push(spot.group);
   });
+  nextSpotHint = teleportOn ? ' Press A for the next spot.' : '';
 }
-const nextSpotHint = TELEPORT ? ' Press A for the next spot.' : '';
+if (!TELEPORT) setTeleport(false);
+// menu pass: what the menu switched off (all on = the old game; ?menu=0 never changes these)
+const gameOpts = { raptor: true, croc: true, cutscene: true };
+let menu = null;
+let pendingSpawn = null;
 
 function doorStanding() {
   return world.gear.doorBoards?.some((board) => !board.userData.dead);
@@ -838,7 +849,7 @@ function moveClimb(dir) {
   const next = climb.rung + dir;
   if (next < 0) {
     leaveClimb();
-    setStatus(TELEPORT ? 'Middle of the room. Press A for the other spot.' : 'Middle of the room.');
+    setStatus(teleportOn ? 'Middle of the room. Press A for the other spot.' : 'Middle of the room.');
     return;
   }
   if (next >= rungs.length) {
@@ -879,7 +890,7 @@ function pullClimb(pointerY) {
     climb.pull = 0;
     if (climb.rung <= 0) {
       leaveClimb();
-      setStatus(TELEPORT ? 'Middle of the room. Press A for the other spot.' : 'Middle of the room.');
+      setStatus(teleportOn ? 'Middle of the room. Press A for the other spot.' : 'Middle of the room.');
       return;
     }
     climb.rung -= 1;
@@ -1282,6 +1293,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   if (scalePanel) scalePanel.style.display = 'none';
   controls.enabled = false;
   applyShadowSize();
+  if (menu && !menu.active) menu.open(); // menu pass (rig is reset to the origin here): every headset session starts in the white room
 });
 renderer.xr.addEventListener('sessionend', () => {
   xrBaseSpace = null;
@@ -1360,10 +1372,10 @@ if (croc) {
   croc.on('return', () => playCrocGrowl(croc.root.position, 1));
   croc.on('windup', (e) => { playCrocHiss(e.position, croc._s.enraged ? 0.65 : 0.9); pulseBoth(0.25, 60); });
   croc.on('snap', (e) => playCrocSnap(e.position));
-  croc.on('bite', (e) => { if (hurtPlayer(e.damage) > 0) { playBite(); pulseBoth(1, 200); } });
-  croc.on('grabTick', (e) => { hurtPlayer(e.damage, { ignoreInvuln: true }); pulseBoth(0.8, 120); });
+  croc.on('bite', (e) => { if (gameOpts.croc && hurtPlayer(e.damage) > 0) { playBite(); pulseBoth(1, 200); } });
+  croc.on('grabTick', (e) => { if (gameOpts.croc) hurtPlayer(e.damage, { ignoreInvuln: true }); pulseBoth(0.8, 120); });
   croc.on('release', () => pulseBoth(0.3, 60));
-  croc.on('ram', (e) => { hurtPlayer(e.damage); playCrocSnap(croc.root.position); pulseBoth(0.9, 160); world.canoe.knock?.(e.dir, 1); });
+  croc.on('ram', (e) => { if (gameOpts.croc) hurtPlayer(e.damage); playCrocSnap(croc.root.position); pulseBoth(0.9, 160); world.canoe.knock?.(e.dir, 1); });
   croc.on('hurt', (e) => {
     playCrocHit(e.point, e.crit);
     const hand = world.gear.handHolding(e.source === 'hatchet' ? 'hatchet' : 'bow');
@@ -1377,7 +1389,7 @@ if (croc) {
 
 // overlook boss: the raptor (src/raptor.js + src/raptorfight.js; calls from the woods when you top out of the east crag
 // climb, then comes out) or, with ?legacy=bear, the bear (src/bear.js + src/bearfight.js)
-const bossArgs = { health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf, player: crocPlayer, head: crocHead, debug: crocDebug, tickHealth: !croc };
+const bossArgs = { health, sfx, audio, renderer, shiftPlayer, pulseBoth, pulseController, gear: world.gear, golf: world.golf, player: () => (gameOpts.raptor ? crocPlayer() : null), head: crocHead, debug: crocDebug, tickHealth: !croc };
 const bearFight = !world.bear || watching ? null
   : world.bear.kind === 'raptor' ? wireRaptor({ raptor: world.bear, hockey: world.hockey, ...bossArgs })
     : wireBear({ bear: world.bear, ...bossArgs });
@@ -1507,6 +1519,7 @@ function tryCutscene(head, ground) {
   if (shot || !fallDeath || watching) return false;
   const water = ground === WATER_Y && world.shallowFloor?.(head.x, head.z) == null;
   if (!fallDeath.willKill(water ? WATER_Y : ground, { water })) return false;
+  if (!gameOpts.cutscene) return fallDeath.die('void'); // menu pass: cutscenes off = the off-map death, no shark/drop shot
   beginShot(water ? 'sea' : 'drop', head, ground);
   return true;
 }
@@ -1614,6 +1627,22 @@ window.addEventListener('pointerup', onPointerUp);
 window.addEventListener('keydown', onKeyDown);
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
 
+// menu pass: the start menu (src/menu.js); ?menu=0 = the old start, untouched
+if (MENU && !watching) {
+  menu = createMenu({ renderer, urlTeleport: pageParams.has('teleport') ? pageParams.get('teleport') !== '0' : null, onStart: onMenuStart });
+  const deskPointer = (down) => (event) => {
+    if (!menu.active || renderer.xr.isPresenting) return;
+    menu.pointer(event, camera, down);
+    event.stopImmediatePropagation();
+    if (down) event.preventDefault();
+  };
+  window.addEventListener('pointerdown', deskPointer(true), true);
+  window.addEventListener('pointermove', deskPointer(false), true);
+  window.addEventListener('keydown', (event) => {
+    if ((event.key === 'm' || event.key === 'M') && !event.target?.closest?.('input, textarea')) openMenu();
+  });
+}
+
 // ?testhooks=1: the headless checks run right after each frame, still inside the XR callback (live XRFrame)
 renderer.setAnimationLoop(pageParams.get('testhooks') === '1' ? (time, xr) => { frame(time, xr); testFrameHook?.(); } : frame);
 
@@ -1624,6 +1653,7 @@ function setupController(index) {
     controller.userData.rotateLatch = false;
   });
   controller.addEventListener('selectstart', () => {
+    if (menu?.active) return; // menu pass: the menu polls the trigger itself
     controller.userData.triggerDown = true;
     onXrTrigger(controller);
   });
@@ -1637,6 +1667,7 @@ function setupController(index) {
     }
   });
   controller.addEventListener('squeezestart', () => {
+    if (menu?.active) return;
     controller.userData.squeezeDown = true;
     onXrSqueeze(controller);
   });
@@ -4096,7 +4127,7 @@ function pollGazeLock() {
 }
 
 function pollTeleport(controller) {
-  if (!TELEPORT || glide.flying) return;
+  if (!teleportOn || glide.flying) return;
   const pressed = !!controller.userData.inputSource?.gamepad?.buttons?.[4]?.pressed;
   if (pressed && !controller.userData.teleportLatch) {
     controller.userData.teleportLatch = true;
@@ -4788,9 +4819,127 @@ function liveFrame(raw) {
   };
 }
 
+// --- menu pass: start spots, applying a menu choice, the way back to the menu -------------------------------------
+// Test-mode start spots: feet on a walkable floor with 0.45 m of floor around (checked by scripts/ground/menu.mjs),
+// facing something worth seeing. 'start' is the designer spawn (Game mode): the locked start room, as today.
+function spawnSpec(id) {
+  const cave = world.cave;
+  const deckY = world.crag?.deckY;
+  if (id === 'cliff') return { id, x: 1.6, z: 0.12, floor: 0, look: [-5, 0.9, 0.1], status: 'On the cliff, outside the start room.' };
+  if (id === 'cave' && cave) return { id, x: 1.0, z: cave.standZ, floor: cave.floor, look: [-4, cave.floor + 1, cave.standZ], status: 'Down in the cave.' };
+  if (id === 'peak' && deckY != null && world.crag.deckAt?.(6.5, 0) != null) {
+    return { id, x: 6.5, z: 0, floor: world.crag.deckAt(6.5, 0), look: [11.7, deckY + 1, 1.0], status: 'On the raptor peak.' };
+  }
+  if (id === 'garden' && world.garden?.groundAt) {
+    const floor = world.garden.groundAt(3.0, 16.9);
+    if (floor != null) return { id, x: 3.0, z: 16.9, floor, look: [6.6, floor + 0.6, 18.55], status: 'In the Japanese garden.' };
+  }
+  if (id === 'hockey' && world.hockey) return { id, x: 6.35, z: 4.0, floor: -3.6, look: [5.6, -2.5, 5.8], status: 'Hockey room. The lift is behind the goal, to the west.' };
+  return { id: 'start', x: START_CELL.spawnX, z: START_CELL.spawnZ, floor: 0, look: [START_CELL.spawnX - 3, 1.2, START_CELL.spawnZ], status: '' };
+}
+
+let menuChoice = null;
+const menuDesk = { pos: new THREE.Vector3(), target: new THREE.Vector3(), saved: false };
+function saveDeskView() {
+  if (menuDesk.saved) return;
+  menuDesk.pos.copy(camera.position);
+  menuDesk.target.copy(controls.target);
+  menuDesk.saved = true;
+}
+function onMenuStart(settings, choice) {
+  gameOpts.raptor = settings.raptor;
+  gameOpts.croc = settings.croc;
+  gameOpts.cutscene = settings.cutscene;
+  setTeleport(settings.teleport);
+  const sp = spawnSpec(settings.spawn);
+  menuChoice = { settings, choice, spawn: sp };
+  if (renderer.xr.isPresenting) {
+    pendingSpawn = sp;
+  } else {
+    controls.enabled = true;
+    if (menuDesk.saved && sp.id === 'start') {
+      camera.position.copy(menuDesk.pos);
+      controls.target.copy(menuDesk.target);
+    } else {
+      camera.position.set(sp.x, sp.floor + 1.55, sp.z);
+      controls.target.set(sp.look[0], sp.look[1], sp.look[2]);
+    }
+    menuDesk.saved = false;
+    controls.update();
+  }
+  if (sp.status) setStatus(sp.status);
+}
+function applySpawn() {
+  if (!pendingSpawn || !renderer.xr.isPresenting || !xrFrame || cellPhase < 2) return;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const sp = pendingSpawn;
+  pendingSpawn = null;
+  if (climb) leaveClimb();
+  if (aboard) leaveCanoe();
+  swim?.leave?.('respawn');
+  biteHold = false;
+  fallVy = 0;
+  const head = pose.transform.position;
+  const o = pose.transform.orientation;
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(o.x, o.y, o.z, o.w));
+  shiftPlayer(sp.x - head.x, sp.floor - xrOffset.y, sp.z - head.z);
+  let d = Math.atan2(-(sp.look[0] - sp.x), -(sp.look[2] - sp.z)) - Math.atan2(-f.x, -f.z);
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  if (Math.abs(d) > 0.03) yawAround(d, sp.x, sp.z);
+  contain.ok = false;
+  fallDeath?.reset(sp.floor);
+  startSettle({ x: sp.x, z: sp.z, floor: sp.floor });
+  if (sp.id === 'hockey') parkLift(sp.floor);
+}
+// the lift has no call button below the surface: a hockey-room start parks the car at that landing, set to go up
+function parkLift(y) {
+  const lift = world.lift;
+  if (!lift || lift.moving || lift.phase !== 'idle') return;
+  lift.floorY = y;
+  lift.target = y;
+  lift.dir = -1; // LIFT_STOPS run top (0) to bottom: -1 = up
+  lift.doorOpen = 0;
+  lift.pendingMove = false;
+  lift.speed = 0;
+  lift.sync?.();
+}
+function openMenu() {
+  if (!menu || menu.active || sceneLock()) return;
+  if (!renderer.xr.isPresenting) { saveDeskView(); menu.open(); return; }
+  const m = renderer.xr.getCamera().matrixWorld.elements; // head pose in world space: the room goes around you
+  menu.open({ x: m[12], y: xrOffset.y, z: m[14], yaw: Math.atan2(m[8], m[10]) });
+}
+// hold the left Y button for 1.5 s (a short press still rotates a held item)
+let menuHoldT0 = 0;
+function pollMenuHold() {
+  if (!menu) return;
+  const left = controllers.find((c) => c.userData.inputSource?.handedness === 'left');
+  const pressed = !!left?.userData.inputSource?.gamepad?.buttons?.[5]?.pressed;
+  if (!pressed) { menuHoldT0 = 0; return; }
+  const now = performance.now();
+  if (!menuHoldT0) menuHoldT0 = now;
+  else if (now - menuHoldT0 > 1500) { menuHoldT0 = 0; openMenu(); }
+}
+function menuFrame() {
+  if (renderer.xr.isPresenting) menu.frameXr();
+  else {
+    saveDeskView();
+    controls.enabled = false;
+    camera.position.set(0, 1.6, 0.35);
+    camera.lookAt(0, 1.3, -1.25);
+  }
+  if (menu.active) renderer.render(menu.scene, camera);
+}
+
 function frame(time, frame) {
   xrFrame = liveFrame(frame);
+  if (menu?.active) { menuFrame(); return; } // menu pass: the world is neither simulated nor drawn behind the menu
   placeInCell();
+  applySpawn();
+  pollMenuHold();
   containPlayer();
   const dt = Math.min(clock.getDelta(), 0.05);
   updateRoar(dt);
@@ -4920,7 +5069,7 @@ function frame(time, frame) {
   });
   if (croc) {
     if (watching) croc.root.visible = false;
-    else if (!biteHold && (!world.zones?.enabled || world.zones.isAwake('cave') || world.zones.isAwake('sea'))) croc.update(dt, crocPlayer());
+    else if (!biteHold && (!world.zones?.enabled || world.zones.isAwake('cave') || world.zones.isAwake('sea'))) croc.update(dt, gameOpts.croc ? crocPlayer() : null);
     health?.update(dt);
   }
   bearFight?.update(dt);
@@ -5075,6 +5224,13 @@ if (pageParams.get('testhooks') === '1') {
     garden: () => (world.garden ? { stats: world.garden.stats, loaded: { ...world.garden.loaded }, shishi: { ...world.garden.shishi }, sfx: gardenSfx.stats } : null), // garden pass
     cans: () => ({ phys: world.cans?.debug?.() ?? null, sfx: canSfx.stats, voices: canSfx.voices(), log: canSfx.log.slice(-40), legacy: !!world.cans?.legacy }), // cans pass
     daynight: dayNight, // day/night pass
+    // menu pass
+    menu: () => (menu ? { active: menu.active, choice: { ...menu.state.choice }, presses: menu.state.presses, last: menu.state.last, hover: menu.state.hover, applied: menuChoice, opts: { ...gameOpts, teleport: teleportOn }, pending: !!pendingSpawn } : null),
+    menuPoint: (id) => menu?.buttonPoint(id) ?? null,
+    menuPress: (id) => menu?.press(id),
+    openMenu,
+    spawnSpec,
+    menuScene: () => menu?.scene ?? null,
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };
 }

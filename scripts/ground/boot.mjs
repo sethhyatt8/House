@@ -28,7 +28,7 @@ export async function boot(dist, query = '', { port = 8790 + Math.floor(Math.ran
   const rn = performance.now.bind(performance); ${freezeClock ? 'window.__vt = rn();' : ''} performance.now = () => (window.__vt != null ? window.__vt : rn());
   const RS = window.XRReferenceSpace.prototype; const orig = RS.getOffsetReferenceSpace;
   RS.getOffsetReferenceSpace = function (t) { return orig.call(this, t && t.matrix ? t.matrix : t); }; })();`);
-  await pg.goto(`http://localhost:${port}/?testhooks=1&shadow=256&xrscale=0.25&${query}`);
+  await pg.goto(`http://localhost:${port}/?testhooks=1&shadow=256&xrscale=0.25&${/(^|&)menu=/.test(query) ? '' : 'menu=0&'}${query}`);
   await pg.waitForFunction(() => document.getElementById('loading')?.hidden && window.__house, { timeout: 600000, polling: 1000 });
   const btn = await pg.evaluate(() => { const b = document.getElementById('XRButton'); return b ? b.textContent + '|' + b.disabled + '|' + getComputedStyle(b).display : 'none'; }); console.log('xrbutton', btn); if (before) await pg.evaluate(before, beforeArg); await pg.evaluate(() => document.getElementById('XRButton').click());
   try { await pg.waitForFunction(() => window.__xr.activeSession, { timeout: 60000 }); } catch (e) { console.log('no session', logs); throw e; }
