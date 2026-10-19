@@ -17,7 +17,7 @@ export function loadChoice() {
     if (raw && typeof raw === 'object') {
       const c = { ...DEFAULT_CHOICE, ...raw };
       if (!SPAWN_IDS.includes(c.spawn)) c.spawn = DEFAULT_CHOICE.spawn;
-      if (c.mode !== 'test') c.mode = 'game';
+      if (c.mode !== 'test' && c.mode !== 'tutorial') c.mode = 'game';
       return c;
     }
   } catch { /* private mode / bad JSON: defaults */ }
@@ -30,6 +30,8 @@ export function saveChoice(c) {
 // What the game should do for a choice. URL flags win over the menu: ?teleport= fixes teleport.
 export function settingsFor(c, { urlTeleport = null } = {}) {
   const test = c.mode === 'test';
+  // tutorial pass: on the cave beach, no attacks, no cutscenes, no teleport (everything by walking)
+  if (c.mode === 'tutorial') return { mode: 'tutorial', spawn: 'tutorial', teleport: false, raptor: false, croc: false, cutscene: false };
   return {
     mode: c.mode,
     spawn: test ? c.spawn : 'start',
@@ -95,9 +97,13 @@ export function createMenu({ renderer, urlTeleport = null, onStart }) {
     const c = state.choice;
     const test = c.mode === 'test';
     const b = [];
-    b.push({ id: 'mode:game', x: 60, y: 96, w: 430, h: 70, label: 'Game mode', on: !test, kind: 'tab' });
-    b.push({ id: 'mode:test', x: 534, y: 96, w: 430, h: 70, label: 'Test mode', on: test, kind: 'tab' });
-    if (test) {
+    const tut = c.mode === 'tutorial';
+    b.push({ id: 'mode:game', x: 60, y: 96, w: 280, h: 70, label: 'Game', on: !test && !tut, kind: 'tab' });
+    b.push({ id: 'mode:tutorial', x: 372, y: 96, w: 280, h: 70, label: 'Tutorial', on: tut, kind: 'tab' });
+    b.push({ id: 'mode:test', x: 684, y: 96, w: 280, h: 70, label: 'Test', on: test, kind: 'tab' });
+    if (tut) {
+      // no options: the body text explains it
+    } else if (test) {
       SPAWN_IDS.forEach((id, i) => {
         const colN = i % 2; const row = Math.floor(i / 2);
         b.push({ id: `spawn:${id}`, x: 60 + colN * 474, y: 196 + row * 76, w: 430, h: 62, label: SPAWN_LABEL[id], on: c.spawn === id });
@@ -139,7 +145,13 @@ export function createMenu({ renderer, urlTeleport = null, onStart }) {
     }
     g2.fillStyle = '#6b7178';
     g2.font = '24px system-ui, sans-serif';
-    g2.fillText(state.choice.mode === 'test' ? 'Test: pick a start spot. Attacks off = no raptor/alligator, no fall cutscene.' : 'Game: you start in the locked room.', W / 2, 446);
+    if (state.choice.mode === 'tutorial') {
+      g2.fillStyle = '#30353b';
+      g2.font = '28px system-ui, sans-serif';
+      ['Five short stations on the cave beach by the canoe:', 'walk, turn, two-handed stick, row, swim.', 'Each one ends when you do the move. Hold left X to skip.', 'No attacks, no cutscenes, no teleport.'].forEach((t, i) => g2.fillText(t, W / 2, 220 + i * 44));
+      g2.fillStyle = '#6b7178';
+      g2.font = '24px system-ui, sans-serif';
+    } else g2.fillText(state.choice.mode === 'test' ? 'Test: pick a start spot. Attacks off = no raptor/alligator, no fall cutscene.' : 'Game: you start in the locked room.', W / 2, 446);
     g2.fillText('Trigger / click to choose.  Back to this menu: hold left Y (desktop: M).', W / 2, 600);
     tex.needsUpdate = true;
   }

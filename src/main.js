@@ -33,6 +33,7 @@ import { SWIM, createSwim } from './swim.js';
 import { createScuba } from './scuba.js';
 import { DAYNIGHT, createDayNight } from './daynight.js'; // day/night pass
 import { MENU, createMenu, loadChoice, settingsFor } from './menu.js'; // menu pass
+import { TUTORIAL_JUMP, createTutorial } from './tutorial.js'; // tutorial pass
 
 const statusEl = document.getElementById('status');
 const hudEl = document.getElementById('hud');
@@ -1293,7 +1294,8 @@ renderer.xr.addEventListener('sessionstart', () => {
   if (scalePanel) scalePanel.style.display = 'none';
   controls.enabled = false;
   applyShadowSize();
-  if (menu && !menu.active) menu.open(); // menu pass (rig is reset to the origin here): every headset session starts in the white room
+  if (menu && !menu.active) menu.open(); // menu pass (rig is reset to the origin here)
+  if (TUTORIAL_JUMP != null && !watching) onMenuStart(settingsFor({ mode: 'tutorial' }), { mode: 'tutorial' }); // ?tutorial=N: every headset session starts in the white room
 });
 renderer.xr.addEventListener('sessionend', () => {
   xrBaseSpace = null;
@@ -1628,7 +1630,7 @@ window.addEventListener('keydown', onKeyDown);
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
 
 // menu pass: the start menu (src/menu.js); ?menu=0 = the old start, untouched
-if (MENU && !watching) {
+if (MENU && !watching && TUTORIAL_JUMP == null) {
   menu = createMenu({ renderer, urlTeleport: pageParams.has('teleport') ? pageParams.get('teleport') !== '0' : null, onStart: onMenuStart });
   const deskPointer = (down) => (event) => {
     if (!menu.active || renderer.xr.isPresenting) return;
@@ -4834,6 +4836,8 @@ function spawnSpec(id) {
     const floor = world.garden.groundAt(3.0, 16.9);
     if (floor != null) return { id, x: 3.0, z: 16.9, floor, look: [6.6, floor + 0.6, 18.55], status: 'In the Japanese garden.' };
   }
+  // tutorial pass: the cave beach, east of the canoe, facing it and the water
+  if (id === 'tutorial' && cave) return { id, x: 0.4, z: 0.5, floor: cave.floor, look: [-4, cave.floor + 1, 0.5], status: 'Tutorial.' };
   if (id === 'hockey' && world.hockey) return { id, x: 6.35, z: 4.0, floor: -3.6, look: [5.6, -2.5, 5.8], status: 'Hockey room. The lift is behind the goal, to the west.' };
   return { id: 'start', x: START_CELL.spawnX, z: START_CELL.spawnZ, floor: 0, look: [START_CELL.spawnX - 3, 1.2, START_CELL.spawnZ], status: '' };
 }
@@ -4847,6 +4851,8 @@ function saveDeskView() {
   menuDesk.saved = true;
 }
 function onMenuStart(settings, choice) {
+  tutorial?.stop();
+  restoreStick();
   gameOpts.raptor = settings.raptor;
   gameOpts.croc = settings.croc;
   gameOpts.cutscene = settings.cutscene;
@@ -4855,6 +4861,13 @@ function onMenuStart(settings, choice) {
   menuChoice = { settings, choice, spawn: sp };
   if (renderer.xr.isPresenting) {
     pendingSpawn = sp;
+  } else if (sp.id === 'tutorial') {
+    tutorial?.start(TUTORIAL_JUMP ?? 1); // desktop: the panel only (the stations need the headset)
+    camera.position.set(sp.x, sp.floor + 1.55, sp.z);
+    controls.target.set(sp.look[0], sp.look[1], sp.look[2]);
+    controls.enabled = true;
+    menuDesk.saved = false;
+    controls.update();
   } else {
     controls.enabled = true;
     if (menuDesk.saved && sp.id === 'start') {
@@ -4893,6 +4906,7 @@ function applySpawn() {
   fallDeath?.reset(sp.floor);
   startSettle({ x: sp.x, z: sp.z, floor: sp.floor });
   if (sp.id === 'hockey') parkLift(sp.floor);
+  if (sp.id === 'tutorial') tutorial?.start(TUTORIAL_JUMP ?? 1);
 }
 // the lift has no call button below the surface: a hockey-room start parks the car at that landing, set to go up
 function parkLift(y) {
@@ -4908,6 +4922,8 @@ function parkLift(y) {
 }
 function openMenu() {
   if (!menu || menu.active || sceneLock()) return;
+  tutorial?.stop();
+  restoreStick();
   if (!renderer.xr.isPresenting) { saveDeskView(); menu.open(); return; }
   const m = renderer.xr.getCamera().matrixWorld.elements; // head pose in world space: the room goes around you
   menu.open({ x: m[12], y: xrOffset.y, z: m[14], yaw: Math.atan2(m[8], m[10]) });
@@ -4923,6 +4939,67 @@ function pollMenuHold() {
   if (!menuHoldT0) menuHoldT0 = now;
   else if (now - menuHoldT0 > 1500) { menuHoldT0 = 0; openMenu(); }
 }
+// --- tutorial pass ---------------------------------------------------------------------------------------------------
+let tutorial = null;
+const stickHome = { saved: false, pos: new THREE.Vector3(), rot: new THREE.Euler() };
+function headWorld() {
+  const m = (renderer.xr.isPresenting ? renderer.xr.getCamera() : camera).matrixWorld.elements;
+  return { x: m[12], y: m[13], z: m[14], yaw: Math.atan2(m[8], m[10]) };
+}
+// station 3: lay the hockey stick on the sand 0.55 m ahead (it goes back to the hockey room when the tutorial ends)
+function offerStick() {
+  const stick = world.hockey?.stick;
+  if (!stick || stick.userData.carried) return;
+  if (!stickHome.saved) { stickHome.pos.copy(stick.position); stickHome.rot.copy(stick.rotation); stickHome.saved = true; }
+  const h = headWorld();
+  const x = h.x - Math.sin(h.yaw) * 0.55;
+  const z = h.z - Math.cos(h.yaw) * 0.55;
+  const ground = groundUnder(x, z, xrOffset.y + 0.3);
+  stick.position.set(x, ground + 0.02, z);
+  stick.rotation.copy(stickHome.rot);
+  stick.rotation.y = h.yaw;
+}
+function restoreStick() {
+  const stick = world.hockey?.stick;
+  if (!stick || !stickHome.saved || stick.userData.carried) return;
+  stick.position.copy(stickHome.pos);
+  stick.rotation.copy(stickHome.rot);
+  stickHome.saved = false;
+}
+function tutorialFinished() {
+  // keep playing from the beach with the saved Game-mode toggles (attacks and cutscenes back on, teleport as chosen)
+  const c = loadChoice();
+  const g = settingsFor({ ...c, mode: 'game' }, { urlTeleport: pageParams.has('teleport') ? pageParams.get('teleport') !== '0' : null });
+  gameOpts.raptor = g.raptor;
+  gameOpts.croc = g.croc;
+  gameOpts.cutscene = true;
+  setTeleport(g.teleport);
+  restoreStick();
+}
+if (!watching && (MENU || TUTORIAL_JUMP != null)) {
+  tutorial = createTutorial({
+    scene,
+    sfx,
+    snapDeg: SNAP_DEG,
+    turnMode: TURN,
+    api: {
+      head: headWorld,
+      headYaw: () => headWorld().yaw,
+      yaw: () => xrYaw, // the rig's yaw: snap/smooth turns and the held-stick head turn all move it
+      gazeLock: () => !!gazeLock,
+      offerStick,
+      stick: () => ({ carried: !!world.hockey?.stick.userData.carried, twoHands: !!world.hockey?.stick.userData.offHand }),
+      aboard: () => aboard,
+      oars: () => (world.canoe.longOars || []).filter((o) => o.hand).length,
+      boat: () => world.canoe.group.position,
+      swim: () => ({ active: !!swim?.active, strokes: swim?.debug?.().stats.strokes ?? 0 }),
+      onFeet: () => !aboard && !swim?.active && fallVy === 0 && !climb,
+      skipHeld: () => !!controllers.find((c) => c.userData.inputSource?.handedness === 'left')?.userData.inputSource?.gamepad?.buttons?.[4]?.pressed,
+      finished: tutorialFinished,
+    },
+  });
+}
+
 function menuFrame() {
   if (renderer.xr.isPresenting) menu.frameXr();
   else {
@@ -5073,6 +5150,7 @@ function frame(time, frame) {
     health?.update(dt);
   }
   bearFight?.update(dt);
+  tutorial?.update(dt); // tutorial pass
   music?.update(dt);
   if (boatGrip && world.canoe.holding && !world.canoe.holding(boatGrip.controller)) boatGrip = null;
   syncAboard();
@@ -5231,6 +5309,9 @@ if (pageParams.get('testhooks') === '1') {
     openMenu,
     spawnSpec,
     menuScene: () => menu?.scene ?? null,
+    tutorial: () => tutorial?.state() ?? null, // tutorial pass
+    tutorialSkip: () => tutorial?.skip(),
+    tutorialPanel: () => tutorial?.panel ?? null,
     setFrameHook(fn) { testFrameHook = fn; }, // runs after every frame, inside the XR callback
   };
 }
